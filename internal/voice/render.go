@@ -23,12 +23,12 @@ const MaxAudioBytes = 4 << 20
 type Runner interface {
 	Run(context.Context, string, []string, io.Reader) error
 	ValidateModel(context.Context, string) error
-	VerifyWorker(context.Context, Config) (string, error)
+	PrepareWorker(context.Context, Config) (PreparedWorker, error)
 }
 type LocalRunner struct{}
 
-func (LocalRunner) VerifyWorker(ctx context.Context, c Config) (string, error) {
-	return VerifyWorker(ctx, c)
+func (LocalRunner) PrepareWorker(ctx context.Context, c Config) (PreparedWorker, error) {
+	return PrepareWorker(ctx, c)
 }
 
 func (LocalRunner) ValidateModel(ctx context.Context, base string) error {
@@ -38,6 +38,11 @@ func (LocalRunner) ValidateModel(ctx context.Context, base string) error {
 func (LocalRunner) Run(ctx context.Context, name string, args []string, input io.Reader) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, io.Discard, io.Discard
+	if filepath.Base(name) == WorkerName {
+		// No inherited loader overrides may redirect the private native payload.
+		// The worker receives all model/output paths as explicit arguments.
+		cmd.Env = []string{}
+	}
 	cmd.WaitDelay = time.Second
 	if err := cmd.Start(); err != nil {
 		if failure := contextFailure(ctx, err); failure != nil {
@@ -87,10 +92,11 @@ func (r LocalRenderer) synth(ctx context.Context, base string, c Config, text, o
 	if runner == nil {
 		runner = LocalRunner{}
 	}
-	exe, err := runner.VerifyWorker(ctx, c)
+	worker, err := runner.PrepareWorker(ctx, c)
 	if err != nil {
 		return err
 	}
+	defer worker.Close()
 	if err := runner.ValidateModel(ctx, base); err != nil {
 		if failure := contextFailure(ctx, err); failure != nil {
 			return failure
