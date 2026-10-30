@@ -1,12 +1,13 @@
 //go:build darwin && cgo && sherpa
 
-package voice
+package voiceworker
 
 import (
 	"io"
 	"strings"
 
 	sherpa "github.com/k2-fsa/sherpa-onnx-go-macos"
+	"github.com/relux-works/a2a-swarm/internal/voice"
 )
 
 const nativeSynthesis = true
@@ -17,8 +18,8 @@ func Worker(args []string, input io.Reader) int {
 	if len(args) != 2 {
 		return 2
 	}
-	text, err := io.ReadAll(io.LimitReader(input, maxInputRunes*4+1))
-	if err != nil || len(text) > maxInputRunes*4 {
+	text, err := io.ReadAll(io.LimitReader(input, 6000*4+1))
+	if err != nil || len(text) > 6000*4 || len([]rune(string(text))) > 6000 {
 		return 1
 	}
 	return withWorkerModel(args[0], args[1], manifestSHA256, func(paths workerPaths) int {

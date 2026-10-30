@@ -23,8 +23,13 @@ const MaxAudioBytes = 4 << 20
 type Runner interface {
 	Run(context.Context, string, []string, io.Reader) error
 	ValidateModel(context.Context, string) error
+	VerifyWorker(context.Context, Config) (string, error)
 }
 type LocalRunner struct{}
+
+func (LocalRunner) VerifyWorker(ctx context.Context, c Config) (string, error) {
+	return VerifyWorker(ctx, c)
+}
 
 func (LocalRunner) ValidateModel(ctx context.Context, base string) error {
 	return ValidateModel(ctx, base)
@@ -64,8 +69,7 @@ type Renderer interface {
 	Render(context.Context, string, Config, string) (Audio, error)
 }
 type LocalRenderer struct {
-	Runner     Runner
-	Executable string
+	Runner Runner
 }
 
 func (r LocalRenderer) run(ctx context.Context, timeout time.Duration, name string, args []string, in io.Reader) error {
@@ -78,10 +82,14 @@ func (r LocalRenderer) run(ctx context.Context, timeout time.Duration, name stri
 	return runner.Run(c, name, args, in)
 }
 
-func (r LocalRenderer) synth(ctx context.Context, base, text, out string) error {
+func (r LocalRenderer) synth(ctx context.Context, base string, c Config, text, out string) error {
 	runner := r.Runner
 	if runner == nil {
 		runner = LocalRunner{}
+	}
+	exe, err := runner.VerifyWorker(ctx, c)
+	if err != nil {
+		return err
 	}
 	if err := runner.ValidateModel(ctx, base); err != nil {
 		if failure := contextFailure(ctx, err); failure != nil {
