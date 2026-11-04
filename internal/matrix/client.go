@@ -94,6 +94,13 @@ func IsStatus(err error, status int) bool {
 // ErrAuth wraps token rejections so the CLI can print one clear message.
 var ErrAuth = errors.New("access token rejected by the homeserver")
 
+// Retain the interpreted original-response evidence for callers distinguishing
+// a definite token refusal from an uncertain mutation. Error text is unchanged.
+type authRejection struct{ response *Error }
+
+func (e *authRejection) Error() string   { return fmt.Sprintf("%s (%s)", ErrAuth, e.response.ErrCode) }
+func (e *authRejection) Unwrap() []error { return []error{ErrAuth, e.response} }
+
 // seg escapes one path segment (room ids, aliases, event ids, user ids).
 func seg(s string) string { return url.PathEscape(s) }
 
