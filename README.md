@@ -67,11 +67,15 @@ The `transport/conformancetest` receive hook checks the declared boundary;
 without `ReceivedRawAtSize`, `raw_bounds/received` reports a named skip.
 
 The optional per-identity [admission interface](docs/admission.md) gates mailbox delivery and prepared message sends.
+This fork also links the [Nostr-only CG1 foundation](docs/cg1-foundation.md),
+with trusted-input/configuration contracts and exact validation commands.
+Production NIP-17 wiring is a separate unit; Matrix cannot select CG1.
 
 ## Tools
 
 | Tool | Purpose | How to run | Output |
 | --- | --- | --- | --- |
+| CG1 admission checks (Go) | Verify Nostr-only registration, real CG1/K1, refusal controls and frozen none bytes | [Exact commands and isolated Core prerequisites](docs/cg1-foundation.md#validation-tools-and-limits) | Test stdout; generated Core fixtures at explicit CG1_RUN_ROOT, private custody excluded from delivery |
 | Curator build checks (Go, Make) | Verify the dedicated build branch vendor closure and compile its command | `make verify-vendor BUILD_REPOSITORY="$REPOSITORY" BUILD_COMMIT="$FULL_BUILD_OID" MAIN_COMMIT="$FULL_MAIN_OID"`; `make curator-command BUILD_REPOSITORY="$BUILD_CHECKOUT" OUTPUT="$ARTIFACT"`; [branch rule and limits](docs/curator-build.md) | Named equality/refusal output; binary at the explicit output path |
 | Registry bundle qualifier (Go) | Compare complete selected registry functions and one level of resolved callees as inert bytes, with planted controls | [Command and limits](docs/registryqualifier.md) | JSON structural comparison; nonzero on differences, refusals or failed controls |
 | Local voice (Go, macOS Sherpa, ffmpeg) | Optional spoken copy after unchanged text | `go build -tags sherpa -o .temp/voice/a2a-voice ./cmd/a2a`; `voice status [--json]`; `voice install` then `voice config --enable`; `post ROOM --topic TOPIC --voice TEXT`; [contract](docs/voice.md) | Candidate binary `.temp/voice/`; config/cache `<config>/voice/`; private temporary audio deleted; text ID stdout, optional warning stderr |

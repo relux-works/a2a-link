@@ -200,3 +200,11 @@ implementation is constructed. Names do not imply capabilities. Registration
 panics for empty/duplicate names, nil factories or calls outside an init stack.
 The pre-registered `none` cannot be replaced. Test-only registration lives under
 `internal/admission/testdata/policy` and is imported only by test sources.
+
+## Fork extension: CG1
+
+The a2a-link fork links a Nostr-only `cg1` factory and explicitly extends the
+closed reason vocabulary with CG1 codes. See [the foundation contract](cg1-foundation.md)
+for trusted Nostr tuple provenance, provisioning, deadlines, F1/F2/F3 boundaries
+and the independent upstream none-byte fixtures. Matrix sessions retain
+Nostr:false and refuse CG1 startup; no Nostr engine is wired by this unit.

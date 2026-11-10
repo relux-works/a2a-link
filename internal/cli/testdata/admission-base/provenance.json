@@ -1,0 +1,11 @@
+{
+  "source": "e68c9a10c48b018d5859e599cf539826faaa0b81",
+  "command": "go test -count=1 -run ^TestAdmissionNone(Sync|Post)Golden$ ./internal/cli",
+  "capture": "Test-only overlay copies the non-bypass result without changing inputs or execution.",
+  "files": {
+    "none-mailbox.golden": "c51c596913106ccf8084f01b96c5c352062ccc641e6f90bf17ba3c5f983747ed",
+    "none-post-state.golden": "a4b08434fa15c46abf14e05e3adb71912b9b8a47e1d722478912e4f3fe545b63",
+    "none-request.golden": "6c1f1afe5951f3dd174eeaa9c156f5ee1ef764b5bf6ed61e2cc4f93ed0af118e",
+    "none-sync-state.golden": "8cabb43d253f9f212bac53dd3af716ca2116f69b90fc730342912487f4024ab5"
+  }
+}

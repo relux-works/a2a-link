@@ -1,0 +1,18 @@
+{
+  "writer": {
+    "protocol": 2,
+    "seal": "0b0fa1078fb21a4ab93ab8446044719e6100d1b1f281984b996539bc510eef32"
+  },
+  "mail_alarm": {
+    "active": false,
+    "last_observed": "0001-01-01T00:00:00Z",
+    "idle_since": "0001-01-01T00:00:00Z",
+    "last_alert": "0001-01-01T00:00:00Z"
+  },
+  "notification": {
+    "version": 0,
+    "not_before": "0001-01-01T00:00:00Z"
+  },
+  "next_batch": "done",
+  "wake": {}
+}

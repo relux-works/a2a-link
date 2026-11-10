@@ -1,0 +1,20 @@
+{
+  "writer": {
+    "protocol": 2,
+    "seal": "289a18c0610b17d80730cf0f3367519b99e9961f95b30bd75bf35f8f09936352"
+  },
+  "mail_alarm": {
+    "active": false,
+    "last_observed": "0001-01-01T00:00:00Z",
+    "idle_since": "0001-01-01T00:00:00Z",
+    "last_alert": "0001-01-01T00:00:00Z"
+  },
+  "notification": {
+    "version": 0,
+    "not_before": "0001-01-01T00:00:00Z"
+  },
+  "threads": [
+    "$root"
+  ],
+  "wake": {}
+}

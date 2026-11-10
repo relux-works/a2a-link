@@ -90,6 +90,10 @@ func TestAdmissionNoneSyncGolden(t *testing.T) {
 		}
 		mailbox := admissionRead(t, s.paths.MailboxFile(s.name))
 		state := admissionRead(t, s.paths.StateFile(s.name))
+		if !bypass {
+			assertBaseFixture(t, "none-mailbox.golden", mailbox)
+			assertBaseFixture(t, "none-sync-state.golden", state)
+		}
 		if bypass {
 			goldenMailbox, goldenState = mailbox, state
 		} else if !bytes.Equal(mailbox, goldenMailbox) || !bytes.Equal(state, goldenState) {
@@ -125,6 +129,10 @@ func TestAdmissionNonePostGolden(t *testing.T) {
 		}
 		state := admissionRead(t, w.paths.StateFile("alice"))
 		request := w.requests[len(w.requests)-1]
+		if !bypass {
+			assertBaseFixture(t, "none-post-state.golden", state)
+			assertBaseFixture(t, "none-request.golden", request)
+		}
 		if bypass {
 			requestGolden, stateGolden = bytes.Clone(request), state
 		} else if !bytes.Equal(requestGolden, request) || !bytes.Equal(stateGolden, state) {

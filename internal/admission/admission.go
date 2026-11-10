@@ -31,7 +31,7 @@ func ValidReason(s string) bool {
 	case "allowed", "exchange", "denied", "dependency_unavailable", "policy_invalid", "policy_error", "exchange_outbound", "held_age", "held_count", "exchange_capacity", "storage_error":
 		return true
 	}
-	return false
+	return validCG1Reason(s)
 }
 
 func Normalize(d Decision, err error) Decision {
@@ -45,12 +45,13 @@ func Normalize(d Decision, err error) Decision {
 }
 
 type Inbound struct {
-	RoomID    string `json:"room"`
-	EventID   string `json:"event_id"`
-	Sender    string `json:"sender"`
-	Kind      string `json:"kind"`
-	Timestamp int64  `json:"timestamp"`
-	Body      []byte `json:"body"`
+	RoomID    string               `json:"room"`
+	EventID   string               `json:"event_id"`
+	Sender    string               `json:"sender"`
+	Kind      string               `json:"kind"`
+	Timestamp int64                `json:"timestamp"`
+	Body      []byte               `json:"body"`
+	Nostr     *TrustedNostrInbound `json:"nostr,omitempty"`
 }
 
 type Outbound struct {
@@ -59,6 +60,7 @@ type Outbound struct {
 	TransactionID string
 	Kind          string
 	Request       []byte
+	Nostr         *TrustedNostrOutbound
 }
 
 type Checker interface {
@@ -67,9 +69,10 @@ type Checker interface {
 	Close() error
 }
 type Config struct {
-	Identity string
-	StateDir string
-	Nostr    bool
+	Identity    string
+	StateDir    string
+	Nostr       bool
+	NostrPubkey string // Authenticated local transport identity, never a body claim.
 }
 type Factory func(Config) (Checker, error)
 

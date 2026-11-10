@@ -148,3 +148,15 @@ Codex owner-DM companion rules deny known selected, resolved and launch spelling
 Arbitrary undiscovered aliases and later image versions remain outside these
 spelling-based rules; independent host-terminal checks still apply. No live
 Codex rule-engine or existing-hook fleet verification was performed.
+
+## AL1: production Nostr integration and release
+
+AL2 must wire verified NIP-17 sender, exact recipient, rumor ID/time and proof
+extraction into both admission hooks. AL1 refuses Matrix startup for CG1 and
+does not enable a production Nostr transport. AL2 must refuse media before
+upload until a reviewed pre-upload contract exists; per-recipient checks and
+retry/cursor behavior must remain tied to the authenticated transport.
+
+Upstream PR251 was open at licensing source commit
+5880b68929d3f83c64fb13719707e894ea1dec16. Public release remains conditional on
+its landing or explicit authorization from both owners. AL1 delivery is local.
