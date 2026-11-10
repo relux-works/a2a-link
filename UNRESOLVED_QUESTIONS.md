@@ -166,3 +166,13 @@ upgrade limits. Deferred media/room/account capabilities remain unresolved.
 Upstream PR251 was open at licensing source commit
 5880b68929d3f83c64fb13719707e894ea1dec16. Public release remains conditional on
 its landing or explicit authorization from both owners. AL1 delivery is local.
+
+## AL3 scope boundaries
+
+The local two-process smoke does not qualify remote hosts, TLS or enforced
+egress. swarma-relay v0.2.0 refuses discovery10002/10050; AL3 explicitly uses
+empty discovery plus configured-write fallback. RL2 owns replaceable discovery;
+TN3/TN4 own relay pinning and finer refusal codes. Remote reciprocal admission is
+an Infra provisioning precondition; the worker cannot manufacture it. Human
+message display and automatic recovery after partial evidence output are not
+claimed. See RUNBOOK-AL3.md for exact evidence and stop boundaries.
