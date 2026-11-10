@@ -49,10 +49,34 @@ func run() error {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	f, e := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, e := openOutput(output)
 	if e != nil {
 		return al3smoke.ErrSmoke
 	}
 	defer f.Close()
 	return al3smoke.Run(ctx, o, durableOutput{f})
+}
+
+// Persist the newly created directory entry before any output can authorize a
+// mailbox receipt. Existing files and symlinked parents are never replaced.
+func openOutput(path string) (*os.File, error) {
+	parent := filepath.Dir(path)
+	actual, e := filepath.EvalSymlinks(parent)
+	if e != nil || !filepath.IsAbs(path) || filepath.Clean(path) != path || actual != parent {
+		return nil, al3smoke.ErrSmoke
+	}
+	dir, e := os.Open(parent)
+	if e != nil {
+		return nil, e
+	}
+	defer dir.Close()
+	f, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
+		return nil, e
+	}
+	if e = dir.Sync(); e != nil {
+		f.Close()
+		return nil, e
+	}
+	return f, nil
 }

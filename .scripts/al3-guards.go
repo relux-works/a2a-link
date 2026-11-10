@@ -138,6 +138,8 @@ func run() error {
 				return fmt.Errorf("unsafe archive")
 			}
 			switch h.Typeflag {
+			case tar.TypeXGlobalHeader:
+				continue // git archive commit metadata, not a filesystem member
 			case tar.TypeDir:
 				if e = os.MkdirAll(path, 0700); e != nil {
 					return e
