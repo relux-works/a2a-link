@@ -404,3 +404,14 @@ The opt-in [Host enrollment boundary](docs/host-enrollment.md) provides strict
 source scope and existing-lease matching with cooperative state-writer guards.
 It exposes no live Host delivery route; durable attempt reconciliation and
 integrated backend validation remain required before activation.
+
+### AL3 admitted-session smoke tools
+
+[RUNBOOK-AL3.md](RUNBOOK-AL3.md) describes local two-process/Core qualification
+and parameterized remote workers (Infra only). Build `go build -o .temp/al3-smoke ./cmd/al3-smoke`;
+run with explicit `-config-root`, `-identity`, `-peer`, `-relay`, `-role`,
+`-run-id`, `-timeout`, `-output`. It requires existing reciprocal CG1 admission.
+`go run .scripts/al3-verify.go` validates two public JSONL transcripts before
+normalization. `go run .scripts/al3-guards.go -task-root ABS -out ABS` calibrates
+bounded mutations in isolated scratch. Binaries, logs, PIDs and public evidence
+belong under task-owned `.temp/`; no remote work is performed automatically.
