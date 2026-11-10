@@ -229,10 +229,27 @@ func al3Run(t *testing.T) []byte {
 			t.Fatal("fresh session bypass", e)
 		}
 	}
+	mailboxSnapshot := func(root string) string {
+		raw, err := os.ReadFile(filepath.Join(root, "state", "station.mailbox.jsonl"))
+		if os.IsNotExist(err) {
+			return "absent"
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rental.Hash(raw)
+	}
+	unchanged := func(root, before string) {
+		if mailboxSnapshot(root) != before {
+			t.Fatal("refused traffic changed ordinary mailbox bytes")
+		}
+	}
+	beforeOutsider := mailboxSnapshot(rootA)
 	// Non-admitted sender is held in the exchange lane, never ordinary output.
 	rawO := fx.Adapter(t, filepath.Join(l.private, "outsider"), url, outsider)
 	outsiderID := post(rawO, a.PubKeyHex(), "outsider", nil)
 	sync(sa)
+	unchanged(rootA, beforeOutsider)
 	st, e := sa.Status(ctx)
 	if e != nil || st.Pending != 0 || st.Counts["no_grant"] != 1 {
 		t.Fatal("outsider not refused/held", e)
@@ -269,6 +286,7 @@ func al3Run(t *testing.T) []byte {
 			t.Fatal(e)
 		}
 	}
+	beforeReplay := mailboxSnapshot(rootA)
 	// Replay of an already accepted logical operation cannot refill a receipted inbox.
 	if idA != post(rawB, a.PubKeyHex(), "provision-a", carrier(proofForB)) {
 		t.Fatal("replay changed event")
@@ -277,6 +295,7 @@ func al3Run(t *testing.T) []byte {
 	if pending(sa) != 0 {
 		t.Fatal("replay redelivered")
 	}
+	unchanged(rootA, beforeReplay)
 	// Send the identical signed wrap onto the actual wire again; a cached
 	// adapter ACK alone would not exercise relay replay handling.
 	journal, err := os.ReadFile(filepath.Join(l.private, "bootstrap-b", "seam-send", rental.Hash([]byte("provision-a"))+".json"))
@@ -301,6 +320,7 @@ func al3Run(t *testing.T) []byte {
 	if pending(sa) != 0 {
 		t.Fatal("wire replay redelivered")
 	}
+	unchanged(rootA, beforeReplay)
 	// Wrong recipient and forged rumor author have valid signed outer envelopes;
 	// transport drops them before CG1 while the ordinary mailbox remains empty.
 	fx.Misroute(t, url, b, a.PubKeyHex(), outsider.PubKeyHex())
@@ -308,6 +328,7 @@ func al3Run(t *testing.T) []byte {
 	if batch.Dropped != 1 || pending(sa) != 0 {
 		t.Fatal("wrong-recipient not dropped")
 	}
+	unchanged(rootA, beforeReplay)
 	body := []byte(`{"v":1,"text":"forged"}`)
 	fx.Inject(t, url, b, a.PubKeyHex(), outsider.PubKeyHex(), body)
 	batch = sync(sa)
@@ -315,6 +336,7 @@ func al3Run(t *testing.T) []byte {
 		t.Fatal("forged author not independently dropped")
 	}
 
+	unchanged(rootA, beforeReplay)
 	rawA.Close()
 	rawB.Close()
 	rawO.Close()
@@ -392,14 +414,16 @@ func al3Run(t *testing.T) []byte {
 	if err = sm.ReadInbox(ctx, 50, func(rows []nostrsession.Record) error { delivered = rows; return nil }); err != nil || len(delivered) != 1 || delivered[0].ID != rumor.ID || delivered[0].Sender != b.PubKeyHex() {
 		t.Fatal("malicious fixture valid neighbor missing")
 	}
+	beforeDuplicate := mailboxSnapshot(rootM)
 	sync(sm)
+	unchanged(rootM, beforeDuplicate)
 	if pending(sm) != 0 {
 		t.Fatal("duplicate response redelivered after receipt")
 	}
 	sm.Close()
 
 	fx.Write(t, filepath.Join(l.root, "normalized.json"), result)
-	proofs := map[string]any{"a": map[string]string{"presentation_sha256": rental.Hash(proofForA), "grantee": a.PubKeyHex()}, "b": map[string]string{"presentation_sha256": rental.Hash(proofForB), "grantee": b.PubKeyHex()}, "negative_controls": []string{"fresh-outbound:no_grant", "outsider:no_grant", "replay:no-mailbox", "wrong-recipient:dropped", "forged-rumor:dropped", "malicious-relay:forged-signature-dropped", "malicious-relay:duplicate-frame-deduplicated"}}
+	proofs := map[string]any{"a": map[string]string{"presentation_sha256": rental.Hash(proofForA), "grantee": a.PubKeyHex()}, "b": map[string]string{"presentation_sha256": rental.Hash(proofForB), "grantee": b.PubKeyHex()}, "mailbox_byte_invariants": "passed", "negative_controls": []string{"fresh-outbound:no_grant", "outsider:no_grant", "replay:no-mailbox", "wrong-recipient:dropped", "forged-rumor:dropped", "malicious-relay:forged-signature-dropped", "malicious-relay:duplicate-frame-deduplicated"}}
 	fx.Write(t, filepath.Join(l.root, "public-evidence.json"), jsonBytes(t, proofs))
 	return result
 }
