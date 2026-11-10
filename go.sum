@@ -102,8 +102,8 @@ github.com/onsi/gomega v1.7.1/go.mod h1:XdKZgCCFLUoM/7CFJVPcG8C1xQ1AJ0vpAezJrB7J
 github.com/onsi/gomega v1.10.1/go.mod h1:iN09h71vgCQne3DLsj+A5owkum+a2tYe+TOCB1ybHNo=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/relux-works/a2a-transport-nostr v0.2.0 h1:40x4Utki09SgXyDyF0y//CVxWYfjuuLgWRANb1tAJ88=
-github.com/relux-works/a2a-transport-nostr v0.2.0/go.mod h1:crg/UvdyyeZiRNiGbCh0/Lm8bPVM/vvQfDDYMp1wcpQ=
+github.com/relux-works/a2a-transport-nostr v0.3.0 h1:/WKseKvl7rg6HE4ewxVXmXFzOZwzZFGPsT7LSKoY6cQ=
+github.com/relux-works/a2a-transport-nostr v0.3.0/go.mod h1:crg/UvdyyeZiRNiGbCh0/Lm8bPVM/vvQfDDYMp1wcpQ=
 github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1 h1:T3iD+MHLRxHp9Oj2BJfuBudZFVzbVgxh8Cv1P6xUw1U=
 github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1/go.mod h1:eskmRagIK80UL3welr4n8HITS/BAZz4lyT4LoBESN+8=
 github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.0 h1:VCSPrUDKRMkLwf/zLgPptIKfdzEEKMk6Zai40CudphY=

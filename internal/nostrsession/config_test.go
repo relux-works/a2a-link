@@ -11,8 +11,8 @@ import (
 	fx "github.com/relux-works/a2a-swarm/internal/nostrtest"
 )
 
-// Duplicate detection compares decoded keys at every nesting level, in either
-// ordering. A single escaped spelling is normalized, without rewriting proof bytes.
+// Carrier keys cannot use escapes. Decoded certificate duplicate detection
+// compares unescaped keys at every nesting level without rewriting proof bytes.
 func TestPresentationUniqueJSON(t *testing.T) {
 	valid := []byte(`{"grant":{"scope":["deliver"]}}`)
 	carrier := fx.Carrier(t, strings.Repeat("a", 64), valid)
@@ -21,8 +21,12 @@ func TestPresentationUniqueJSON(t *testing.T) {
 		t.Fatal("valid carrier refused", e)
 	}
 	escaped := bytes.Replace(carrier, []byte(`"grant_id"`), []byte(`"grant_\u0069d"`), 1)
-	if _, e := presentation(escaped); e != nil {
-		t.Fatal("single escaped key not normalized")
+	if _, e := presentation(escaped); e != ErrPresentation {
+		t.Fatal("escaped carrier key accepted", e)
+	}
+	certificate := []byte(`{"gr\u0061nt":{"scope":["deliver"]}}`)
+	if got, e := presentation(fx.Carrier(t, strings.Repeat("a", 64), certificate)); e != nil || !bytes.Equal(got.Bytes, certificate) {
+		t.Fatal("opaque certificate bytes rewritten or refused", e)
 	}
 	for _, pair := range [][2]string{{`"x":1`, `"x":2`}, {`"x":1`, `"\u0078":2`}, {`"v":1`, `"\u0076":2`}} {
 		for reverse := 0; reverse < 2; reverse++ {

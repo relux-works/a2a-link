@@ -70,8 +70,9 @@ without `ReceivedRawAtSize`, `raw_bounds/received` reports a named skip.
 The optional per-identity [admission interface](docs/admission.md) gates mailbox delivery and prepared message sends.
 This fork also links the [Nostr-only CG1 foundation](docs/cg1-foundation.md),
 with trusted-input/configuration contracts and exact validation commands.
-The [host-selected Nostr session](docs/nostr-session.md) supplies genuine NIP-17
-post, sync, inbox and status with per-target checks on every retry. Matrix cannot
+The [host-selected Nostr session](docs/nostr-session.md), using transport v0.3.0
+with strict JSON boundaries, supplies genuine NIP-17 post, sync, inbox and status
+with per-target checks on every retry. Matrix cannot
 select CG1; unsupported Nostr room/account/media commands refuse.
 
 ## Tools

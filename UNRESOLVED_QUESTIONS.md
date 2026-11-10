@@ -156,11 +156,12 @@ recipient, rumor ID/time and proof extraction into admission. Each external
 target is rechecked on every send attempt. Matrix CG1 startup still refuses, and
 Nostr media/room/account operations remain unsupported pending separate contracts.
 
-The published transport v0.2.0 collapses duplicate keys in the outer envelope
-and extension map before exposing Message. AL2 rejects duplicate raw-carrier
-and certificate keys after unescaping, in both orderings. Strict outer-envelope
-JSON parsing remains the separately assigned SJ1 transport follow-up; AL2 does
-not claim it can recover discarded wire syntax.
+The former outer-envelope duplicate-key limitation is resolved by the published
+transport v0.3.0 (SJ1/SJ1T): original JSON is checked before map decoding.
+Escaped carrier keys now refuse even when unique. The decoded certificate stays
+opaque to transport; AL2 retains duplicate-after-unescaping checks and CG1/K1
+validation. See the session documentation for durable-state and old escaped-key
+upgrade limits. Deferred media/room/account capabilities remain unresolved.
 
 Upstream PR251 was open at licensing source commit
 5880b68929d3f83c64fb13719707e894ea1dec16. Public release remains conditional on

@@ -6,7 +6,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5
 	github.com/coder/websocket v1.8.15
 	github.com/k2-fsa/sherpa-onnx-go-macos v1.13.8
-	github.com/relux-works/a2a-transport-nostr v0.2.0
+	github.com/relux-works/a2a-transport-nostr v0.3.0
 	github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1
 	github.com/relux-works/swarma-chain-lab/experiments/rental v0.1.0
 	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway v0.1.0

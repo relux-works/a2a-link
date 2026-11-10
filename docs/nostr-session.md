@@ -1,7 +1,7 @@
 # Host-selected Nostr session (AL2)
 
 This fork can open a genuine NIP-17 identity using the published
-`github.com/relux-works/a2a-transport-nostr v0.2.0` dependency. It retains the
+`github.com/relux-works/a2a-transport-nostr v0.3.0` dependency. It retains the
 `github.com/relux-works/a2a-swarm` module path so both packages share one transport
 type identity. There are no replacements or copied transport implementations.
 Matrix identities retain their existing paths and bytes; Matrix still refuses
@@ -48,11 +48,13 @@ The host is responsible for choosing the correct agent/landlord/issuer pins.
 An optional `presentation` field contains the typed `swarma.grant.v1` object:
 `v:1`, a lowercase 64-hex `grant_id`, and `bytes` as standard padded base64 of
 the complete certificate JSON (1..16384 decoded bytes). It is untrusted proof,
-not permission. The carrier is separate from human text. Session validates
-unique keys in the carrier and every object in the decoded certificate,
-including objects in arrays, comparing keys after JSON unescaping. A single
-escaped spelling is normalized for comparison; certificate bytes are never
-rewritten. Both duplicate orderings are refused. Explicit malformed proof never
+not permission. The carrier is separate from human text. Transport v0.3.0 refuses
+duplicate or escaped carrier keys, including a single escaped spelling. Session
+also checks every object in the decoded certificate,
+including objects in arrays, for duplicate keys after JSON unescaping. A single
+escaped certificate key is normalized only for that comparison; certificate
+bytes are never rewritten and CG1/K1 still validates their meaning. Both
+duplicate orderings are refused. Explicit malformed proof never
 falls back to an admitted cache. The transport additionally enforces its original
 ordinary-extension and message budgets and real nested NIP-17 size limits.
 
@@ -149,10 +151,23 @@ grantee, forged rumor author, wrong-recipient ciphertext, duplicate certificate,
 mixed recipients and revoked retries. It records/stops the owned node PID.
 Never include its private custody directory in delivery artifacts.
 
-Transport v0.2.0 decodes the outer wire envelope/extensions map before AL2 sees
-it. Duplicate keys already collapsed there cannot be recovered by this API;
-the separate SJ1 transport follow-up owns that limitation. AL2 refuses duplicates
-in the raw carrier and decoded certificate visible at its boundary. No deployment,
-mainnet, S1 resolver, owner bypass, full room parity or media authorization is
-claimed. Required independent review and hosted checks remain separate from
-producer-local evidence.
+Transport v0.3.0 checks original event/envelope/extension JSON before map decoding.
+Duplicate or escaped keys and typed-field aliases refuse at that boundary;
+ordinary escaped string values remain legal. Rejected inbound envelopes may
+increment transport drop/checkpoint bookkeeping, but never reach the session's
+ordinary mailbox. The decoded base64 certificate remains opaque to transport,
+so the session's duplicate check and CG1/K1 validation remain required.
+
+Upgrade compatibility: v0.2.0 accepted single escaped carrier keys; v0.3.0
+returns a presentation refusal. Legal literal `<`, `>` and `&` extension keys
+now round-trip without HTML escaping. Previously escaped wire/cache keys are
+still refused. Ordinary extension keys requiring mandatory JSON escapes also
+refuse. Corrupt or newly-invalid durable records may refuse retry/read; preserve
+the identity key, journal and cursor for diagnosis rather than deleting state.
+Retry comparison hashes keep their previous encoding. Tests cover malformed
+inbound neighbors, legal key send/receive, restart retries and a deliberately
+corrupt journal with no publication or state rewrite followed by valid repair.
+
+No deployment, mainnet, S1 resolver, owner bypass, full room parity or media
+authorization is claimed. Required independent review and hosted checks remain
+separate from producer-local evidence.
