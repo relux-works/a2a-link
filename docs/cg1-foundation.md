@@ -1,10 +1,10 @@
 # Nostr-only CG1 admission foundation
 
-This fork registers `cg1` through `RegisterNostrOnly` at build time. Its CLI and
-Courier engine still open Matrix sessions with `Nostr:false`, so selecting cg1
-there refuses startup before policy configuration, sends or uploads. This is an
-adapter foundation, not an enabled Nostr transport. Production transport wiring
-is the separate AL2 unit. The module path remains the upstream a2a-swarm path so
+This fork registers `cg1` through `RegisterNostrOnly` at build time. Matrix CLI
+and Courier sessions open with `Nostr:false`, so selecting cg1 there refuses
+startup before policy configuration, sends or uploads. The separate
+[host-selected Nostr session](nostr-session.md) supplies the authenticated AL2
+transport boundary. The module path remains the upstream a2a-swarm path so
 that the published transport's import refers to one transport registry.
 
 The fork uses Go 1.26 and directly requires published grantcheck v0.1.0 and
@@ -40,7 +40,7 @@ The Go type is an engine trust contract, not a cryptographic verifier. Never
 unmarshal an incoming body's claims into it. Nil Presentation means no supplied
 proof and allows CG1's same-identity admitted cache; a non-nil malformed proof
 never falls back. Private held state retains the trusted tuple for rechecking;
-AL2 must commit it only with the verified event and preserve cursor semantics.
+AL2 commits it only with the verified event and preserves cursor semantics.
 
 TrustedNostrOutbound contains one exact recipient from the transport-validated
 conversation. It is not Message.To or a caller-provided body field. Before each
@@ -102,11 +102,11 @@ filesystem syscall stalled by the OS. Keep identity state on qualified storage.
 
 Issue431 F2: the matrixtransport registry factory creates an unguarded Matrix
 client and is NOT adopted as a CG1 transport. Existing Matrix none behavior is
-unchanged. AL2 must explicitly install admission on its authenticated Nostr path;
+unchanged. AL2 explicitly installs admission on its authenticated Nostr path;
 calling a transport directly is not an admission boundary.
 
 Issue431 F3: upstream Matrix attach/voice uploads precede the send guard. CG1
-cannot start a Matrix session, so it cannot use that path. AL2 must reject CG1
+cannot start a Matrix session, so it cannot use that path. AL2 rejects Nostr
 media before upload until it supplies a separate reviewed pre-upload contract;
 a later event refusal cannot undo an upload. State/account-data/membership and
 redactions remain outside the message seam. This foundation does not claim to
@@ -128,12 +128,15 @@ fix unrelated upstream hardening issues F5-F11.
   go test -race -count=1 -run '^TestCoreAdmission$' -v ./internal/cg1` checks the
   real issuer, published CG1/K1 and isolated Core. It uses only generated fixture
   custody and stops its recorded node PID. Never publish the private/ subdirectory.
-- On macOS, Courier's tests require the normal per-user temporary directory:
-  `export TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"` if the launcher omitted it.
+- Launch from an absolute physical task-owned scratch checkout with HOME,
+  config, caches and temporary directories inside the same root. Keep macOS
+  socket fixture paths short enough for the existing 103-byte limit; never
+  move test writes into a shared host temporary directory or SDK.
 - `go vet ./internal/cg1 ./internal/admission ./internal/cli`, `go mod verify`,
   `go mod tidy -diff`, `gofmt -l` and `git diff --check` are the remaining checks.
 
-There is no live NIP-17 activation, Matrix identity mapping, S1 resolver, owner
-bypass, media authorization, deployment or mainnet acceptance in this unit.
+The foundation alone does not activate NIP-17; see the AL2 session contract for
+that path. Matrix identity mapping, S1 resolver, owner bypass, media authorization,
+deployment and mainnet acceptance remain outside this unit.
 
 Remaining integration work is recorded in [UNRESOLVED_QUESTIONS.md](../UNRESOLVED_QUESTIONS.md).

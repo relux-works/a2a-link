@@ -1,5 +1,5 @@
 // Package cg1 registers the fork's Nostr-only grant policy. It has no transport,
-// signing, media upload or mailbox implementation; production NIP-17 wiring is AL2.
+// signing, media upload or mailbox implementation; nostrsession owns that boundary.
 package cg1
 
 import (
@@ -44,13 +44,17 @@ func open(c admission.Config) (admission.Checker, error) {
 		return nil, errConfig
 	}
 	defer root.Close()
+	entry, err := root.Lstat("cg1.json")
+	if err != nil || !entry.Mode().IsRegular() {
+		return nil, errConfig
+	}
 	f, err := root.OpenFile("cg1.json", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, errConfig
 	}
 	defer f.Close()
 	st, err := f.Stat()
-	if err != nil || !privateFile(st) || st.Size() > 8192 {
+	if err != nil || !os.SameFile(entry, st) || !privateFile(st) || st.Size() > 8192 {
 		return nil, errConfig
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, 8193))

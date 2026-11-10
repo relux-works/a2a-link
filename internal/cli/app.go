@@ -279,6 +279,12 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		a.usage(a.Stdout)
 		return ExitOK
 	}
+	// Local Courier/association protocols retain their environment-free boundary.
+	if !a.courierEngine && rest[0] != "courier" && associationInvocation(args) == nil {
+		if handled, err := a.nostrInvocation(ctx, args); handled {
+			return a.fail(err)
+		}
+	}
 	for _, c := range commands() {
 		if c.name == rest[0] {
 			// Enrollment is a local operator command; it must not read a

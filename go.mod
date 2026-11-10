@@ -6,6 +6,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5
 	github.com/coder/websocket v1.8.15
 	github.com/k2-fsa/sherpa-onnx-go-macos v1.13.8
+	github.com/relux-works/a2a-transport-nostr v0.2.0
 	github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1
 	github.com/relux-works/swarma-chain-lab/experiments/rental v0.1.0
 	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway v0.1.0
@@ -21,6 +22,7 @@ require (
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.1.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 )

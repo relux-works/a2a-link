@@ -32,7 +32,7 @@ func TestFactoryAndConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("policy not registered")
 	}
-	for _, mode := range []string{"valid", "matrix", "missing", "mode", "symlink", "hardlink", "extra", "duplicate", "null", "oversize", "version", "timeout", "route", "key", "own-key", "state-link"} {
+	for _, mode := range []string{"valid", "matrix", "missing", "mode", "symlink", "relative-symlink", "hardlink", "extra", "duplicate", "null", "oversize", "version", "timeout", "route", "key", "own-key", "state-link"} {
 		t.Run(mode, func(t *testing.T) {
 			c, s := configFixture(t)
 			path := filepath.Join(c.StateDir, "cg1.json")
@@ -59,6 +59,10 @@ func TestFactoryAndConfig(t *testing.T) {
 			case "symlink":
 				os.Rename(path, path+".target")
 				os.Symlink(path+".target", path)
+			case "relative-symlink":
+				// os.Root resolves relative links internally: O_NOFOLLOW alone is insufficient.
+				os.Rename(path, path+".target")
+				os.Symlink("cg1.json.target", path)
 			case "hardlink":
 				os.Link(path, path+".alias")
 			case "extra", "duplicate", "null":

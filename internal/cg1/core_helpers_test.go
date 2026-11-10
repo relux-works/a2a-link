@@ -38,6 +38,7 @@ type coreLab struct {
 	node                     *exec.Cmd
 	log                      *os.File
 	observer                 su.Node
+	route                    su.Route
 	issuer                   *btcec.PrivateKey
 	issuerPub, agentNostrPub string
 }
@@ -219,6 +220,7 @@ func newCoreLab(t *testing.T, agentNostrPub string) *coreLab {
 	mac := hmac.New(sha256.New, []byte(salt))
 	mac.Write([]byte(password))
 	route := su.Route{Host: "127.0.0.1", Port: port, Username: "w3-observer", Password: password}
+	l.route = route
 	l.observer, e = newReadNode(route)
 	if e != nil {
 		t.Fatal(e)
@@ -299,7 +301,13 @@ func (l *coreLab) seal() rental.Point {
 // booking package. The harness signs/broadcasts its returned transaction plan;
 // it never constructs or signs a v3 grant itself.
 func (l *coreLab) grant(grantee *nostr.PrivKey, label string, seal rental.Point, confirmed bool) []byte {
+	return l.grantAt(grantee, label, seal, confirmed, 500)
+}
+
+// grantAt shifts the fixture lifetime so production wall-clock checks need no override.
+func (l *coreLab) grantAt(grantee *nostr.PrivKey, label string, seal rental.Point, confirmed bool, now int64) []byte {
 	l.t.Helper()
+	delta := now - 500
 	booking := rental.Hash([]byte(label))
 	provider, err := nostr.GeneratePrivKey()
 	if err != nil {
@@ -317,17 +325,17 @@ func (l *coreLab) grant(grantee *nostr.PrivKey, label string, seal rental.Point,
 	}
 	contract := rental.Contract{
 		Version: 1, BookingID: booking, RenterPubkey: grantee.PubKeyHex(), AgentPubkey: l.agentNostrPub,
-		StationName: e2eAgentName, NotBefore: 300, NotAfter: 1000,
+		StationName: e2eAgentName, NotBefore: 300 + delta, NotAfter: 1000 + delta,
 		Allowed: []string{"deliver", "pay"}, Forbidden: []string{"publish", "repository.push", "secret.release"}, BudgetSat: 1000000,
 		TemplateID: "lab-template", TemplateSHA256: strings.Repeat("1", 64), ProfileID: "lab-profile", ProfileVersion: "1", ProfileSHA256: strings.Repeat("2", 64),
-		PriceUSDCents: 100, USDMicrosPerNMC: 100000000, RateAsOf: 100, PriceNMCSat: 1000000, PaymentPolicy: "advance", PaymentAddress: l.address, PrivacySHA256: strings.Repeat("3", 64),
+		PriceUSDCents: 100, USDMicrosPerNMC: 100000000, RateAsOf: 100 + delta, PriceNMCSat: 1000000, PaymentPolicy: "advance", PaymentAddress: l.address, PrivacySHA256: strings.Repeat("3", 64),
 	}
 	contractID := rental.Hash(jsonBytes(l.t, contract))
-	consent := signEvent(l.t, grantee, rental.Event{CreatedAt: 200, Kind: 8181, Tags: [][]string{{"t", "swarma-rental-consent-v1"}, {"contract", contractID}, {"booking", booking}, {"privacy", contract.PrivacySHA256}}})
+	consent := signEvent(l.t, grantee, rental.Event{CreatedAt: 200 + delta, Kind: 8181, Tags: [][]string{{"t", "swarma-rental-consent-v1"}, {"contract", contractID}, {"booking", booking}, {"privacy", contract.PrivacySHA256}}})
 	pk, _ := btcec.PrivKeyFromBytes(provider.Bytes())
-	pack := rental.Package{Version: 1, Contract: contract, Consent: consent, ProviderPubkey: provider.PubKeyHex(), ProviderSignature: signHash(l.t, pk, contractID), PrivacyAckAt: 100, PrivacySHA256: contract.PrivacySHA256, HoldCreatedAt: 100, HoldExpiresAt: 900}
-	publication := signEvent(l.t, provider, rental.Event{CreatedAt: 300, Kind: 8182, Tags: [][]string{{"t", "swarma-rental-package-v1"}, {"contract", contractID}, {"booking", booking}, {"e", consent.ID}}, Content: string(jsonBytes(l.t, pack))})
-	req := rental.IssuanceRequest{Version: 1, BookingID: booking, StationName: e2eAgentName, AgentPubkey: l.agentNostrPub, RenterPubkey: grantee.PubKeyHex(), ContractSHA256: contractID, Scope: contract.Allowed, BudgetSat: contract.BudgetSat, NotBefore: 300, NotAfter: 1000, PaymentPolicy: "advance", PaymentTxID: payment.TxID, PaymentVout: payment.Vout, PaymentHeight: header.Height, PaymentBlockHash: paymentTx.Block, ObservedTipHash: labText(l.t, l.rpc("", "getbestblockhash")), PackageEventID: publication.ID}
+	pack := rental.Package{Version: 1, Contract: contract, Consent: consent, ProviderPubkey: provider.PubKeyHex(), ProviderSignature: signHash(l.t, pk, contractID), PrivacyAckAt: 100 + delta, PrivacySHA256: contract.PrivacySHA256, HoldCreatedAt: 100 + delta, HoldExpiresAt: 900 + delta}
+	publication := signEvent(l.t, provider, rental.Event{CreatedAt: 300 + delta, Kind: 8182, Tags: [][]string{{"t", "swarma-rental-package-v1"}, {"contract", contractID}, {"booking", booking}, {"e", consent.ID}}, Content: string(jsonBytes(l.t, pack))})
+	req := rental.IssuanceRequest{Version: 1, BookingID: booking, StationName: e2eAgentName, AgentPubkey: l.agentNostrPub, RenterPubkey: grantee.PubKeyHex(), ContractSHA256: contractID, Scope: contract.Allowed, BudgetSat: contract.BudgetSat, NotBefore: 300 + delta, NotAfter: 1000 + delta, PaymentPolicy: "advance", PaymentTxID: payment.TxID, PaymentVout: payment.Vout, PaymentHeight: header.Height, PaymentBlockHash: paymentTx.Block, ObservedTipHash: labText(l.t, l.rpc("", "getbestblockhash")), PackageEventID: publication.ID}
 	issuerState := filepath.Join(l.private, "issuer-"+label)
 	if err = os.Mkdir(issuerState, 0700); err != nil {
 		l.t.Fatal(err)
@@ -339,7 +347,7 @@ func (l *coreLab) grant(grantee *nostr.PrivKey, label string, seal rental.Point,
 	sealScript, _ := rental.GrantSealScript(l.issuerPub)
 	policy := rental.Policy{Network: "regtest", Genesis: su.RegtestGenesis, AgentName: e2eAgentName, LandlordName: e2eLandlordName, SealScript: sealScript, FundingScript: l.script, StateDir: issuerState}
 	spec := rental.PlanSpec{Kind: "grant-issue", Inputs: []su.PlanInput{{Point: su.Point{TxID: funding.TxID, Vout: funding.Vout}, ValueSat: 1000000, Script: l.script, Role: "funding"}}, ChangeScript: l.script}
-	r := rental.IssueGrant(context.Background(), l.observer, rental.IssuerPolicy{Policy: policy, ProviderPubkey: provider.PubKeyHex()}, jsonBytes(l.t, req), jsonBytes(l.t, publication), seal, spec, keyPath, 500)
+	r := rental.IssueGrant(context.Background(), l.observer, rental.IssuerPolicy{Policy: policy, ProviderPubkey: provider.PubKeyHex()}, jsonBytes(l.t, req), jsonBytes(l.t, publication), seal, spec, keyPath, now)
 	if r.Verdict != "prepared" || r.Plan == nil || r.GrantID != rental.Hash(r.SignedGrant) {
 		l.t.Fatalf("K1 issuer: %s/%s", r.Verdict, r.Reason)
 	}

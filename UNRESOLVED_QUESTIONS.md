@@ -149,13 +149,18 @@ Arbitrary undiscovered aliases and later image versions remain outside these
 spelling-based rules; independent host-terminal checks still apply. No live
 Codex rule-engine or existing-hook fleet verification was performed.
 
-## AL1: production Nostr integration and release
+## AL2: transport strict JSON and deferred capabilities
 
-AL2 must wire verified NIP-17 sender, exact recipient, rumor ID/time and proof
-extraction into both admission hooks. AL1 refuses Matrix startup for CG1 and
-does not enable a production Nostr transport. AL2 must refuse media before
-upload until a reviewed pre-upload contract exists; per-recipient checks and
-retry/cursor behavior must remain tied to the authenticated transport.
+The [Nostr session](docs/nostr-session.md) now wires verified NIP-17 sender, local
+recipient, rumor ID/time and proof extraction into admission. Each external
+target is rechecked on every send attempt. Matrix CG1 startup still refuses, and
+Nostr media/room/account operations remain unsupported pending separate contracts.
+
+The published transport v0.2.0 collapses duplicate keys in the outer envelope
+and extension map before exposing Message. AL2 rejects duplicate raw-carrier
+and certificate keys after unescaping, in both orderings. Strict outer-envelope
+JSON parsing remains the separately assigned SJ1 transport follow-up; AL2 does
+not claim it can recover discarded wire syntax.
 
 Upstream PR251 was open at licensing source commit
 5880b68929d3f83c64fb13719707e894ea1dec16. Public release remains conditional on

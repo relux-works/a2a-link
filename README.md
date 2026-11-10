@@ -19,6 +19,7 @@ It hosts many **rooms** (usually one per project), and one agent can be a member
 | `internal/cli/` | `a2a` commands, plus the in-memory fake homeserver used by the unit tests and the gated integration test |
 | `internal/matrix/` | Thin Matrix client-server API client (net/http only, no SDK) |
 | `internal/voice/` | Optional local Sherpa synthesis, pinned model install and bounded Ogg/Opus rendering; [voice contract](docs/voice.md) |
+| `internal/nostrsession/` | Host-selected Nostr session, guarded sends and durable admission/inbox |
 | `internal/config/` | Config dir, `matrix.env`, per-identity credential metadata and optional file tokens (0600 only), per-agent `wait` state |
 | `internal/skill/` | The a2a agent skill, embedded (`files/a2a/SKILL.md`) and installed by `a2a skill install` |
 | `internal/redact/` | Scrubs tokens and passwords from anything the CLI prints |
@@ -69,12 +70,15 @@ without `ReceivedRawAtSize`, `raw_bounds/received` reports a named skip.
 The optional per-identity [admission interface](docs/admission.md) gates mailbox delivery and prepared message sends.
 This fork also links the [Nostr-only CG1 foundation](docs/cg1-foundation.md),
 with trusted-input/configuration contracts and exact validation commands.
-Production NIP-17 wiring is a separate unit; Matrix cannot select CG1.
+The [host-selected Nostr session](docs/nostr-session.md) supplies genuine NIP-17
+post, sync, inbox and status with per-target checks on every retry. Matrix cannot
+select CG1; unsupported Nostr room/account/media commands refuse.
 
 ## Tools
 
 | Tool | Purpose | How to run | Output |
 | --- | --- | --- | --- |
+| Nostr session checks (Go, loopback relay, isolated Core) | Verify real NIP-17 admission, recipient/retry guards and crash recovery | [Commands and limits](docs/nostr-session.md#validation-and-limits) | Test stdout and task-owned scratch; generated private custody excluded from delivery |
 | CG1 admission checks (Go) | Verify Nostr-only registration, real CG1/K1, refusal controls and frozen none bytes | [Exact commands and isolated Core prerequisites](docs/cg1-foundation.md#validation-tools-and-limits) | Test stdout; generated Core fixtures at explicit CG1_RUN_ROOT, private custody excluded from delivery |
 | Curator build checks (Go, Make) | Verify the dedicated build branch vendor closure and compile its command | `make verify-vendor BUILD_REPOSITORY="$REPOSITORY" BUILD_COMMIT="$FULL_BUILD_OID" MAIN_COMMIT="$FULL_MAIN_OID"`; `make curator-command BUILD_REPOSITORY="$BUILD_CHECKOUT" OUTPUT="$ARTIFACT"`; [branch rule and limits](docs/curator-build.md) | Named equality/refusal output; binary at the explicit output path |
 | Registry bundle qualifier (Go) | Compare complete selected registry functions and one level of resolved callees as inert bytes, with planted controls | [Command and limits](docs/registryqualifier.md) | JSON structural comparison; nonzero on differences, refusals or failed controls |
