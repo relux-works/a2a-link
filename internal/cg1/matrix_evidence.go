@@ -67,7 +67,7 @@ func evidenceRecord(value any, kind string) bool {
 		return false
 	}
 	body, ok := outer["body"].(map[string]any)
-	if !ok || body["type"] != kind || !evidenceKey(body["issuer"]) {
+	if !ok || !evidenceSignedBody(body, kind) {
 		return false
 	}
 	sigs, ok := outer["signatures"].([]any)

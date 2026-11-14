@@ -164,6 +164,35 @@ All supported evidence slots and their nested field types are validated at start
 unknown slots and malformed root, generation, revocation, time or optional device
 facts refuse before any policy state is created. Signed evidence keeps its original
 bounded bytes; message-time signature, authority and freshness checks still run.
+
+The signed evidence body gate follows [the pinned specification, section 2.6](https://github.com/relux-works/swarma-envelope/blob/e38510c503d266d36a275a5976f933e10fae4060/spec/swarm-envelope-2.md#26-root-signed-attestations-and-shared-revocation):
+attestation bodies have exactly type, issuer, subject, key_class, purpose, roles,
+actions, iat, exp and binding. Subject algorithm/key-id/public-bytes must agree;
+agent and service validity is positive and at most 86400 seconds. Agent bindings
+close all six generation fields and their integer/text bounds; device and service
+bindings close the one owner field. Device validity is positive, with any further
+expiry restriction left to protected runtime policy. Revocations close type,
+issuer, issued_at, complete=true and up to 64 closed kind/id/from entries, checking
+all entries and the key-vs-content-id distinction. Empty complete snapshots are
+well shaped. Unknown/missing members, wrong nested types and out-of-range values
+refuse before either binding is persisted.
+
+This is **shape only**. It does not verify signatures, recompute content ids,
+resolve issuing-root authority or current generations, or establish freshness.
+The original signed bytes are never normalized, replaced or re-signed. The full
+runtime verifier still owns those checks; a well-shaped bad signature can pass
+startup but cannot reach grantcheck. This consumer recognizes the section-2.6
+Ed25519 agent, P-256 operator-device and Ed25519 service body profiles. The
+section-3.5 Mac-agent and grant-revocation-publisher extensions are unsupported
+by this Ed25519 Matrix slice and refuse rather than taking a partial shape path.
+
+`TestMatrixSignedEvidenceBodies` pairs each field/profile refusal with a valid
+same-namespace startup control; its field-level source-overlay plants retain the
+outer signed carrier. Boundary controls cover numeric/text maxima and minima,
+exact 86400-second windows, 64 entries and empty snapshots. The registration
+integer above 2^53-1 is also rejected by the shared CCJ reader before body intake;
+a typed helper control checks that upper bound without pretending it can be
+encoded as a valid CCJ-1 record.
 The file is read afresh for each check and again before accepting a Live result.
 Grant work crossing an envelope/evidence expiry cannot use that result.
 

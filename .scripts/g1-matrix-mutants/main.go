@@ -41,7 +41,7 @@ func plants() []plant {
 	fallback := func(condition string) string {
 		return "signer, e := c.cosign.Verify(envelope, obj[cg1cosign.ContentKey])\n\tif e != nil && (" + condition + ") { signer = cfg.Pins[sender].Key } else if e != nil { return matrixDenied() }"
 	}
-	return []plant{
+	return append([]plant{
 		{"startup-evidence-shapes", "all host evidence is validated before a binding is persisted", "./internal/cg1", "TestMatrixStartupEvidenceShapes/empty-service-root", "invalid envelope evidence admitted at startup", []edit{{"internal/cg1/matrix_config.go", `if !matrixEvidenceShape(cfg.Evidence) {`, `if false && !matrixEvidenceShape(cfg.Evidence) {`, 1}}},
 		{"failed-startup-binding", "backend rejection leaves no binding and correction can start", "./internal/cg1", "TestMatrixRejectedStartupCanRecover/agent", "failed startup persisted binding", []edit{{"internal/cg1/matrix_config.go", `core, e := grantcheck.NewForTransport`, `if e = commitMatrixJournal(journal, binding, cfg.InitialWatermark); e != nil { return nil, errConfig }; core, e := grantcheck.NewForTransport`, 1}, {"internal/cg1/matrix_config.go", `if !success {
 				_ = os.Remove`, `if false && !success {
@@ -70,7 +70,7 @@ func plants() []plant {
 		{"transaction-record", "one transaction cannot switch signed records", "./internal/cg1", "TestMatrixTransactionBinding", "Verdict:0", []edit{{checker, `if knownID != key && known == rec {`, `if false && knownID != key && known == rec {`, 1}}},
 		{"post-grant-window", "grant work cannot outlive the envelope window", "./internal/cg1", "TestMatrixRecheckAfterGrant/expired", "Verdict:0", []edit{{checker, `code = verifyMatrixEnvelope(current, envelope, room, recipient, []byte(text), finalNow, finalStamp, parsed.ID, previous)`, `code = "accept"`, 1}}},
 		{"replay-event", "an admitted id cannot be replayed as another event", "./internal/cg1", "TestMatrixPresentationAndReplay", "Verdict:0", []edit{{checker, `if seen && prior != rec {`, `if false && seen && prior != rec {`, 1}}},
-	}
+	}, signedBodyPlants()...)
 }
 func main() {
 	if e := run(); e != nil {
