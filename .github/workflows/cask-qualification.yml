@@ -125,16 +125,13 @@ jobs:
           q0_brew_setup
           q0_brew_tap "$IN/a2a.rb"
           q0_brew_lint
-          # The Linux archives are not published under v0.1.1, so the install
-          # downloads them from a local mirror of the same URLs. The cask is
-          # byte-for-byte the one under test; only the transport is redirected.
-          M="$T/mirror/https:/github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG"
-          mkdir -p "$M" && cp "$IN"/a2a_0.1.1_linux_*.tar.gz "$M/"
-          ( cd "$T/mirror" && python3 -m http.server 8765 --bind 127.0.0.1 >"$T/mirror.log" 2>&1 & echo $! >"$T/mirror.pid" )
-          sleep 2
+          # v0.1.1 publishes no Linux assets, so the real archive is placed at
+          # the download path Homebrew itself reports (brew --cache). The cask
+          # is byte-for-byte the one under test and its sha256 is still verified.
+          q0_brew_preseed a2a "$IN/a2a_0.1.1_linux_amd64.tar.gz"
           mkdir -p "$T/x" && tar -xzf "$IN/a2a_0.1.1_linux_amd64.tar.gz" -C "$T/x"
           q0_home_snapshot before
-          "$Q" check install-linux -- env HOMEBREW_ARTIFACT_DOMAIN=http://127.0.0.1:8765 HOMEBREW_ARTIFACT_DOMAIN_NO_FALLBACK=1 "$BREW" install --cask relux-works/q0/a2a
+          "$Q" check install-linux -- "$BREW" install --cask relux-works/q0/a2a
           "$Q" check installed-a2a-is-archive-binary -- cmp "$BREW_PREFIX/bin/a2a" "$T/x/a2a"
           "$Q" refuse no-darwin-companion-on-linux -- test -e "$BREW_PREFIX/bin/a2a-keychain-status"
           "$Q" check installed-a2a-runs-help -- "$BREW_PREFIX/bin/a2a" help
@@ -142,9 +139,8 @@ jobs:
           "$Q" refuse uninstall-removed-binary -- test -e "$BREW_PREFIX/bin/a2a"
           q0_home_snapshot after
           "$Q" check home-unchanged-by-install-and-uninstall -- diff -u "$T/home-before.txt" "$T/home-after.txt"
-          q0_tamper_negative "$IN/a2a.rb" linux
-          kill "$(cat "$T/mirror.pid")" || true
-          mkdir -p "$T/out" && cp -R "$Q0_RESULTS" "$T/out/results" && cp "$T/mirror.log" "$T/out/" || true
+          q0_tamper_negative "$IN/a2a.rb" linux "$IN/a2a_0.1.1_linux_amd64.tar.gz"
+          mkdir -p "$T/out" && cp -R "$Q0_RESULTS" "$T/out/results" || true
       - name: Verdict
         if: always()
         shell: bash

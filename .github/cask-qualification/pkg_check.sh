@@ -9,6 +9,10 @@
 set -eu
 mode=$1 pkg=$2 ref=$3
 
+same() { # byte equality without cmp, which minimal images lack
+	[ "$(sha256sum <"$1" | cut -d' ' -f1)" = "$(sha256sum <"$2" | cut -d' ' -f1)" ] || { echo "$1 differs from $2" >&2; exit 1; }
+}
+
 allowed_files() { # stdin: the package file list; fail on anything but the binary path
 	grep -vxE '/\.|/usr|/usr/bin|/usr/bin/a2a' | grep -v '^$' && { echo "unexpected packaged paths above" >&2; exit 1; } || true
 }
@@ -28,7 +32,7 @@ deb)
 	dpkg -L a2a | allowed_files
 	scripts=$(ls /var/lib/dpkg/info/a2a.* | grep -vE '\.(list|md5sums)$' || true)
 	[ -z "$scripts" ] || { echo "maintainer scripts: $scripts" >&2; exit 1; }
-	cmp /usr/bin/a2a "$ref"
+	same /usr/bin/a2a "$ref"
 	run_help
 	dpkg -r a2a
 	;;
@@ -37,7 +41,7 @@ rpm)
 	rpm -ql a2a | allowed_files
 	scripts=$(rpm -q --scripts a2a)
 	[ -z "$scripts" ] || { echo "rpm scriptlets: $scripts" >&2; exit 1; }
-	cmp /usr/bin/a2a "$ref"
+	same /usr/bin/a2a "$ref"
 	run_help
 	rpm -e a2a
 	;;

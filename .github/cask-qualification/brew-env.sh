@@ -26,6 +26,19 @@ q0_brew_tap() {
 	mkdir -p "$tap/Casks"
 	cp "$1" "$tap/Casks/a2a.rb"
 	"$Q" check cask-under-test-unchanged -- cmp "$1" "$tap/Casks/a2a.rb"
+	# Homebrew 7 refuses to load casks from an untrusted tap; the local test tap is trusted explicitly.
+	"$Q" check brew-trust-local-tap -- "$BREW" trust relux-works/q0
+}
+
+# q0_brew_preseed TOKEN FILE: put FILE where `brew --cache` says this cask's
+# download for the current OS lives. Homebrew still verifies its sha256 on
+# install. Used on Linux only, where v0.1.1 publishes no Linux assets.
+q0_brew_preseed() {
+	local dest
+	dest="$("$BREW" --cache --cask "relux-works/q0/$1")"
+	mkdir -p "$(dirname "$dest")"
+	cp "$2" "$dest"
+	"$Q" check "preseed-$1-at-brew-cache-path" -- test -s "$dest"
 }
 
 q0_brew_lint() {
@@ -39,7 +52,7 @@ q0_home_snapshot() {
 	find "$HOME" -print | LC_ALL=C sort >"$T/home-$1.txt"
 }
 
-# q0_tamper_negative CASKFILE OS: the same cask with every sha256 zeroed must
+# q0_tamper_negative CASKFILE OS [ARCHIVE]: the same cask with every sha256 zeroed must
 # be refused by a checksum mismatch, the intended reason, and leave nothing.
 q0_tamper_negative() {
 	local tap zero
@@ -47,8 +60,9 @@ q0_tamper_negative() {
 	zero=0000000000000000000000000000000000000000000000000000000000000000
 	sed -e 's/^cask "a2a" do/cask "a2a-tamper" do/' -E -e "s/sha256 \"[0-9a-f]{64}\"/sha256 \"$zero\"/" "$1" >"$tap/Casks/a2a-tamper.rb"
 	"$Q" check tamper-cask-has-only-zero-digests -- sh -c "! grep -E 'sha256 \"[0-9a-f]{64}\"' '$tap/Casks/a2a-tamper.rb' | grep -v '$zero'"
-	local domain=""
-	[ "$2" = linux ] && domain="HOMEBREW_ARTIFACT_DOMAIN=http://127.0.0.1:8765 HOMEBREW_ARTIFACT_DOMAIN_NO_FALLBACK=1"
-	"$Q" check install-refuses-wrong-sha256 -- sh -c "if env $domain '$BREW' install --cask relux-works/q0/a2a-tamper >'$T/tamper.log' 2>&1; then cat '$T/tamper.log'; exit 1; fi; cat '$T/tamper.log'; grep -Eqi 'sha.?256 mismatch|checksum.*(mismatch|does not match)' '$T/tamper.log'"
+	# On Linux the tampered cask's download is preseeded with the real archive,
+	# so the only possible refusal is the checksum, not a missing download.
+	[ "$2" = linux ] && q0_brew_preseed a2a-tamper "$3"
+	"$Q" check install-refuses-wrong-sha256 -- sh -c "if '$BREW' install --cask relux-works/q0/a2a-tamper >'$T/tamper.log' 2>&1; then cat '$T/tamper.log'; exit 1; fi; cat '$T/tamper.log'; grep -Eqi 'sha.?256 mismatch|checksum.*(mismatch|does not match)' '$T/tamper.log'"
 	"$Q" refuse tampered-install-left-no-binary -- test -e "$BREW_PREFIX/bin/a2a"
 }
