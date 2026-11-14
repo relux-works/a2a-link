@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/relux-works/a2a-swarm/internal/cg1cosign"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 )
 
@@ -91,7 +92,13 @@ func (a *App) readEnvelopeText(arg string) (string, error) {
 // the encoded envelope under the fixed content key. The event content is checked
 // against the published byte budget before anything is sent.
 func (s *session) sendThreadEnvelope(ctx context.Context, roomID, label string, h Header, text, encoded string, mentions []string) (string, error) {
+	return s.sendThreadEnvelopeCosignature(ctx, roomID, label, h, text, encoded, mentions, nil)
+}
+func (s *session) sendThreadEnvelopeCosignature(ctx context.Context, roomID, label string, h Header, text, encoded string, mentions []string, co any) (string, error) {
 	content := threadReply(h, mentions)
+	if co != nil {
+		content[cg1cosign.ContentKey] = co
+	}
 	content["msgtype"] = "m.text"
 	content["body"] = text
 	content[matrix.EnvelopeContentKey] = encoded
@@ -201,4 +208,41 @@ func readEnvelopeInput(ctx context.Context, a *App, room, event string) error {
 		err = io.ErrShortWrite
 	}
 	return err
+}
+
+// The fork carrier requires one explicit object file beside an envelope; only the admission policy authenticates it.
+func cosignaturePostSelection(args []string, operand string, envelope bool) error {
+	count := 0
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "="); strings.HasPrefix(arg, "-") && name == "cg1-cosignature" {
+			count++
+		}
+	}
+	if !envelope || count != 1 || !strings.HasPrefix(operand, "@") || len(operand) < 2 {
+		return usagef("--cg1-cosignature requires exactly one @file beside --envelope")
+	}
+	return nil
+}
+func (a *App) readCosignatureFile(operand string) (any, error) {
+	f, err := a.openInputFile(operand[1:])
+	if err != nil {
+		return nil, matrix.Refuse("cosignature_unreadable", "")
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 2049))
+	if err != nil || len(raw) > 2048 {
+		return nil, matrix.Refuse("cosignature_malformed", "")
+	}
+	value, err := matrix.ParseStrictJSON(raw)
+	if err != nil {
+		return nil, matrix.Refuse("cosignature_malformed", "")
+	}
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return nil, matrix.Refuse("cosignature_malformed", "")
+	}
+	return obj, nil
 }

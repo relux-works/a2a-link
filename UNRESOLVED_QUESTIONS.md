@@ -264,14 +264,20 @@ publication does not authorize installing or switching a live consumer. The appr
 release-standard integration; no duplicate standard or guessed pin is delivered here. See
 [the bounded release contract](docs/darwin-release.md).
 
-## G1-GATE-1: reviewed BIP-340 envelope profile needed
+## G1-GATE-1: Track A review and live acceptance
 
-The [catch-up and prerequisite record](docs/g1-gate-1.md) identifies the exact
-protocol mismatch: current waggle main specifies Ed25519 message authors and
-one carrier recipient id, while G1 Matrix admission requires the verifying
-BIP-340 sender key. A protected exact carrier-id/key pin is the proposed
-recipient source; it does not change the envelope signature algorithm. The
-protocol owner must supply or approve a reviewed sender profile, or explicitly
-change that acceptance requirement, including grant presentation carriage. Until then,
-Matrix CG1 remains refused at startup. Chain-lab PR #100 is an API input, not
-a wire-schema decision or live-grant acceptance evidence.
+The keeper's slice-1 addendum resolves the former sender-format blocker with a
+fork-only per-message BIP-340 co-signature over the unchanged Ed25519 envelope.
+The [Track A specification](docs/g1-gate-1.md) describes its exact bytes, protected
+pins/evidence, independent owner-DM route and fresh grantcheck calls. No shared
+envelope schema or algorithm changes. A reviewed BIP-340 author profile remains
+the future Track B, after the format owner's agreement.
+
+Grantcheck PR #100 is pinned at its explicitly authorized candidate head; its
+main re-pin remains after landing. Its transport provenance binding rejects
+old unpinned state; no migration or installed consumer adoption is performed.
+Source tests and a real constructor do not attest live grants. The optional
+PR #101 bench integration, two-consumer acceptance, J7 enforcing custody,
+native/deployment qualification, independent review and keeper landing remain
+outstanding. The host must provision authentic/current envelope snapshots and
+refresh their private evidence; the adapter neither fetches nor invents them.

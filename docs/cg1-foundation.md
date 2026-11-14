@@ -1,5 +1,12 @@
 # Nostr-only CG1 admission foundation
 
+The `cg1` factory described here remains Nostr-only. The separate
+[cg1-matrix Track A policy](g1-gate-1.md) uses the same seam with a verified
+Ed25519 envelope and a per-message BIP-340 co-signature. The modern grantcheck
+pin requires explicit W and rejects old unpinned state; no live migration is
+performed by this source change.
+
+
 This fork registers `cg1` through `RegisterNostrOnly` at build time. Matrix CLI
 and Courier sessions open with `Nostr:false`, so selecting cg1 there refuses
 startup before policy configuration, sends or uploads. The separate

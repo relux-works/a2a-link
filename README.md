@@ -81,13 +81,16 @@ without `ReceivedRawAtSize`, `raw_bounds/received` reports a named skip.
 
 The optional per-identity [admission interface](docs/admission.md) gates mailbox delivery and prepared message sends.
 The [G1-GATE-1 catch-up and prerequisites](docs/g1-gate-1.md) record the pinned
-upstream merge, the grantcheck interface and the unresolved Matrix wire profile.
+upstream merge, the co-signature specification, protected identity configuration
+and grantcheck dependency pins.
 This fork also links the [Nostr-only CG1 foundation](docs/cg1-foundation.md),
 with trusted-input/configuration contracts and exact validation commands.
 The [host-selected Nostr session](docs/nostr-session.md), using transport v0.3.0
 with strict JSON boundaries, supplies genuine NIP-17 post, sync, inbox and status
-with per-target checks on every retry. Matrix cannot
-select CG1; unsupported Nostr room/account/media commands refuse.
+with per-target checks on every retry. The separate `cg1-matrix` policy verifies
+unchanged Ed25519 envelopes plus the fork-only per-message BIP-340 co-signature,
+then checks the pinned v3 regtest grant backend. The `cg1` policy remains
+Nostr-only; unsupported Nostr room/account/media commands refuse.
 
 The default-off [agent pair DM](docs/agent-dm.md) supports exact host-admitted
 keeper/orchestrator pairs with explicit peer join and sole-recipient delivery:
@@ -102,6 +105,8 @@ scope admission remain separate from source delivery.
 
 | Tool | Purpose | How to run | Output |
 | --- | --- | --- | --- |
+| G1 fixture co-signature (Go) | Sign exact envelope bytes with public fixture keys only; carry the result beside an envelope | `go run -p 1 ./cmd/g1-fixture-sign --fixture bob --envelope envelope.json > cosignature.json`; `a2a post ROOM --topic TOPIC --envelope @envelope.json --cg1-cosignature @cosignature.json 'exact text'`; [specification](docs/g1-gate-1.md) | Public co-signature JSON at the caller's output path; no custody input or live grant claim |
+| G1 Matrix narrowing controls (Go source overlays) | Validate named refusal witnesses, restored positives and unchanged source hashes | `go run -p 1 ./.scripts/g1-matrix-mutants --root . --out .temp/g1-matrix-mutants` | Fresh task-owned `.temp/` JSON logs, child PID/exit records, source hashes and `results.json`; [limits](docs/g1-gate-1.md#validation-tools-and-limits) |
 | G1 catch-up checks (Go) | Check retained Nostr CG1, admission, carrier and daemon compatibility | [Focused commands and limits](docs/g1-gate-1.md#validation-tools) | JSON test logs and build diagnostics in task-owned `.temp/`; no Matrix admission qualification |
 | Nostr session checks (Go, loopback relay, isolated Core) | Verify real NIP-17 admission, recipient/retry guards and crash recovery | [Commands and limits](docs/nostr-session.md#validation-and-limits) | Test stdout and task-owned scratch; generated private custody excluded from delivery |
 | CG1 admission checks (Go) | Verify Nostr-only registration, real CG1/K1, refusal controls and frozen none bytes | [Exact commands and isolated Core prerequisites](docs/cg1-foundation.md#validation-tools-and-limits) | Test stdout; generated Core fixtures at explicit CG1_RUN_ROOT, private custody excluded from delivery |

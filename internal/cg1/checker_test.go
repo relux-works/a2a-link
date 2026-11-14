@@ -21,7 +21,7 @@ func (f nodeFunc) Call(c context.Context, m string, a ...any) (json.RawMessage, 
 }
 func testChecker(t *testing.T, node nodeFunc) *checker {
 	t.Helper()
-	core, e := grantcheck.New(grantcheck.Config{Identity: "alice", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), StateDir: stateDir(t), Node: node, Now: func() time.Time { return time.Unix(500, 0) }})
+	core, e := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: "alice", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), StateDir: stateDir(t), Node: node, Now: func() time.Time { return time.Unix(500, 0) }})
 	if e != nil {
 		t.Fatal(e)
 	}

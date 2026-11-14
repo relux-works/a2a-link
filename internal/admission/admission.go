@@ -69,10 +69,11 @@ type Checker interface {
 	Close() error
 }
 type Config struct {
-	Identity    string
-	StateDir    string
-	Nostr       bool
-	NostrPubkey string // Authenticated local transport identity, never a body claim.
+	Identity     string
+	StateDir     string
+	Nostr        bool
+	NostrPubkey  string // Authenticated local transport identity, never a body claim.
+	MatrixUserID string // Credential-bound local Matrix recipient; never a message field.
 }
 type Factory func(Config) (Checker, error)
 

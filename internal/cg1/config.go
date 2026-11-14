@@ -83,7 +83,7 @@ func open(c admission.Config) (admission.Checker, error) {
 		return nil, errConfig
 	}
 	sr.Close()
-	core, err := grantcheck.New(grantcheck.Config{Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: state, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond})
+	core, err := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: state, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond})
 	if err != nil {
 		return nil, errConfig
 	}

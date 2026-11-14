@@ -208,3 +208,10 @@ closed reason vocabulary with CG1 codes. See [the foundation contract](cg1-found
 for trusted Nostr tuple provenance, provisioning, deadlines, F1/F2/F3 boundaries
 and the independent upstream none-byte fixtures. Matrix sessions retain
 Nostr:false and refuse CG1 startup; no Nostr engine is wired by this unit.
+
+The separate downstream `cg1-matrix` factory verifies the unchanged Ed25519
+swarm envelope and fork-only per-message BIP-340 co-signature before grantcheck.
+Its `Config.MatrixUserID` comes from authenticated session credentials, never
+a message. The protected owner-DM route is handled by the authenticated session
+outside peer admission. See the [Track A specification](g1-gate-1.md) for exact
+bytes, W configuration, source pins, refusal controls and validation limits.

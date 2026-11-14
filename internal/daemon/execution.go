@@ -125,7 +125,7 @@ func Authorize(argv []string, identity string) (Plan, error) {
 		}
 		start = 2
 	case "post":
-		values = "topic kind re to reply-by trunk subtype subject operation-id envelope"
+		values = "topic kind re to reply-by trunk subtype subject operation-id envelope cg1-cosignature"
 		bools = "reply-main json"
 		minPos = 2
 		maxPos = 256
@@ -220,6 +220,7 @@ func Authorize(argv []string, identity string) (Plan, error) {
 		return false
 	}
 	var pos []int
+	envelopeCount, cosignatureCount := 0, 0
 	literal := false
 	for i := start; i < len(rest); i++ {
 		arg := rest[i]
@@ -237,6 +238,14 @@ func Authorize(argv []string, identity string) (Plan, error) {
 			}
 			if !allowed(values, name) {
 				return p, errRefused
+			}
+			if p.Command == "post" {
+				if name == "envelope" {
+					envelopeCount++
+				}
+				if name == "cg1-cosignature" {
+					cosignatureCount++
+				}
 			}
 			vi := i
 			if !eq {
@@ -257,19 +266,22 @@ func Authorize(argv []string, identity string) (Plan, error) {
 				}
 				waitTimeout = d
 			}
-			if (p.Command == "topic" && name == "body" || p.Command == "post" && name == "envelope" || p.Command == "inbox" && name == "from") && strings.HasPrefix(value, "@") {
+			if (p.Command == "topic" && name == "body" || p.Command == "post" && (name == "envelope" || name == "cg1-cosignature") || p.Command == "inbox" && name == "from") && strings.HasPrefix(value, "@") {
 				p.Inputs[indices[vi]] = false
 			}
 			// inbox show --from is a path, so only explicit streamed @input is admitted.
 			if p.Command == "inbox" && name == "from" && !strings.HasPrefix(value, "@") {
 				return p, errRefused
 			}
-			if p.Command == "post" && name == "envelope" && !strings.HasPrefix(value, "@") {
+			if p.Command == "post" && (name == "envelope" || name == "cg1-cosignature") && !strings.HasPrefix(value, "@") {
 				return p, errRefused
 			}
 			continue
 		}
 		pos = append(pos, i)
+	}
+	if p.Command == "post" && cosignatureCount > 0 && (cosignatureCount != 1 || envelopeCount != 1) {
+		return p, errRefused
 	}
 	if len(pos) < minPos || len(pos) > maxPos {
 		return p, errRefused

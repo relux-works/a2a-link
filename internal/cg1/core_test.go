@@ -42,7 +42,7 @@ func TestCoreAdmission(t *testing.T) {
 	if e = os.Mkdir(kdir, 0700); e != nil {
 		t.Fatal(e)
 	}
-	k, e := kernelbind.New(l.observer, kdir, e2eAgentName, e2eLandlordName, l.issuerPub)
+	k, e := kernelbind.New(l.observer, kdir, e2eAgentName, e2eLandlordName, l.issuerPub, "W")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -55,7 +55,7 @@ func TestCoreAdmission(t *testing.T) {
 		if e = os.Mkdir(dir, 0700); e != nil {
 			t.Fatal(e)
 		}
-		core, e := grantcheck.New(grantcheck.Config{Identity: label, AgentName: e2eAgentName, LandlordName: e2eLandlordName, IssuerPubkey: l.issuerPub, StateDir: dir, Node: l.observer, Now: func() time.Time { return time.Unix(now, 0) }})
+		core, e := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: label, AgentName: e2eAgentName, LandlordName: e2eLandlordName, IssuerPubkey: l.issuerPub, StateDir: dir, Node: l.observer, Now: func() time.Time { return time.Unix(now, 0) }})
 		if e != nil {
 			t.Fatal(e)
 		}

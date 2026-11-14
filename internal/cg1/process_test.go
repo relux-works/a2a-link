@@ -36,7 +36,7 @@ func TestProcessSafety(t *testing.T) {
 		t.Fatal("parent did not release child")
 	}
 	root := stateDir(t)
-	core, e := grantcheck.New(grantcheck.Config{Identity: "alice", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), StateDir: root, Now: func() time.Time { return time.Unix(500, 0) }, Node: nodeFunc(func(context.Context, string, ...any) (json.RawMessage, error) { return nil, errors.New("unused") })})
+	core, e := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: "alice", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), StateDir: root, Now: func() time.Time { return time.Unix(500, 0) }, Node: nodeFunc(func(context.Context, string, ...any) (json.RawMessage, error) { return nil, errors.New("unused") })})
 	if e != nil {
 		t.Fatal(e)
 	}

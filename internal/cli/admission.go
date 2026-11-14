@@ -14,10 +14,11 @@ import (
 )
 
 type identityAdmission struct {
-	mu      sync.Mutex
-	checker admission.Checker
-	store   admission.Store
-	none    bool
+	mu          sync.Mutex
+	checker     admission.Checker
+	store       admission.Store
+	none        bool
+	ownerBypass func(context.Context, string, string, bool) bool
 }
 
 func (a *App) closeAdmission() {
@@ -37,11 +38,14 @@ func (s *session) openAdmission() error {
 		return errors.New("admission: identity_invalid")
 	}
 	dir := filepath.Join(s.paths.Base, "admission", s.name)
-	c, err := admission.Open(name, admission.Config{Identity: s.name, StateDir: dir, Nostr: false})
+	c, err := admission.Open(name, admission.Config{Identity: s.name, StateDir: dir, Nostr: false, MatrixUserID: s.creds.UserID})
 	if err != nil {
 		return err
 	}
 	s.admission = &identityAdmission{checker: c, store: admission.Store{Dir: dir}, none: name == "none"}
+	if name == "cg1-matrix" {
+		s.admission.ownerBypass = s.ownerAdmissionBypass
+	}
 	s.app.admissionSessions = append(s.app.admissionSessions, s.admission)
 	if !s.admission.none {
 		s.client.BeforeSend = s.checkOutbound
@@ -53,11 +57,17 @@ func (s *session) openAdmission() error {
 func (p *identityAdmission) Inbound(ctx context.Context, in admission.Inbound) (admission.Decision, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.ownerBypass != nil && p.ownerBypass(ctx, in.RoomID, in.Sender, true) {
+		return admission.Decision{Verdict: admission.Live, Reason: "allowed"}, nil
+	}
 	return p.checker.Inbound(ctx, in)
 }
 func (p *identityAdmission) Outbound(ctx context.Context, out admission.Outbound) (admission.Decision, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.ownerBypass != nil && p.ownerBypass(ctx, out.RoomID, "", false) {
+		return admission.Decision{Verdict: admission.Live, Reason: "allowed"}, nil
+	}
 	return p.checker.Outbound(ctx, out)
 }
 func (p *identityAdmission) Close() error { return nil } // Owned by App, not Store.Process.
@@ -170,4 +180,22 @@ func cmdAdmissionStatus(ctx context.Context, a *App, args []string) error {
 	return json.NewEncoder(a.Stdout).Encode(struct {
 		Counts map[string]uint64 `json:"counts"`
 	}{counts})
+}
+
+// ownerAdmissionBypass uses existing protected owner pins and current exact private audience, never event claims.
+func (s *session) ownerAdmissionBypass(ctx context.Context, room, sender string, inbound bool) bool {
+	if ctx == nil || ctx.Err() != nil {
+		return false
+	}
+	f := ownerFiles(s.paths, s.name)
+	pin := f.pin()
+	c, _, err := f.load()
+	if err != nil || c == nil || !c.Active || pin.Owner == "" || pin.Owner != c.Owner || c.Room != room {
+		return false
+	}
+	if inbound && sender != pin.Owner {
+		return false
+	}
+	joined, err := s.ownerAudience(ctx, room, pin.Owner, false)
+	return err == nil && joined && ctx.Err() == nil
 }
