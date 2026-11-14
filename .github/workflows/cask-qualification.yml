@@ -1,0 +1,273 @@
+# Qualify the mixed a2a Homebrew cask and the Linux packages with the real
+# pinned tools, BEFORE any production release code. Qualification only:
+# read-only token, no secrets, no release, tag or tap write. Everything is
+# installed into throwaway prefixes under RUNNER_TEMP or into disposable
+# containers. Each assertion leaves one result JSON; the artifacts carry them.
+name: Cask qualification
+on:
+  pull_request:
+    paths:
+      - .github/cask-qualification/**
+      - .github/workflows/cask-qualification.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cask-qualification-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  FIXTURE_TAG: v0.1.1
+  FIXTURE_COMMIT: 3c3c3d1c8c6fd8386fa4a740dbdb6f99a92bb8d1
+  DARWIN_ASSET: a2a_0.1.1_darwin_arm64.tar.gz
+  DARWIN_SHA256: bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7
+  GORELEASER_VERSION: v2.20.2
+  GORELEASER_LINUX_SHA256: f3d24969a7389a46613875711d15a96d8f6ef1553d84c6ace09d69ac1e7d44c0
+  BREW_TAG: 7.0.13
+  BREW_COMMIT: bc63375ac3a4d6debb1ceb441ae6e22854f0909a
+  GO_FLAGS_NOTE: "-trimpath -buildvcs=false -buildmode=exe -compiler=gc -pgo=off -ldflags=-linkmode=internal -libgcc=none"
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+jobs:
+  packaging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      Q0_JOB: packaging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - name: Build Linux archives, packages and the cask (publication skipped)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export Q0_RESULTS="$RUNNER_TEMP/q0-results"
+          Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
+          T="$RUNNER_TEMP"
+          # The fixture source is the immutable v0.1.1 tag; the qualification config stays outside it.
+          git worktree add --detach "$T/src" "$FIXTURE_TAG"
+          "$Q" check fixture-source-is-v0.1.1 -- test "$(git -C "$T/src" rev-parse HEAD)" = "$FIXTURE_COMMIT"
+          curl -fsSL -o "$T/goreleaser.tgz" "https://github.com/goreleaser/goreleaser/releases/download/$GORELEASER_VERSION/goreleaser_Linux_x86_64.tar.gz"
+          "$Q" check goreleaser-pinned-checksum -- sh -c "echo '$GORELEASER_LINUX_SHA256  $T/goreleaser.tgz' | sha256sum -c -"
+          mkdir -p "$T/goreleaser" && tar -xzf "$T/goreleaser.tgz" -C "$T/goreleaser" goreleaser
+          "$Q" check goreleaser-version -- sh -c "'$T/goreleaser/goreleaser' --version | tee /dev/stderr | grep -q 'GitVersion:.*2.20.2'"
+          curl -fsSL -o "$T/$DARWIN_ASSET" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/$DARWIN_ASSET"
+          curl -fsSL -o "$T/checksums.txt" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/checksums.txt"
+          "$Q" check darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | sha256sum -c -"
+          "$Q" check darwin-fixture-in-published-checksums -- grep -qx "$DARWIN_SHA256  $DARWIN_ASSET" "$T/checksums.txt"
+          export A2A_DARWIN_ARM64_SHA256="$DARWIN_SHA256"
+          "$Q" check goreleaser-render-only-release -- sh -c "cd '$T/src' && '$T/goreleaser/goreleaser' release --config '$GITHUB_WORKSPACE/.github/cask-qualification/goreleaser.yml' --clean --skip=publish,announce,sign,sbom > '$T/goreleaser.log' 2>&1; rc=\$?; cat '$T/goreleaser.log'; exit \$rc"
+          D="$T/src/dist"
+          for f in a2a_0.1.1_linux_amd64.tar.gz a2a_0.1.1_linux_arm64.tar.gz a2a_0.1.1_amd64.deb a2a_0.1.1_arm64.deb a2a-0.1.1-1.x86_64.rpm a2a-0.1.1-1.aarch64.rpm linux-checksums.txt homebrew/Casks/a2a.rb; do
+            "$Q" check "dist-has-$(echo "$f" | tr '/' '_')" -- test -s "$D/$f"
+          done
+          "$Q" refuse dist-has-no-darwin-build -- sh -c "ls '$D' | grep -i darwin"
+          "$Q" skip sbom "SBOM generation is a production packaging step (pinned Syft); this run qualifies the cask and packages only."
+          C="$D/homebrew/Casks/a2a.rb"
+          cat "$C" || true
+          "$Q" check cask-version-0.1.1 -- grep -qx '  version "0.1.1"' "$C"
+          "$Q" check cask-darwin-original-url -- grep -qF 'url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"' "$C"
+          "$Q" check cask-darwin-verified-sha256 -- grep -qF "sha256 \"$DARWIN_SHA256\"" "$C"
+          "$Q" check cask-darwin-companion-in-macos-block -- python3 -I "$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py" companion "$C"
+          "$Q" check cask-linux-sha256-match-linux-checksums -- python3 -I "$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py" linux "$C" "$D/linux-checksums.txt"
+          "$Q" refuse cask-not-macos-only -- grep -q 'depends_on :macos' "$C"
+          "$Q" refuse cask-no-quarantine-or-hooks -- grep -qE 'quarantine|xattr|preflight|postflight|service ' "$C"
+          for a in amd64 arm64; do
+            mkdir -p "$T/x-$a" && tar -xzf "$D/a2a_0.1.1_linux_$a.tar.gz" -C "$T/x-$a"
+          done
+          "$Q" check linux-amd64-static-elf -- sh -c "file '$T/x-amd64/a2a' | tee /dev/stderr | grep -q 'ELF 64-bit.*x86-64.*statically linked'"
+          "$Q" check linux-arm64-static-elf -- sh -c "file '$T/x-arm64/a2a' | tee /dev/stderr | grep -q 'ELF 64-bit.*ARM aarch64.*statically linked'"
+          mkdir -p "$T/out"
+          cp "$D"/a2a_0.1.1_linux_*.tar.gz "$D"/*.deb "$D"/*.rpm "$D/linux-checksums.txt" "$C" "$T/goreleaser.log" "$T/out/"
+          cp -R "$Q0_RESULTS" "$T/out/results"
+      - name: Verdict
+        if: always()
+        shell: bash
+        run: Q0_RESULTS="$RUNNER_TEMP/q0-results" .github/cask-qualification/q0.sh verdict
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: q0-packaging
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/q0-results
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-brew:
+    needs: packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      Q0_JOB: linux-brew
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: q0-packaging
+          path: ${{ runner.temp }}/in
+      - name: Pinned Homebrew in a throwaway prefix; style, readall, audit, install, uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          export Q0_RESULTS="$T/q0-results"
+          Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
+          . "$GITHUB_WORKSPACE/.github/cask-qualification/brew-env.sh"
+          q0_brew_setup
+          q0_brew_tap "$T/in/a2a.rb"
+          q0_brew_lint
+          # The Linux archives are not published under v0.1.1, so the install
+          # downloads them from a local mirror of the same URLs. The cask is
+          # byte-for-byte the one under test; only the transport is redirected.
+          M="$T/mirror/https:/github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG"
+          mkdir -p "$M" && cp "$T"/in/a2a_0.1.1_linux_*.tar.gz "$M/"
+          ( cd "$T/mirror" && python3 -m http.server 8765 --bind 127.0.0.1 >"$T/mirror.log" 2>&1 & echo $! >"$T/mirror.pid" )
+          sleep 2
+          mkdir -p "$T/x" && tar -xzf "$T/in/a2a_0.1.1_linux_amd64.tar.gz" -C "$T/x"
+          q0_home_snapshot before
+          "$Q" check install-linux -- env HOMEBREW_ARTIFACT_DOMAIN=http://127.0.0.1:8765 HOMEBREW_ARTIFACT_DOMAIN_NO_FALLBACK=1 "$BREW" install --cask relux-works/q0/a2a
+          "$Q" check installed-a2a-is-archive-binary -- cmp "$BREW_PREFIX/bin/a2a" "$T/x/a2a"
+          "$Q" refuse no-darwin-companion-on-linux -- test -e "$BREW_PREFIX/bin/a2a-keychain-status"
+          "$Q" check installed-a2a-runs-help -- "$BREW_PREFIX/bin/a2a" help
+          "$Q" check uninstall-linux -- "$BREW" uninstall --cask relux-works/q0/a2a
+          "$Q" refuse uninstall-removed-binary -- test -e "$BREW_PREFIX/bin/a2a"
+          q0_home_snapshot after
+          "$Q" check home-unchanged-by-install-and-uninstall -- diff -u "$T/home-before.txt" "$T/home-after.txt"
+          q0_tamper_negative "$T/in/a2a.rb" linux
+          kill "$(cat "$T/mirror.pid")" || true
+          mkdir -p "$T/out" && cp -R "$Q0_RESULTS" "$T/out/results" && cp "$T/mirror.log" "$T/out/" || true
+      - name: Verdict
+        if: always()
+        shell: bash
+        run: Q0_RESULTS="$RUNNER_TEMP/q0-results" .github/cask-qualification/q0.sh verdict
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: q0-linux-brew
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/q0-results
+          retention-days: 14
+
+  linux-packages:
+    needs: packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      Q0_JOB: linux-packages
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: q0-packaging
+          path: ${{ runner.temp }}/in
+      - name: deb and rpm in disposable containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          export Q0_RESULTS="$T/q0-results"
+          Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
+          for a in amd64 arm64; do mkdir -p "$T/in/ref-$a" && tar -xzf "$T/in/a2a_0.1.1_linux_$a.tar.gz" -C "$T/in/ref-$a" a2a; done
+          S="$GITHUB_WORKSPACE/.github/cask-qualification/pkg_check.sh"
+          docker pull -q debian:bookworm-slim && docker pull -q fedora:41
+          docker image inspect --format '{{.RepoDigests}}' debian:bookworm-slim fedora:41 | tee "$T/images.txt"
+          "$Q" check deb-amd64-install-uninstall -- docker run --rm --network none -v "$T/in:/in:ro" -v "$S:/check.sh:ro" debian:bookworm-slim sh /check.sh deb /in/a2a_0.1.1_amd64.deb /in/ref-amd64/a2a
+          "$Q" check rpm-amd64-install-uninstall -- docker run --rm --network none -v "$T/in:/in:ro" -v "$S:/check.sh:ro" fedora:41 sh /check.sh rpm /in/a2a-0.1.1-1.x86_64.rpm /in/ref-amd64/a2a
+          "$Q" check deb-arm64-metadata-and-binary -- sh -c "test \"\$(dpkg-deb -f '$T/in/a2a_0.1.1_arm64.deb' Architecture)\" = arm64 && dpkg-deb --fsys-tarfile '$T/in/a2a_0.1.1_arm64.deb' | tar -xO ./usr/bin/a2a | cmp - '$T/in/ref-arm64/a2a'"
+          "$Q" check rpm-arm64-metadata-and-binary -- docker run --rm --network none -v "$T/in:/in:ro" -v "$S:/check.sh:ro" fedora:41 sh /check.sh rpm-meta /in/a2a-0.1.1-1.aarch64.rpm /in/ref-arm64/a2a aarch64
+          "$Q" refuse deb-rejects-tampered-binary -- docker run --rm --network none -v "$T/in:/in:ro" -v "$S:/check.sh:ro" debian:bookworm-slim sh /check.sh deb /in/a2a_0.1.1_amd64.deb /in/ref-arm64/a2a
+          mkdir -p "$T/out" && cp -R "$Q0_RESULTS" "$T/out/results" && cp "$T/images.txt" "$T/out/"
+      - name: Verdict
+        if: always()
+        shell: bash
+        run: Q0_RESULTS="$RUNNER_TEMP/q0-results" .github/cask-qualification/q0.sh verdict
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: q0-linux-packages
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/q0-results
+          retention-days: 14
+
+  macos:
+    needs: packaging
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      Q0_JOB: macos
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: q0-packaging
+          path: ${{ runner.temp }}/in
+      - name: Linux reproducibility, then the pinned Homebrew cask cycle on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          export Q0_RESULTS="$T/q0-results"
+          Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
+          # Independent cross-build of the Linux binaries on macOS, same source and flags.
+          git worktree add --detach "$T/src" "$FIXTURE_TAG"
+          for a in amd64 arm64; do
+            mkdir -p "$T/x-$a" && tar -xzf "$T/in/a2a_0.1.1_linux_$a.tar.gz" -C "$T/x-$a" a2a
+            ( cd "$T/src" && GOOS=linux GOARCH=$a CGO_ENABLED=0 go build -trimpath -buildvcs=false -buildmode=exe -compiler=gc -pgo=off -ldflags='-linkmode=internal -libgcc=none' -o "$T/cross-$a" ./cmd/a2a )
+            "$Q" check "linux-$a-reproducible-from-macos" -- cmp "$T/cross-$a" "$T/x-$a/a2a"
+          done
+          cp "$T/cross-amd64" "$T/altered" && printf '\001' | dd of="$T/altered" bs=1 seek=4096 conv=notrunc 2>/dev/null
+          "$Q" refuse reproducibility-detects-altered-binary -- cmp "$T/altered" "$T/x-amd64/a2a"
+          # The original notarised Darwin fixture.
+          curl -fsSL -o "$T/$DARWIN_ASSET" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/$DARWIN_ASSET"
+          "$Q" check darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | shasum -a 256 -c -"
+          mkdir -p "$T/d" && tar -xzf "$T/$DARWIN_ASSET" -C "$T/d"
+          . "$GITHUB_WORKSPACE/.github/cask-qualification/brew-env.sh"
+          q0_brew_setup
+          q0_brew_tap "$T/in/a2a.rb"
+          q0_brew_lint
+          "$Q" check audit-online-macos -- "$BREW" audit --cask --strict --online relux-works/q0/a2a
+          "$Q" check intel-macos-refused -- sh -c "'$BREW' info --cask --json=v2 --variations relux-works/q0/a2a > '$T/info.json' && python3 -I '$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py' intel '$T/info.json'"
+          q0_home_snapshot before
+          "$Q" check install-macos -- "$BREW" install --cask relux-works/q0/a2a
+          "$Q" check installed-a2a-is-notarised-original -- cmp "$BREW_PREFIX/bin/a2a" "$T/d/a2a"
+          "$Q" check installed-companion-is-original -- cmp "$BREW_PREFIX/bin/a2a-keychain-status" "$T/d/a2a-keychain-status"
+          "$Q" check installed-a2a-signature-verifies -- codesign --verify --strict --verbose=2 "$BREW_PREFIX/bin/a2a"
+          "$Q" check downloaded-darwin-archive-unchanged -- sh -c "f=\$(ls '$HOMEBREW_CACHE'/downloads/*--$DARWIN_ASSET) && echo \"$DARWIN_SHA256  \$f\" | shasum -a 256 -c -"
+          "$Q" skip installed-a2a-execution "Not executed on macOS: the qualification never runs the Keychain-capable binary; bytes and signature are compared instead."
+          "$Q" check uninstall-macos -- "$BREW" uninstall --cask relux-works/q0/a2a
+          "$Q" refuse uninstall-removed-binaries -- sh -c "test -e '$BREW_PREFIX/bin/a2a' || test -e '$BREW_PREFIX/bin/a2a-keychain-status'"
+          q0_home_snapshot after
+          "$Q" check home-unchanged-by-install-and-uninstall -- diff -u "$T/home-before.txt" "$T/home-after.txt"
+          q0_tamper_negative "$T/in/a2a.rb" macos
+          mkdir -p "$T/out" && cp -R "$Q0_RESULTS" "$T/out/results" && cp "$T/info.json" "$T/out/" || true
+      - name: Verdict
+        if: always()
+        shell: bash
+        run: Q0_RESULTS="$RUNNER_TEMP/q0-results" .github/cask-qualification/q0.sh verdict
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: q0-macos
+          path: |
+            ${{ runner.temp }}/out
+            ${{ runner.temp }}/q0-results
+          retention-days: 14

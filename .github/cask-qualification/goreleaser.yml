@@ -1,0 +1,86 @@
+# Qualification only. This is NOT a release configuration: it is run with
+# every publication step skipped, from a checkout of the immutable v0.1.1 tag,
+# to qualify the mixed Homebrew cask (GoReleaser-built Linux archives plus the
+# already notarised a2a Darwin asset) with the real pinned tools.
+version: 2
+
+project_name: a2a
+
+builds:
+  - id: a2a
+    main: ./cmd/a2a
+    binary: a2a
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+      - -buildvcs=false
+      - -buildmode=exe
+      - -compiler=gc
+      - -pgo=off
+    # Replaces GoReleaser's default -s -w -X ldflags: no stripping and no
+    # version injection, matching the portable descriptor.
+    ldflags:
+      - -linkmode=internal -libgcc=none
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: linux
+    ids: [a2a]
+    formats: [tar.gz]
+    name_template: "a2a_{{ .Version }}_linux_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+
+checksum:
+  name_template: linux-checksums.txt
+
+nfpms:
+  - id: packages
+    ids: [a2a]
+    package_name: a2a
+    vendor: Relux Works, LLC
+    homepage: https://github.com/relux-works/a2a-swarm
+    maintainer: Relux Works, LLC
+    description: Agent-to-agent messaging CLI
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    file_name_template: "{{ .ConventionalFileName }}"
+
+homebrew_casks:
+  - name: a2a
+    ids: [linux]
+    # Render-only: the cask is written to dist/homebrew/Casks and never pushed
+    # (publication is skipped). The repository is named only because
+    # GoReleaser skips cask generation without it.
+    repository:
+      owner: relux-works
+      name: homebrew-tap
+    directory: Casks
+    homepage: https://github.com/relux-works/a2a-swarm
+    description: Agent-to-agent messaging CLI
+    license: Apache-2.0
+    skip_upload: auto
+    binaries: [a2a]
+    url:
+      template: "https://github.com/relux-works/a2a-swarm/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    # The Darwin stanza points at the original notarised a2a asset. Its digest
+    # comes from the verified public checksums.txt, passed in by the workflow;
+    # nothing here builds, repackages or re-signs Darwin bytes.
+    custom_block: |
+      on_macos do
+        depends_on arch: :arm64
+        url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"
+        sha256 "{{ .Env.A2A_DARWIN_ARM64_SHA256 }}"
+        binary "a2a-keychain-status"
+      end
+
+release:
+  disable: true
+
+changelog:
+  disable: true
