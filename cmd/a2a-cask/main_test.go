@@ -119,6 +119,19 @@ func TestRunRefusals(t *testing.T) {
 		}
 		noOutput(t, dir)
 	})
+	t.Run("manifest key case alias", func(t *testing.T) {
+		dir, args := fixture(t)
+		path := filepath.Join(dir, "release-assets.json")
+		raw, _ := os.ReadFile(path)
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), `"sha256"`, `"SHA256"`, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := run(args, io.Discard, accept)
+		if err == nil || !strings.HasPrefix(err.Error(), "manifest-malformed") {
+			t.Fatalf("got %v", err)
+		}
+		noOutput(t, dir)
+	})
 	t.Run("checksum name with a path", func(t *testing.T) {
 		dir, args := fixture(t)
 		f, err := os.OpenFile(filepath.Join(dir, "checksums.txt"), os.O_APPEND|os.O_WRONLY, 0)

@@ -3,7 +3,8 @@
 //
 // The package holds the pure parts of the derivation; the gated entry point
 // is cmd/a2a-cask, which verifies the manifest's signature first.
-//   - ParseManifest validates a closed schema: exact keys, the exact member
+//   - ParseManifest validates a closed schema: exact keys, spelled exactly and
+//     each once at both levels, the exact member
 //     names for the tag, fixed repository URLs, the required architectures,
 //     the digest form, a stable version and its agreement with the tag.
 //   - Bind requires every archive the cask references to match both the
@@ -85,9 +86,102 @@ func members(version string) (required []string, allowed map[string]bool) {
 	return required, allowed
 }
 
+var (
+	topKeys   = map[string]bool{"schema": true, "tag": true, "commit": true, "version": true, "assets": true}
+	assetKeys = map[string]bool{"name": true, "url": true, "sha256": true}
+)
+
+func expectDelim(dec *json.Decoder, want json.Delim) error {
+	t, err := dec.Token()
+	if d, ok := t.(json.Delim); err != nil || !ok || d != want {
+		return fmt.Errorf("manifest-malformed: want %q", want)
+	}
+	return nil
+}
+
+func objectKey(dec *json.Decoder) (string, error) {
+	t, err := dec.Token()
+	k, ok := t.(string)
+	if err != nil || !ok {
+		return "", errors.New("manifest-malformed: key")
+	}
+	return k, nil
+}
+
+// exactKeys walks the raw JSON and requires exactly the schema's keys, spelled
+// exactly, each once, at both levels. encoding/json matches field names case-
+// insensitively and lets a duplicate key overwrite, so the typed decode alone
+// would accept "SCHEMA" or a second "sha256".
+func exactKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := expectDelim(dec, '{'); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		k, err := objectKey(dec)
+		if err != nil {
+			return err
+		}
+		if !topKeys[k] || seen[k] {
+			return fmt.Errorf("manifest-malformed: key %q", k)
+		}
+		seen[k] = true
+		if k != "assets" {
+			var v json.RawMessage
+			if err := dec.Decode(&v); err != nil {
+				return errors.New("manifest-malformed: value")
+			}
+			continue
+		}
+		if err := expectDelim(dec, '['); err != nil {
+			return err
+		}
+		for dec.More() {
+			if err := expectDelim(dec, '{'); err != nil {
+				return err
+			}
+			aseen := map[string]bool{}
+			for dec.More() {
+				ak, err := objectKey(dec)
+				if err != nil {
+					return err
+				}
+				if !assetKeys[ak] || aseen[ak] {
+					return fmt.Errorf("manifest-malformed: asset key %q", ak)
+				}
+				aseen[ak] = true
+				var v json.RawMessage
+				if err := dec.Decode(&v); err != nil {
+					return errors.New("manifest-malformed: value")
+				}
+			}
+			if err := expectDelim(dec, '}'); err != nil {
+				return err
+			}
+			if len(aseen) != len(assetKeys) {
+				return errors.New("manifest-malformed: asset keys missing")
+			}
+		}
+		if err := expectDelim(dec, ']'); err != nil {
+			return err
+		}
+	}
+	if err := expectDelim(dec, '}'); err != nil {
+		return err
+	}
+	if len(seen) != len(topKeys) {
+		return errors.New("manifest-malformed: keys missing")
+	}
+	return nil
+}
+
 // ParseManifest decodes and validates raw manifest bytes. Call it only after
 // the bytes have passed the authenticity gate.
 func ParseManifest(raw []byte) (Manifest, error) {
+	if err := exactKeys(raw); err != nil {
+		return Manifest{}, err
+	}
 	var m Manifest
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()

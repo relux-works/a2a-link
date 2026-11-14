@@ -119,6 +119,8 @@ jobs:
           "$Q" check renderer-refuses-missing-asset -- refused missing "asset-missing: a2a_0.1.1_linux_arm64.tar.gz"
           fixture unknown --add a2a.rb=1111111111111111111111111111111111111111111111111111111111111111
           "$Q" check renderer-refuses-unknown-member -- refused unknown 'manifest-member-unknown: "a2a.rb"'
+          fixture casealias --case-alias-asset-key SHA256
+          "$Q" check renderer-refuses-case-alias-key -- refused casealias 'manifest-malformed: asset key "SHA256"'
           fixture prerelease --version 0.1.2-rc.1
           "$Q" check renderer-refuses-prerelease -- refused prerelease "version-not-stable"
           cp "$T/fx/good.json" "$T/fx/good-manifest.json"

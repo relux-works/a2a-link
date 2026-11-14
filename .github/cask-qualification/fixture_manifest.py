@@ -29,6 +29,7 @@ def main():
     p.add_argument("--set-digest", action="append", default=[])
     p.add_argument("--add", action="append", default=[])
     p.add_argument("--version")
+    p.add_argument("--case-alias-asset-key", help="rename the first asset's sha256 key to this spelling")
     a = p.parse_args()
     sums = {}
     for path in a.checksums:
@@ -52,9 +53,11 @@ def main():
         name, digest = kv.split("=", 1)
         assets.append({"name": name, "url": BASE + tag + "/" + name, "sha256": digest})
     manifest = {"schema": "a2a-release-assets/1", "tag": tag, "commit": a.commit, "version": version, "assets": assets}
+    text = json.dumps(manifest, indent=1, sort_keys=True) + "\n"
+    if a.case_alias_asset_key:
+        text = text.replace('"sha256":', '"' + a.case_alias_asset_key + '":', 1)
     with open(a.out, "w") as f:
-        json.dump(manifest, f, indent=1, sort_keys=True)
-        f.write("\n")
+        f.write(text)
 
 
 if __name__ == "__main__":

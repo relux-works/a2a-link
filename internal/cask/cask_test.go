@@ -111,7 +111,17 @@ func TestParseManifestRefusals(t *testing.T) {
 		"uppercase digest":      {edit: func(m *Manifest) { m.Assets[1].SHA256 = strings.ToUpper(digest('b')) }, want: "digest-malformed: " + la},
 		"unknown top-level key": {raw: func(b []byte) []byte { return append([]byte(`{"extra":1,`), b[1:]...) }, want: "manifest-malformed"},
 		"unknown asset key":     {raw: func(b []byte) []byte { return []byte(strings.Replace(string(b), `"sha256"`, `"size":1,"sha256"`, 1)) }, want: "manifest-malformed"},
-		"trailing data":         {raw: func(b []byte) []byte { return append(b, []byte(" {}")...) }, want: "manifest-malformed: trailing data"},
+		"trailing data":         {raw: func(b []byte) []byte { return append(b, []byte(" {}")...) }, want: "manifest-malformed"},
+		// encoding/json alone matches keys case-insensitively and lets a
+		// duplicate overwrite; the exact-key walk refuses each of these.
+		"top-level case alias":    {raw: func(b []byte) []byte { return []byte(strings.Replace(string(b), `"schema"`, `"SCHEMA"`, 1)) }, want: `manifest-malformed: key "SCHEMA"`},
+		"asset case alias":        {raw: func(b []byte) []byte { return []byte(strings.Replace(string(b), `"sha256"`, `"SHA256"`, 1)) }, want: `manifest-malformed: asset key "SHA256"`},
+		"asset mixed-case alias":  {raw: func(b []byte) []byte { return []byte(strings.Replace(string(b), `"name"`, `"Name"`, 1)) }, want: `manifest-malformed: asset key "Name"`},
+		"duplicate top-level key": {raw: func(b []byte) []byte { return append([]byte(`{"tag":"v0.1.1",`), b[1:]...) }, want: `manifest-malformed: key "tag"`},
+		"duplicate asset key": {raw: func(b []byte) []byte {
+			return []byte(strings.Replace(string(b), `"sha256":`, `"sha256":"`+digest('f')+`","sha256":`, 1))
+		}, want: `manifest-malformed: asset key "sha256"`},
+		"missing top-level key": {raw: func(b []byte) []byte { return []byte(strings.Replace(string(b), `"commit":"`+testCommit+`",`, "", 1)) }, want: "manifest-malformed: keys missing"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
