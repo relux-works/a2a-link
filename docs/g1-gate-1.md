@@ -160,6 +160,10 @@ rollback below its durable watermark, and supplies the qualified sample to the
 verifier. It does not synthesize trusted/fresh or current-generation assertions.
 Signed snapshot age remains at most the existing 60-second limit. There is no
 automatic evidence fetch: refresh the private host evidence or admission holds.
+All supported evidence slots and their nested field types are validated at startup;
+unknown slots and malformed root, generation, revocation, time or optional device
+facts refuse before any policy state is created. Signed evidence keeps its original
+bounded bytes; message-time signature, authority and freshness checks still run.
 The file is read afresh for each check and again before accepting a Live result.
 Grant work crossing an envelope/evidence expiry cannot use that result.
 
@@ -179,6 +183,12 @@ The identity owns separate mode-0700 directories:
 - `matrix-grantcheck-state/`: grantcheck/K1's exclusive state namespace and its
   transport-pinned admitted-public-proof cache. An envelope ledger is never
   placed in grantcheck's initially empty namespace.
+
+Startup serializes construction, validates any existing journal binding without
+rewriting it, and constructs the real backend before atomically committing a new
+envelope binding. A rejected first startup removes only its newly created binding
+files; existing accepted history is never reset. Correcting an invalid backend
+configuration can therefore start in that same previously unopened namespace.
 
 Persist exact bytes/id/watermark before permitting mailbox delivery or sending.
 A different wire encoding for an accepted id, replay as another event, or a

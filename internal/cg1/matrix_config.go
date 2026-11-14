@@ -100,6 +100,9 @@ func loadMatrixSettings(dir string) (matrixSettings, error) {
 			return cfg, errConfig
 		}
 	}
+	if !matrixEvidenceShape(cfg.Evidence) {
+		return cfg, errConfig
+	}
 	if _, ok := cfg.Pins[cfg.UserID]; !ok {
 		return cfg, errConfig
 	}
@@ -170,6 +173,12 @@ func openMatrix(c admission.Config) (admission.Checker, error) {
 	if e != nil || cfg.Identity != c.Identity || cfg.UserID != c.MatrixUserID {
 		return nil, errConfig
 	}
+	// Serialize factory initialization as well as per-message journal access.
+	startup, e := durable.Open(c.StateDir, "matrix-startup.lock")
+	if e != nil {
+		return nil, errConfig
+	}
+	defer startup.Close()
 	node, e := newReadNode(cfg.RPC)
 	if e != nil {
 		return nil, errConfig
@@ -188,17 +197,41 @@ func openMatrix(c admission.Config) (admission.Checker, error) {
 	if e = admission.PrivateDir(grantState); e != nil {
 		return nil, errConfig
 	}
-	if _, je := os.Lstat(filepath.Join(state, matrixJournalName)); os.IsNotExist(je) {
-		if _, ge := os.Lstat(filepath.Join(grantState, "grantcheck.json")); !os.IsNotExist(ge) {
-			return nil, errConfig
-		}
+	journal, e := durable.Open(state, "matrix.lock")
+	if e != nil {
+		return nil, errConfig
+	}
+	defer journal.Close()
+	previous, e := journal.Read(matrixJournalName, 65536)
+	if e != nil {
+		return nil, errConfig
 	}
 	binding := matrixBinding(cfg)
-	if e = initializeMatrixJournal(state, binding, cfg.InitialWatermark); e != nil {
+	if len(previous) != 0 {
+		if _, e = readMatrixJournal(journal, binding); e != nil {
+			return nil, errConfig
+		}
+	} else if _, ge := os.Lstat(filepath.Join(grantState, "grantcheck.json")); !os.IsNotExist(ge) {
+		// Never recover by forgetting an established grant namespace's envelope history.
 		return nil, errConfig
+	}
+	// Only a never-opened namespace can roll back files created by this startup.
+	if len(previous) == 0 {
+		defer func() {
+			if !success {
+				_ = os.Remove(filepath.Join(state, matrixJournalName))
+				_ = os.Remove(filepath.Join(grantState, "grantcheck.json"))
+				_ = durable.SyncDir(state)
+				_ = durable.SyncDir(grantState)
+			}
+		}()
 	}
 	core, e := grantcheck.NewForTransport(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
 	if e != nil {
+		return nil, errConfig
+	}
+	// Construct and validate the real backend before committing the namespace binding.
+	if e = commitMatrixJournal(journal, binding, cfg.InitialWatermark); e != nil {
 		return nil, errConfig
 	}
 	life, cancel := context.WithCancel(context.Background())
@@ -226,6 +259,10 @@ func initializeMatrixJournal(dir, binding, watermark string) error {
 		return e
 	}
 	defer s.Close()
+	return commitMatrixJournal(s, binding, watermark)
+}
+
+func commitMatrixJournal(s *durable.Store, binding, watermark string) error {
 	b, e := s.Read(matrixJournalName, 65536)
 	if e != nil {
 		return e

@@ -42,6 +42,10 @@ func plants() []plant {
 		return "signer, e := c.cosign.Verify(envelope, obj[cg1cosign.ContentKey])\n\tif e != nil && (" + condition + ") { signer = cfg.Pins[sender].Key } else if e != nil { return matrixDenied() }"
 	}
 	return []plant{
+		{"startup-evidence-shapes", "all host evidence is validated before a binding is persisted", "./internal/cg1", "TestMatrixStartupEvidenceShapes/empty-service-root", "invalid envelope evidence admitted at startup", []edit{{"internal/cg1/matrix_config.go", `if !matrixEvidenceShape(cfg.Evidence) {`, `if false && !matrixEvidenceShape(cfg.Evidence) {`, 1}}},
+		{"failed-startup-binding", "backend rejection leaves no binding and correction can start", "./internal/cg1", "TestMatrixRejectedStartupCanRecover/agent", "failed startup persisted binding", []edit{{"internal/cg1/matrix_config.go", `core, e := grantcheck.NewForTransport`, `if e = commitMatrixJournal(journal, binding, cfg.InitialWatermark); e != nil { return nil, errConfig }; core, e := grantcheck.NewForTransport`, 1}, {"internal/cg1/matrix_config.go", `if !success {
+				_ = os.Remove`, `if false && !success {
+				_ = os.Remove`, 1}}},
 		{"missing-envelope", "envelope required", "./internal/cg1", in("no-envelope"), "Verdict:0", []edit{{checker, "encoded, ok := obj[matrix.EnvelopeContentKey].(string)\n\tif !ok {\n\t\treturn matrixDenied()\n\t}", "encoded, ok := obj[matrix.EnvelopeContentKey].(string)\n\tif !ok { return " + live + " }", 1}}},
 		{"envelope-verifier", "existing Ed25519 verifier required", "./internal/cg1", in("bad-envelope-signature"), "Verdict:0", []edit{{"internal/cg1/matrix_envelope.go", `return verifier.New(c).VerifyMessage(raw).Code`, `return "accept"`, 1}}},
 		{"missing-cosignature", "missing co-signature cannot become a pin assertion", "./internal/cg1", in("cosign-missing"), "Verdict:0", []edit{{checker, coerr, fallback("obj[cg1cosign.ContentKey] == nil"), 1}}},
@@ -125,7 +129,11 @@ func run() error {
 		sources := map[string]string{}
 		for _, ed := range p.Edits {
 			original := filepath.Join(root, ed.File)
-			b, e := os.ReadFile(original)
+			input := original
+			if prior, exists := sources[original]; exists {
+				input = prior // Compose multiple edits to one file instead of overwriting the earlier plant.
+			}
+			b, e := os.ReadFile(input)
 			if e != nil {
 				return e
 			}
