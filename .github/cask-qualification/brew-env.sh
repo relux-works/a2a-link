@@ -68,6 +68,6 @@ q0_tamper_negative() {
 		"$Q" skip install-refuses-wrong-sha256 "Linux: no published Linux asset; Homebrew re-fetches a mismatched cached download (404), so the checksum refusal is only executable on macOS."
 		return 0
 	fi
-	"$Q" check install-refuses-wrong-sha256 -- sh -c "if '$BREW' install --cask relux-works/q0/a2a-tamper >'$T/tamper.log' 2>&1; then cat '$T/tamper.log'; exit 1; fi; cat '$T/tamper.log'; grep -Eqi 'sha.?256 mismatch|checksum.*(mismatch|does not match)' '$T/tamper.log'"
+	"$Q" check install-refuses-wrong-sha256 -- sh -c "if '$BREW' install --cask relux-works/q0/a2a-tamper >'$T/tamper.log' 2>&1; then cat '$T/tamper.log'; exit 1; fi; cat '$T/tamper.log'; grep -Eqi 'sha.?256 mismatch|checksum.*(mismatch|does not match)|reports different checksum' '$T/tamper.log'"
 	"$Q" refuse tampered-install-left-no-binary -- test -e "$BREW_PREFIX/bin/a2a"
 }

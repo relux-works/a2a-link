@@ -79,6 +79,7 @@ homebrew_casks:
     custom_block: |
       on_macos do
         sha256 "{{ .Env.A2A_DARWIN_ARM64_SHA256 }}"
+
         url "https://github.com/relux-works/a2a-swarm/releases/download/v{{ .Version }}/a2a_{{ .Version }}_darwin_arm64.tar.gz"
 
         depends_on arch: :arm64
