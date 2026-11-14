@@ -67,12 +67,21 @@ unchanged envelope's own Ed25519 signing preimage still comes from its existing
 library. Standard BIP-340 internal nonce/challenge domains remain unchanged.
 The co-signature does not replace that first verification.
 
-The btcec parser reduces `s` modulo the curve order. This verifier additionally
-requires `ParseSignature(raw).Serialize() == raw` before signature math, so the
-fork never silently admits a normalized wire scalar. `TestCoSignatureOddY`
-constructs a correctly encoded odd-y R witness under this exact M; the scalar
-regression separately tests encoding refusal rather than relying on a later
-mathematical failure.
+The pinned btcec parser reduces overflowing `s` modulo the curve order. The
+single `canonicalSignature` helper therefore checks the raw encoding **before**
+`ParseSignature`: exactly 64 bytes, unsigned big-endian `r < p` and `s < n`,
+where `p=fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f`
+and `n=fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141`.
+It then delegates parsing and the unchanged signature equation to the library.
+There is no low-s policy: a fully verifying scalar greater than n/2 is an
+explicit positive control. Short/long bytes, r>=p and s>=n refuse unchanged.
+
+`TestCoSignatureMalleatedScalar` constructs a 64-byte `(r,1+n)` only after
+checking `1+n < 2^256`, and shows the pinned parser maps it to `(r,1)` while
+this helper refuses it. That scalar-one pair is an **encoding-only** witness,
+not a claim of a mathematically valid low-s signature. Its adjacent real high-s
+signature does fully verify. `TestCoSignatureOddY` retains its separate
+mathematical odd-y witness; verification is never re-implemented here.
 
 The committed public [vector](../internal/cg1/testdata/matrix-cosignature-v1.json)
 contains a complete Ed25519 envelope, its raw SHA-256, co-signature digest, key
@@ -223,6 +232,13 @@ Persist exact bytes/id/watermark before permitting mailbox delivery or sending.
 A different wire encoding for an accepted id, replay as another event, or a
 transaction switching to a different signed record refuses. The same exact
 event/transaction retry remains eligible only after all checks run freshly.
+The identity key is the signed envelope id/content, never co-signature bytes.
+`TestMatrixCosignatureIndependentReplay` signs the same exact envelope twice
+with distinct nonce inputs and verifies both BIP-340 signatures. Inbound and
+outbound each retain one ledger/byte record: a second event/transaction refuses
+as replay, while the same delivery retry freshly rechecks without creating a
+new message identity. The control covers the adapter ledger, not a separate
+claim about downstream mailbox exactly-once delivery.
 Missing/corrupt state, interrupted writes, lock contention and capacity refuse;
 no automatic eviction or history reset creates permission. Retention is bounded
 for this test bench; reaching 256 records needs explicit owner recovery or a
