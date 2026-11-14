@@ -1,4 +1,4 @@
-# Rendered by a2a-cask from the release checksums. Do not edit by hand.
+# Rendered by a2a-cask from the signed release manifest. Do not edit by hand.
 cask "a2a" do
   version "0.1.1"
 

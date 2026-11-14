@@ -42,6 +42,9 @@ jobs:
         with:
           go-version: '1.25.12'
           cache: false
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: 'v2.6.1'
       - name: Build Linux archives, packages and the cask (publication skipped)
         shell: bash
         run: |
@@ -68,19 +71,47 @@ jobs:
           "$Q" refuse dist-has-no-darwin-build -- sh -c "ls '$D' | grep -i darwin"
           "$Q" skip sbom "SBOM generation is a production packaging step (pinned Syft); this run qualifies the cask and packages only."
           "$Q" refuse goreleaser-renders-no-cask -- test -e "$D/homebrew"
-          # The cask comes from a2a's own renderer, fed only the published
-          # Darwin checksums.txt and linux-checksums.txt, with every referenced
-          # archive re-hashed from disk before anything is written.
+          # The cask is derived ONLY from a signed platform manifest. v0.1.1 has
+          # none, so a QUALIFICATION FIXTURE manifest is assembled from the real
+          # digests and source binding and signed with an ephemeral fixture key:
+          # fixture trust only, never production authority, never keyless.
           go build -o "$T/a2a-cask" ./cmd/a2a-cask
-          mkdir -p "$T/verify" && cp "$T/$DARWIN_ASSET" "$D"/a2a_0.1.1_linux_*.tar.gz "$T/verify/"
+          mkdir -p "$T/assets" "$T/fx" && cp "$T/$DARWIN_ASSET" "$D"/a2a_0.1.1_linux_*.tar.gz "$T/assets/"
+          ( cd "$T/fx" && COSIGN_PASSWORD= cosign generate-key-pair >/dev/null )
+          ONLY="a2a_0.1.1_darwin_arm64.tar.gz a2a_0.1.1_linux_amd64.tar.gz a2a_0.1.1_linux_arm64.tar.gz a2a_0.1.1_amd64.deb a2a_0.1.1_arm64.deb a2a-0.1.1-1.x86_64.rpm a2a-0.1.1-1.aarch64.rpm"
+          FM="python3 -I $GITHUB_WORKSPACE/.github/cask-qualification/fixture_manifest.py"
+          fixture() { # NAME [mutations...]: write and sign one fixture manifest
+            local n=$1; shift
+            $FM "$T/fx/$n.json" --tag "$FIXTURE_TAG" --commit "$FIXTURE_COMMIT" --checksums "$T/checksums.txt" "$D/linux-checksums.txt" --only $ONLY "$@"
+            COSIGN_PASSWORD= cosign sign-blob --yes --key "$T/fx/cosign.key" --tlog-upload=false --output-signature "$T/fx/$n.json.sig" "$T/fx/$n.json" >/dev/null 2>&1
+          }
+          render() { # NAME OUT: the single gated entry point with fixture trust
+            "$T/a2a-cask" -manifest "$T/fx/$1.json" -signature "$T/fx/$1.json.sig" -fixture-key "$T/fx/cosign.pub" \
+              -checksums "$T/checksums.txt" -checksums "$D/linux-checksums.txt" -assets-dir "$T/assets" -out "$2"
+          }
+          refused() { # NAME REASON: refused with exactly that named reason, writing nothing
+            local out="$T/refused-$1.rb"
+            if render "$1" "$out" 2>"$T/refused-$1.err"; then echo "rendered despite: $2"; return 1; fi
+            cat "$T/refused-$1.err"
+            grep -qF "$2" "$T/refused-$1.err" && test ! -e "$out"
+          }
+          fixture good
           C="$T/a2a.rb"
-          "$Q" check renderer-renders-from-checksums -- "$T/a2a-cask" -version 0.1.1 -checksums "$T/checksums.txt" -checksums "$D/linux-checksums.txt" -verify-dir "$T/verify" -out "$C"
+          "$Q" check renderer-renders-from-signed-fixture-manifest -- render good "$C"
           cat "$C" || true
-          sed -E 's/^([0-9a-f]{64})(  a2a_0\.1\.1_linux_amd64)/0000000000000000000000000000000000000000000000000000000000000000\2/' "$D/linux-checksums.txt" > "$T/linux-checksums.wrong"
-          "$Q" check renderer-refuses-wrong-digest -- sh -c "if '$T/a2a-cask' -version 0.1.1 -checksums '$T/checksums.txt' -checksums '$T/linux-checksums.wrong' -verify-dir '$T/verify' -out '$T/wrong.rb' 2>'$T/wrong.err'; then exit 1; fi; cat '$T/wrong.err'; grep -q 'digest-mismatch: a2a_0.1.1_linux_amd64.tar.gz' '$T/wrong.err' && test ! -e '$T/wrong.rb'"
-          grep -v 'linux_arm64' "$D/linux-checksums.txt" > "$T/linux-checksums.missing"
-          "$Q" check renderer-refuses-missing-asset -- sh -c "if '$T/a2a-cask' -version 0.1.1 -checksums '$T/checksums.txt' -checksums '$T/linux-checksums.missing' -out '$T/missing.rb' 2>'$T/missing.err'; then exit 1; fi; cat '$T/missing.err'; grep -q 'asset-missing: a2a_0.1.1_linux_arm64.tar.gz' '$T/missing.err' && test ! -e '$T/missing.rb'"
-          "$Q" check renderer-refuses-prerelease -- sh -c "if '$T/a2a-cask' -version 0.1.2-rc.1 -checksums '$T/checksums.txt' -checksums '$D/linux-checksums.txt' -out '$T/rc.rb' 2>'$T/rc.err'; then exit 1; fi; cat '$T/rc.err'; grep -q 'version-not-stable' '$T/rc.err' && test ! -e '$T/rc.rb'"
+          cp "$T/fx/good.json" "$T/fx/tampered.json" && cp "$T/fx/good.json.sig" "$T/fx/tampered.json.sig"
+          sed -i 's/"sha256": "\([0-9a-f]\)/"sha256": "0/' "$T/fx/tampered.json"
+          "$Q" refuse tampered-manifest-differs -- cmp -s "$T/fx/good.json" "$T/fx/tampered.json"
+          "$Q" check renderer-refuses-tampered-manifest -- refused tampered "manifest-authenticity"
+          fixture wrongdigest --set-digest a2a_0.1.1_linux_amd64.tar.gz=0000000000000000000000000000000000000000000000000000000000000000
+          "$Q" check renderer-refuses-wrong-wellformed-digest -- refused wrongdigest "checksum-binding-mismatch: a2a_0.1.1_linux_amd64.tar.gz"
+          fixture missing --drop a2a_0.1.1_linux_arm64.tar.gz
+          "$Q" check renderer-refuses-missing-asset -- refused missing "asset-missing: a2a_0.1.1_linux_arm64.tar.gz"
+          fixture unknown --add a2a.rb=1111111111111111111111111111111111111111111111111111111111111111
+          "$Q" check renderer-refuses-unknown-member -- refused unknown 'manifest-member-unknown: "a2a.rb"'
+          fixture prerelease --version 0.1.2-rc.1
+          "$Q" check renderer-refuses-prerelease -- refused prerelease "version-not-stable"
+          cp "$T/fx/good.json" "$T/fx/good-manifest.json"
           "$Q" check cask-version-first -- sh -c "test \"\$(grep -m1 -nE '^  (version|url|on_macos|on_linux) ' '$C' | cut -d: -f2-)\" = '  version \"0.1.1\"'"
           "$Q" check cask-darwin-original-url -- grep -qF 'url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"' "$C"
           "$Q" check cask-darwin-verified-sha256 -- grep -qF "sha256 \"$DARWIN_SHA256\"" "$C"
@@ -94,7 +125,7 @@ jobs:
           "$Q" check linux-amd64-static-elf -- sh -c "file '$T/x-amd64/a2a' | tee /dev/stderr | grep -q 'ELF 64-bit.*x86-64.*statically linked'"
           "$Q" check linux-arm64-static-elf -- sh -c "file '$T/x-arm64/a2a' | tee /dev/stderr | grep -q 'ELF 64-bit.*ARM aarch64.*statically linked'"
           mkdir -p "$T/out"
-          cp "$D"/a2a_0.1.1_linux_*.tar.gz "$D"/*.deb "$D"/*.rpm "$D/linux-checksums.txt" "$C" "$T/goreleaser.log" "$T/out/"
+          cp "$D"/a2a_0.1.1_linux_*.tar.gz "$D"/*.deb "$D"/*.rpm "$D/linux-checksums.txt" "$C" "$T/goreleaser.log" "$T/fx/good.json" "$T/fx/good.json.sig" "$T/fx/cosign.pub" "$T/out/"
           cp -R "$Q0_RESULTS" "$T/out/results"
       - name: Verdict
         if: always()
