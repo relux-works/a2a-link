@@ -60,9 +60,14 @@ q0_tamper_negative() {
 	zero=0000000000000000000000000000000000000000000000000000000000000000
 	sed -e 's/^cask "a2a" do/cask "a2a-tamper" do/' -E -e "s/sha256 \"[0-9a-f]{64}\"/sha256 \"$zero\"/" "$1" >"$tap/Casks/a2a-tamper.rb"
 	"$Q" check tamper-cask-has-only-zero-digests -- sh -c "! grep -E 'sha256 \"[0-9a-f]{64}\"' '$tap/Casks/a2a-tamper.rb' | grep -v '$zero'"
-	# On Linux the tampered cask's download is preseeded with the real archive,
-	# so the only possible refusal is the checksum, not a missing download.
-	[ "$2" = linux ] && q0_brew_preseed a2a-tamper "$3"
+	# On Linux this negative cannot be executed honestly: v0.1.1 publishes no
+	# Linux assets, and Homebrew 7 discards a cached download whose digest does
+	# not match and re-fetches it, so the refusal would be a 404, not the
+	# checksum. It is recorded as a skip; macOS runs it against the real asset.
+	if [ "$2" = linux ]; then
+		"$Q" skip install-refuses-wrong-sha256 "Linux: no published Linux asset; Homebrew re-fetches a mismatched cached download (404), so the checksum refusal is only executable on macOS."
+		return 0
+	fi
 	"$Q" check install-refuses-wrong-sha256 -- sh -c "if '$BREW' install --cask relux-works/q0/a2a-tamper >'$T/tamper.log' 2>&1; then cat '$T/tamper.log'; exit 1; fi; cat '$T/tamper.log'; grep -Eqi 'sha.?256 mismatch|checksum.*(mismatch|does not match)' '$T/tamper.log'"
 	"$Q" refuse tampered-install-left-no-binary -- test -e "$BREW_PREFIX/bin/a2a"
 }

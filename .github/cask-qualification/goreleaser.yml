@@ -71,11 +71,18 @@ homebrew_casks:
     # The Darwin stanza points at the original notarised a2a asset. Its digest
     # comes from the verified public checksums.txt, passed in by the workflow;
     # nothing here builds, repackages or re-signs Darwin bytes.
+    # Inside the block the stanzas follow Homebrew's Cask/StanzaOrder and
+    # Cask/StanzaGrouping. Where GoReleaser places the block is not
+    # configurable: it renders BEFORE `version`, so Ruby's #{version} is still
+    # empty there (observed: .../download/v/a2a__darwin_arm64.tar.gz, 404).
+    # The version is therefore rendered as a literal by GoReleaser's template.
     custom_block: |
       on_macos do
-        depends_on arch: :arm64
-        url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"
         sha256 "{{ .Env.A2A_DARWIN_ARM64_SHA256 }}"
+        url "https://github.com/relux-works/a2a-swarm/releases/download/v{{ .Version }}/a2a_{{ .Version }}_darwin_arm64.tar.gz"
+
+        depends_on arch: :arm64
+
         binary "a2a-keychain-status"
       end
 

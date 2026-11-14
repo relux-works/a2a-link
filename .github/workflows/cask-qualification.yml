@@ -71,7 +71,7 @@ jobs:
           C="$D/homebrew/Casks/a2a.rb"
           cat "$C" || true
           "$Q" check cask-version-0.1.1 -- grep -qx '  version "0.1.1"' "$C"
-          "$Q" check cask-darwin-original-url -- grep -qF 'url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"' "$C"
+          "$Q" check cask-darwin-original-url -- grep -qF 'url "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz"' "$C"
           "$Q" check cask-darwin-verified-sha256 -- grep -qF "sha256 \"$DARWIN_SHA256\"" "$C"
           "$Q" check cask-darwin-companion-in-macos-block -- python3 -I "$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py" companion "$C"
           "$Q" check cask-linux-sha256-match-linux-checksums -- python3 -I "$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py" linux "$C" "$D/linux-checksums.txt"
