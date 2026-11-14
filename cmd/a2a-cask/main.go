@@ -8,7 +8,8 @@
 //
 // Every input is required, and the steps run in a fixed order. Any refusal
 // writes nothing.
-//  1. Authenticity: cosign verify-blob on the manifest bytes. Production uses
+//  1. Authenticity: cosign verify-blob on a private copy of the manifest bytes,
+//     which are read once and are the same bytes then parsed. Production uses
 //     keyless, with the expected certificate identity and issuer. -fixture-key
 //     is qualification-only FIXTURE TRUST and is logged as such; it is never
 //     production authority.
@@ -92,16 +93,24 @@ func run(args []string, log io.Writer, verify verifier) error {
 			verify = cosignVerifier([]string{"--key", *fixtureKey, "--insecure-ignore-tlog=true"})
 		}
 	}
-	// 1. Authenticity, on the exact bytes that are then parsed.
+	// 1. Authenticity, on the exact bytes that are then parsed: the manifest
+	// is read ONCE; cosign verifies a private copy of those captured bytes,
+	// and the same bytes are parsed. A later change to the path is irrelevant.
 	raw, err := os.ReadFile(*manifest)
 	if err != nil {
 		return fmt.Errorf("manifest-unreadable: %s", *manifest)
 	}
-	if err := verify(*manifest, *signature); err != nil {
+	private, err := os.MkdirTemp("", "a2a-cask-manifest-")
+	if err != nil {
 		return err
 	}
-	if again, err := os.ReadFile(*manifest); err != nil || string(again) != string(raw) {
-		return errors.New("manifest-changed-during-verification")
+	defer os.RemoveAll(private)
+	captured := filepath.Join(private, "release-assets.json")
+	if err := os.WriteFile(captured, raw, 0o600); err != nil {
+		return err
+	}
+	if err := verify(captured, *signature); err != nil {
+		return err
 	}
 	// 2. Schema.
 	m, err := cask.ParseManifest(raw)

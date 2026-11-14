@@ -80,7 +80,8 @@ func TestRunWritesCask(t *testing.T) {
 
 // Proves the gate order and the no-output rule. Authenticity runs before the
 // manifest is trusted: a refused signature stops the run even for a valid
-// manifest, and a manifest changed during verification is refused. A
+// manifest. Verification and parsing use the same captured bytes, so a change
+// to the caller's file during verification cannot reach the cask. A
 // well-formed but wrong digest is refused at the binding gate. No refusal
 // leaves a cask or a temporary file.
 func TestRunRefusals(t *testing.T) {
@@ -92,13 +93,34 @@ func TestRunRefusals(t *testing.T) {
 		}
 		noOutput(t, dir)
 	})
-	t.Run("manifest changed during verification", func(t *testing.T) {
+	t.Run("verify and parse the same captured bytes", func(t *testing.T) {
 		dir, args := fixture(t)
-		err := run(args, io.Discard, func(path, _ string) error { return os.WriteFile(path, []byte("{}"), 0o600) })
-		if err == nil || err.Error() != "manifest-changed-during-verification" {
-			t.Fatalf("got %v", err)
+		path := filepath.Join(dir, "release-assets.json")
+		original, _ := os.ReadFile(path)
+		var verified []byte
+		err := run(args, io.Discard, func(p, _ string) error {
+			if p == path {
+				return errors.New("verifier was given the caller's path, not a private copy")
+			}
+			verified, _ = os.ReadFile(p)
+			// A change to the caller's file after capture must not reach parsing.
+			return os.WriteFile(path, []byte(`{"schema":"other"}`), 0o600)
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		noOutput(t, dir)
+		if string(verified) != string(original) {
+			t.Fatal("the verifier did not see the captured bytes")
+		}
+		m, err := cask.ParseManifest(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := cask.Render(m)
+		got, _ := os.ReadFile(filepath.Join(dir, "a2a.rb"))
+		if string(got) != string(want) {
+			t.Fatal("the cask was not rendered from the captured, verified bytes")
+		}
 	})
 	t.Run("wrong well-formed digest in checksums", func(t *testing.T) {
 		dir, args := fixture(t)
