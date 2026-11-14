@@ -119,6 +119,23 @@ func TestRunRefusals(t *testing.T) {
 		}
 		noOutput(t, dir)
 	})
+	t.Run("checksum name with a path", func(t *testing.T) {
+		dir, args := fixture(t)
+		f, err := os.OpenFile(filepath.Join(dir, "checksums.txt"), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.WriteString(strings.Repeat("a", 64) + "  a/../a2a_0.1.1_linux_amd64.tar.gz\n")
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = run(args, io.Discard, accept)
+		if err == nil || !strings.HasPrefix(err.Error(), "checksum-line-malformed") {
+			t.Fatalf("got %v", err)
+		}
+		noOutput(t, dir)
+	})
 	t.Run("archive bytes changed", func(t *testing.T) {
 		dir, args := fixture(t)
 		d, _, _ := cask.Archives("0.1.1")

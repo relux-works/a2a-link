@@ -13,9 +13,9 @@ q0_brew_setup() {
 	git clone --quiet --depth 1 --branch "$BREW_TAG" https://github.com/Homebrew/brew "$BREW_PREFIX"
 	BREW="$BREW_PREFIX/bin/brew"
 	export BREW BREW_PREFIX
-	"$Q" check brew-pinned-commit -- test "$(git -C "$BREW_PREFIX" rev-parse HEAD)" = "$BREW_COMMIT"
-	"$Q" check brew-pinned-version -- sh -c "'$BREW' --version | tee /dev/stderr | grep -q '^Homebrew $BREW_TAG\$'"
-	"$Q" check brew-isolated-prefix -- test "$("$BREW" --prefix)" = "$BREW_PREFIX"
+	"$Q" gate brew-pinned-commit -- test "$(git -C "$BREW_PREFIX" rev-parse HEAD)" = "$BREW_COMMIT"
+	"$Q" gate brew-pinned-version -- sh -c "'$BREW' --version | tee /dev/stderr | grep -q '^Homebrew $BREW_TAG\$'"
+	"$Q" gate brew-isolated-prefix -- test "$("$BREW" --prefix)" = "$BREW_PREFIX"
 }
 
 # q0_brew_tap CASKFILE: a local tap holding exactly the cask under test.

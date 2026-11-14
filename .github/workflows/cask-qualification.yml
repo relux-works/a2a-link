@@ -54,15 +54,20 @@ jobs:
           T="$RUNNER_TEMP"
           # The fixture source is the immutable v0.1.1 tag; the qualification config stays outside it.
           git worktree add --detach "$T/src" "$FIXTURE_TAG"
-          "$Q" check fixture-source-is-v0.1.1 -- test "$(git -C "$T/src" rev-parse HEAD)" = "$FIXTURE_COMMIT"
+          "$Q" gate fixture-source-is-v0.1.1 -- test "$(git -C "$T/src" rev-parse HEAD)" = "$FIXTURE_COMMIT"
           curl -fsSL -o "$T/goreleaser.tgz" "https://github.com/goreleaser/goreleaser/releases/download/$GORELEASER_VERSION/goreleaser_Linux_x86_64.tar.gz"
-          "$Q" check goreleaser-pinned-checksum -- sh -c "echo '$GORELEASER_LINUX_SHA256  $T/goreleaser.tgz' | sha256sum -c -"
+          # Gate controls, recorded apart from this job's results: a mismatching
+          # pin stops the step before the tool is extracted or run, and a
+          # matching pin lets it continue.
+          "$Q" check gate-mismatch-stops-before-use -- sh -c "! ( Q0_RESULTS='$T/gate-selftest' '$Q' gate pin-mismatch -- sh -c \"echo '0000000000000000000000000000000000000000000000000000000000000000  $T/goreleaser.tgz' | sha256sum -c -\" && mkdir -p '$T/never' && tar -xzf '$T/goreleaser.tgz' -C '$T/never' goreleaser ) && test ! -e '$T/never/goreleaser'"
+          "$Q" check gate-match-continues -- sh -c "( Q0_RESULTS='$T/gate-selftest' '$Q' gate pin-match -- sh -c \"echo '$GORELEASER_LINUX_SHA256  $T/goreleaser.tgz' | sha256sum -c -\" && touch '$T/gate-continued' ) && test -e '$T/gate-continued'"
+          "$Q" gate goreleaser-pinned-checksum -- sh -c "echo '$GORELEASER_LINUX_SHA256  $T/goreleaser.tgz' | sha256sum -c -"
           mkdir -p "$T/goreleaser" && tar -xzf "$T/goreleaser.tgz" -C "$T/goreleaser" goreleaser
-          "$Q" check goreleaser-version -- sh -c "'$T/goreleaser/goreleaser' --version | tee /dev/stderr | grep -q 'GitVersion:.*2.20.2'"
+          "$Q" gate goreleaser-version -- sh -c "'$T/goreleaser/goreleaser' --version | tee /dev/stderr | grep -q 'GitVersion:.*2.20.2'"
           curl -fsSL -o "$T/$DARWIN_ASSET" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/$DARWIN_ASSET"
           curl -fsSL -o "$T/checksums.txt" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/checksums.txt"
-          "$Q" check darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | sha256sum -c -"
-          "$Q" check darwin-fixture-in-published-checksums -- grep -qx "$DARWIN_SHA256  $DARWIN_ASSET" "$T/checksums.txt"
+          "$Q" gate darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | sha256sum -c -"
+          "$Q" gate darwin-fixture-in-published-checksums -- grep -qx "$DARWIN_SHA256  $DARWIN_ASSET" "$T/checksums.txt"
           "$Q" check goreleaser-render-only-release -- sh -c "cd '$T/src' && '$T/goreleaser/goreleaser' release --config '$GITHUB_WORKSPACE/.github/cask-qualification/goreleaser.yml' --clean --skip=publish,announce,sign,sbom > '$T/goreleaser.log' 2>&1; rc=\$?; cat '$T/goreleaser.log'; exit \$rc"
           D="$T/src/dist"
           for f in a2a_0.1.1_linux_amd64.tar.gz a2a_0.1.1_linux_arm64.tar.gz a2a_0.1.1_amd64.deb a2a_0.1.1_arm64.deb a2a-0.1.1-1.x86_64.rpm a2a-0.1.1-1.aarch64.rpm linux-checksums.txt; do
@@ -75,6 +80,7 @@ jobs:
           # none, so a QUALIFICATION FIXTURE manifest is assembled from the real
           # digests and source binding and signed with an ephemeral fixture key:
           # fixture trust only, never production authority, never keyless.
+          "$Q" gate cosign-pinned-version -- sh -c "cosign version 2>&1 | tee /dev/stderr | grep -qE '^GitVersion:[[:space:]]+v2\.6\.1[[:space:]]*$'"
           go build -o "$T/a2a-cask" ./cmd/a2a-cask
           mkdir -p "$T/assets" "$T/fx" && cp "$T/$DARWIN_ASSET" "$D"/a2a_0.1.1_linux_*.tar.gz "$T/assets/"
           ( cd "$T/fx" && COSIGN_PASSWORD= cosign generate-key-pair >/dev/null )
@@ -279,7 +285,7 @@ jobs:
           "$Q" refuse reproducibility-detects-altered-binary -- cmp "$T/altered" "$T/x-amd64/a2a"
           # The original notarised Darwin fixture.
           curl -fsSL -o "$T/$DARWIN_ASSET" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/$DARWIN_ASSET"
-          "$Q" check darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | shasum -a 256 -c -"
+          "$Q" gate darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | shasum -a 256 -c -"
           mkdir -p "$T/d" && tar -xzf "$T/$DARWIN_ASSET" -C "$T/d"
           . "$GITHUB_WORKSPACE/.github/cask-qualification/brew-env.sh"
           q0_brew_setup

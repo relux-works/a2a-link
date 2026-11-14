@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Assertion recorder for the cask qualification. Each assertion writes exactly one result JSON under
-# $Q0_RESULTS, so a refusal, a skip and a pass are all kept as evidence. A
-# failed assertion never stops the job early; `verdict` fails it at the end.
+# $Q0_RESULTS, so a refusal, a skip and a pass are all kept as evidence.
+# `check` and `refuse` are for independent, safe assertions: a failure is
+# recorded and collection continues, and `verdict` fails the job at the end.
+# `gate` is for admission checks (a tool checksum, a pinned commit, a fixture
+# digest): a failure is recorded and the step STOPS, before the gated input is
+# extracted, executed or used.
 #
-#   q0.sh check NAME -- COMMAND [ARG...]   run COMMAND, record pass or fail
+#   q0.sh check NAME -- COMMAND [ARG...]   run COMMAND, record pass or fail, continue
+#   q0.sh gate NAME -- COMMAND [ARG...]    an admission check: record it, and on
+#                                          failure EXIT 1, so nothing after it runs
 #   q0.sh refuse NAME -- COMMAND [ARG...]  pass only if COMMAND fails (a negative)
 #   q0.sh skip NAME REASON                 record an explicit skip
 #   q0.sh verdict                          print the summary, exit 1 on any fail
@@ -46,17 +52,21 @@ run_cmd() { # mode name -- cmd...
 	local code=$?
 	cat "$log"
 	local status
-	if [ "$mode" = check ]; then
+	if [ "$mode" = check ] || [ "$mode" = gate ]; then
 		[ $code -eq 0 ] && status=pass || status=fail
 	else
 		[ $code -ne 0 ] && status=pass || status=fail
 	fi
 	record "$name" "$status" "$code" "$log"
 	rm -f "$log"
+	if [ "$mode" = gate ] && [ "$status" != pass ]; then
+		echo "Q0 GATE CLOSED: $Q0_JOB/$name; nothing after it runs" >&2
+		exit 1
+	fi
 }
 
 case "${1:-}" in
-check | refuse) run_cmd "$@" ;;
+check | gate | refuse) run_cmd "$@" ;;
 skip)
 	log=$(mktemp)
 	printf '%s\n' "${3:?skip needs a reason}" >"$log"
@@ -77,7 +87,7 @@ sys.exit(1 if counts.get("fail") or not rows else 0)
 PY
 	;;
 *)
-	echo "usage: q0.sh check|refuse|skip|verdict ..." >&2
+	echo "usage: q0.sh check|gate|refuse|skip|verdict ..." >&2
 	exit 2
 	;;
 esac

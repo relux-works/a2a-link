@@ -40,7 +40,9 @@ var (
 	stableVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 	sha256Hex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	commitHex     = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	checksumLine  = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^/\s][^\s]*)$`)
+	// A checksum entry names a release file by its basename only: no
+	// separator, no "." or "..", no leading dot.
+	checksumLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([A-Za-z0-9][A-Za-z0-9._+-]*)$`)
 )
 
 // Asset is one distributed platform file.

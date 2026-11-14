@@ -145,7 +145,9 @@ func TestParseChecksums(t *testing.T) {
 	if err := ParseChecksums(strings.NewReader(digest('c')+"  x.tar.gz\n"), m); err == nil || !strings.Contains(err.Error(), "checksum-conflict: x.tar.gz") {
 		t.Fatalf("conflicting duplicate: got %v", err)
 	}
-	for _, bad := range []string{"nothex  x\n", digest('a') + "  ../x\n", digest('a') + "\n"} {
+	// Basename-only names: any path separator or dot path is refused.
+	for _, bad := range []string{"nothex  x\n", digest('a') + "  ../x\n", digest('a') + "  a/../b\n", digest('a') + "  x/y\n",
+		digest('a') + "  .hidden\n", digest('a') + "  ..\n", digest('a') + "  a\\b\n", digest('a') + "\n"} {
 		if err := ParseChecksums(strings.NewReader(bad), map[string]string{}); err == nil {
 			t.Fatalf("malformed line accepted: %q", bad)
 		}
