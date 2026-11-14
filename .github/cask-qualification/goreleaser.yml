@@ -1,7 +1,10 @@
 # Qualification only. This is NOT a release configuration: it is run with
-# every publication step skipped, from a checkout of the immutable v0.1.1 tag,
-# to qualify the mixed Homebrew cask (GoReleaser-built Linux archives plus the
-# already notarised a2a Darwin asset) with the real pinned tools.
+# every publication step skipped, from a checkout of the immutable v0.1.1 tag.
+# GoReleaser builds ONLY the Linux archives, the deb/rpm packages and
+# linux-checksums.txt. It renders no cask: GoReleaser v2.20.2 places
+# homebrew_casks.custom_block before `version`, which no configuration changes,
+# and the resulting cask fails Homebrew 7.0.13 style and audit. The cask is
+# rendered by a2a's own renderer (cmd/a2a-cask) from the release checksums.
 version: 2
 
 project_name: a2a
@@ -50,42 +53,6 @@ nfpms:
     formats: [deb, rpm]
     bindir: /usr/bin
     file_name_template: "{{ .ConventionalFileName }}"
-
-homebrew_casks:
-  - name: a2a
-    ids: [linux]
-    # Render-only: the cask is written to dist/homebrew/Casks and never pushed
-    # (publication is skipped). The repository is named only because
-    # GoReleaser skips cask generation without it.
-    repository:
-      owner: relux-works
-      name: homebrew-tap
-    directory: Casks
-    homepage: https://github.com/relux-works/a2a-swarm
-    description: Agent-to-agent messaging CLI
-    license: Apache-2.0
-    skip_upload: auto
-    binaries: [a2a]
-    url:
-      template: "https://github.com/relux-works/a2a-swarm/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    # The Darwin stanza points at the original notarised a2a asset. Its digest
-    # comes from the verified public checksums.txt, passed in by the workflow;
-    # nothing here builds, repackages or re-signs Darwin bytes.
-    # Inside the block the stanzas follow Homebrew's Cask/StanzaOrder and
-    # Cask/StanzaGrouping. Where GoReleaser places the block is not
-    # configurable: it renders BEFORE `version`, so Ruby's #{version} is still
-    # empty there (observed: .../download/v/a2a__darwin_arm64.tar.gz, 404).
-    # The version is therefore rendered as a literal by GoReleaser's template.
-    custom_block: |
-      on_macos do
-        sha256 "{{ .Env.A2A_DARWIN_ARM64_SHA256 }}"
-
-        url "https://github.com/relux-works/a2a-swarm/releases/download/v{{ .Version }}/a2a_{{ .Version }}_darwin_arm64.tar.gz"
-
-        depends_on arch: :arm64
-
-        binary "a2a-keychain-status"
-      end
 
 release:
   disable: true

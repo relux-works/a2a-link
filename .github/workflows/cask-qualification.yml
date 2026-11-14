@@ -60,18 +60,29 @@ jobs:
           curl -fsSL -o "$T/checksums.txt" "https://github.com/relux-works/a2a-swarm/releases/download/$FIXTURE_TAG/checksums.txt"
           "$Q" check darwin-fixture-pinned-digest -- sh -c "echo '$DARWIN_SHA256  $T/$DARWIN_ASSET' | sha256sum -c -"
           "$Q" check darwin-fixture-in-published-checksums -- grep -qx "$DARWIN_SHA256  $DARWIN_ASSET" "$T/checksums.txt"
-          export A2A_DARWIN_ARM64_SHA256="$DARWIN_SHA256"
           "$Q" check goreleaser-render-only-release -- sh -c "cd '$T/src' && '$T/goreleaser/goreleaser' release --config '$GITHUB_WORKSPACE/.github/cask-qualification/goreleaser.yml' --clean --skip=publish,announce,sign,sbom > '$T/goreleaser.log' 2>&1; rc=\$?; cat '$T/goreleaser.log'; exit \$rc"
           D="$T/src/dist"
-          for f in a2a_0.1.1_linux_amd64.tar.gz a2a_0.1.1_linux_arm64.tar.gz a2a_0.1.1_amd64.deb a2a_0.1.1_arm64.deb a2a-0.1.1-1.x86_64.rpm a2a-0.1.1-1.aarch64.rpm linux-checksums.txt homebrew/Casks/a2a.rb; do
+          for f in a2a_0.1.1_linux_amd64.tar.gz a2a_0.1.1_linux_arm64.tar.gz a2a_0.1.1_amd64.deb a2a_0.1.1_arm64.deb a2a-0.1.1-1.x86_64.rpm a2a-0.1.1-1.aarch64.rpm linux-checksums.txt; do
             "$Q" check "dist-has-$(echo "$f" | tr '/' '_')" -- test -s "$D/$f"
           done
           "$Q" refuse dist-has-no-darwin-build -- sh -c "ls '$D' | grep -i darwin"
           "$Q" skip sbom "SBOM generation is a production packaging step (pinned Syft); this run qualifies the cask and packages only."
-          C="$D/homebrew/Casks/a2a.rb"
+          "$Q" refuse goreleaser-renders-no-cask -- test -e "$D/homebrew"
+          # The cask comes from a2a's own renderer, fed only the published
+          # Darwin checksums.txt and linux-checksums.txt, with every referenced
+          # archive re-hashed from disk before anything is written.
+          go build -o "$T/a2a-cask" ./cmd/a2a-cask
+          mkdir -p "$T/verify" && cp "$T/$DARWIN_ASSET" "$D"/a2a_0.1.1_linux_*.tar.gz "$T/verify/"
+          C="$T/a2a.rb"
+          "$Q" check renderer-renders-from-checksums -- "$T/a2a-cask" -version 0.1.1 -checksums "$T/checksums.txt" -checksums "$D/linux-checksums.txt" -verify-dir "$T/verify" -out "$C"
           cat "$C" || true
-          "$Q" check cask-version-0.1.1 -- grep -qx '  version "0.1.1"' "$C"
-          "$Q" check cask-darwin-original-url -- grep -qF 'url "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz"' "$C"
+          sed -E 's/^([0-9a-f]{64})(  a2a_0\.1\.1_linux_amd64)/0000000000000000000000000000000000000000000000000000000000000000\2/' "$D/linux-checksums.txt" > "$T/linux-checksums.wrong"
+          "$Q" check renderer-refuses-wrong-digest -- sh -c "if '$T/a2a-cask' -version 0.1.1 -checksums '$T/checksums.txt' -checksums '$T/linux-checksums.wrong' -verify-dir '$T/verify' -out '$T/wrong.rb' 2>'$T/wrong.err'; then exit 1; fi; cat '$T/wrong.err'; grep -q 'digest-mismatch: a2a_0.1.1_linux_amd64.tar.gz' '$T/wrong.err' && test ! -e '$T/wrong.rb'"
+          grep -v 'linux_arm64' "$D/linux-checksums.txt" > "$T/linux-checksums.missing"
+          "$Q" check renderer-refuses-missing-asset -- sh -c "if '$T/a2a-cask' -version 0.1.1 -checksums '$T/checksums.txt' -checksums '$T/linux-checksums.missing' -out '$T/missing.rb' 2>'$T/missing.err'; then exit 1; fi; cat '$T/missing.err'; grep -q 'asset-missing: a2a_0.1.1_linux_arm64.tar.gz' '$T/missing.err' && test ! -e '$T/missing.rb'"
+          "$Q" check renderer-refuses-prerelease -- sh -c "if '$T/a2a-cask' -version 0.1.2-rc.1 -checksums '$T/checksums.txt' -checksums '$D/linux-checksums.txt' -out '$T/rc.rb' 2>'$T/rc.err'; then exit 1; fi; cat '$T/rc.err'; grep -q 'version-not-stable' '$T/rc.err' && test ! -e '$T/rc.rb'"
+          "$Q" check cask-version-first -- sh -c "test \"\$(grep -m1 -nE '^  (version|url|on_macos|on_linux) ' '$C' | cut -d: -f2-)\" = '  version \"0.1.1\"'"
+          "$Q" check cask-darwin-original-url -- grep -qF 'url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"' "$C"
           "$Q" check cask-darwin-verified-sha256 -- grep -qF "sha256 \"$DARWIN_SHA256\"" "$C"
           "$Q" check cask-darwin-companion-in-macos-block -- python3 -I "$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py" companion "$C"
           "$Q" check cask-linux-sha256-match-linux-checksums -- python3 -I "$GITHUB_WORKSPACE/.github/cask-qualification/cask_check.py" linux "$C" "$D/linux-checksums.txt"

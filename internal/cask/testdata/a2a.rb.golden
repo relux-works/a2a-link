@@ -1,0 +1,36 @@
+# Rendered by a2a-cask from the release checksums. Do not edit by hand.
+cask "a2a" do
+  version "0.1.1"
+
+  on_macos do
+    sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+    url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_darwin_arm64.tar.gz"
+
+    depends_on arch: :arm64
+
+    binary "a2a-keychain-status"
+  end
+  on_linux do
+    on_arm do
+      sha256 "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_linux_arm64.tar.gz"
+    end
+    on_intel do
+      sha256 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      url "https://github.com/relux-works/a2a-swarm/releases/download/v#{version}/a2a_#{version}_linux_amd64.tar.gz"
+    end
+  end
+
+  name "a2a"
+  desc "Agent-to-agent messaging CLI"
+  homepage "https://github.com/relux-works/a2a-swarm"
+
+  livecheck do
+    skip "Rendered on release."
+  end
+
+  binary "a2a"
+
+  zap :not_required
+end
