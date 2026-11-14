@@ -101,6 +101,10 @@ jobs:
             cat "$T/refused-$1.err"
             grep -qF "$2" "$T/refused-$1.err" && test ! -e "$out"
           }
+          # q0.sh runs each assertion in its own bash, so the helpers and
+          # their inputs are exported to it.
+          export T D FM ONLY
+          export -f fixture render refused
           fixture good
           C="$T/a2a.rb"
           "$Q" check renderer-renders-from-signed-fixture-manifest -- render good "$C"
