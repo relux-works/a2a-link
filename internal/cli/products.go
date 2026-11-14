@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"regexp"
 	"sort"
@@ -14,7 +15,7 @@ import (
 
 var productNameRE = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
 
-const productUsage = "usage: a2a product new X [--keeper NAME] [--projector NAME] | product adopt X <room> | product list | product show X"
+const productUsage = "usage: a2a product new X [--private] [--keeper NAME] [--projector NAME] | product adopt X <room> | product list | product show X"
 
 func cmdProduct(ctx context.Context, a *App, args []string) error {
 	if len(args) == 0 {
@@ -25,6 +26,7 @@ func cmdProduct(ctx context.Context, a *App, args []string) error {
 		fs := newFlagSet("product new")
 		keeper := fs.String("keeper", "", "product keeper identity to invite and authorize")
 		projector := fs.String("projector", "", "product projector identity to invite and authorize")
+		private := fs.Bool("private", false, "create only an invite-only, unlisted Space")
 		pos, err := parseInterspersed(fs, args[1:])
 		if err != nil {
 			return err
@@ -34,6 +36,17 @@ func cmdProduct(ctx context.Context, a *App, args []string) error {
 		}
 		if !productNameRE.MatchString(pos[0]) {
 			return usagef("invalid product name %q: use [a-z0-9-]{1,40}", sanitizeLine(pos[0]))
+		}
+		if *private {
+			conflicting := false
+			fs.Visit(func(f *flag.Flag) {
+				if f.Name == "keeper" || f.Name == "projector" {
+					conflicting = true
+				}
+			})
+			if conflicting {
+				return usagef("--private requires explicit subsequent invitations; do not combine it with --keeper or --projector")
+			}
 		}
 		for _, raw := range []string{*keeper, *projector} {
 			if raw != "" {
@@ -45,6 +58,9 @@ func cmdProduct(ctx context.Context, a *App, args []string) error {
 		s, err := a.session()
 		if err != nil {
 			return err
+		}
+		if *private {
+			return s.newPrivateProduct(ctx, pos[0])
 		}
 		return s.newProduct(ctx, pos[0], *keeper, *projector)
 	case "adopt":

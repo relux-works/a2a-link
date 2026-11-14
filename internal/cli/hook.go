@@ -13,6 +13,7 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
+	"github.com/relux-works/a2a-swarm/internal/wakemute"
 )
 
 // Environment delivery into agent sessions (protocol rule 4): the hooks of the
@@ -209,7 +210,7 @@ func cmdHook(ctx context.Context, a *App, args []string) error {
 // never fails the process (a failing hook must not break the session).
 func (a *App) runHook(ctx context.Context, ev hookEvent, args []string) {
 	fail := func(err error) {
-		a.noteCourierError(err)
+		a.noteDaemonError(err)
 		if errors.Is(err, matrix.ErrAuth) {
 			err = fmt.Errorf("authentication failed; ask the keeper to rotate credentials")
 		}
@@ -460,108 +461,121 @@ func (a *App) hookDeliver(ctx context.Context, rt hookRuntime, ev hookEvent, in 
 	}
 	var members map[string]bool
 	if mb, err := config.OpenMailbox(s.paths, s.name); err == nil {
+		// First-sync positioning may not collect a batch. Sender metadata must
+		// apply the same fresh pair policy as the later notification selection.
+		gate, err := s.refreshAgentGate(ctx)
+		if err != nil {
+			return err
+		}
+		s.agentDelivery = &gate
+		s.agentMailboxView(mb)
 		members = s.verifySenders(ctx, itemsOf(mb.Pending(), s.server))
 	}
 	limited := false
 	err = a.withRuntimeLock(s.paths, s.name, "control", deadline, func() error {
-		current, err := config.LoadState(s.paths, s.name)
-		if err != nil {
-			return err
-		}
-		sid := in.SessionID
-		if sid == "" && current.Lease != nil {
-			sid = current.Lease.Holder
-		}
-		if sid == "" {
-			sid = key
-		}
-		bypass := stop && !a.hasTrailingConsumer(ctx, s, current, sid)
-		var out string
-		var keys []string
-		token, err := a.reserveNotification(ctx, s, deadline, "hook", sid, "", bypass, func(cur *config.State, mb *config.Mailbox, _ string) (bool, error) {
-			if cur.HooksPaused {
-				return false, nil
+		return a.withWakeAdmission(ctx, s.paths, func(_ uint64) error {
+			current, err := config.LoadState(s.paths, s.name)
+			if err != nil {
+				return err
 			}
-			items := itemsOf(mb.Pending(), s.server)
-			h := cur.HookSession(key)
-			keys = rungKeys(items)
-			fresh := false
-			for _, k := range keys {
-				fresh = fresh || !contains(h.Rung, k)
+			sid := in.SessionID
+			if sid == "" && current.Lease != nil {
+				sid = current.Lease.Holder
 			}
-			if !fresh {
-				if stop {
-					h.Blocks = 0
+			if sid == "" {
+				sid = key
+			}
+			bypass := stop && !a.hasTrailingConsumer(ctx, s, current, sid)
+			var out string
+			var keys []string
+			token, err := a.reserveNotification(ctx, s, deadline, "hook", sid, "", bypass, func(cur *config.State, mb *config.Mailbox, _ string) (bool, error) {
+				if cur.HooksPaused {
+					return false, nil
 				}
-				h.Rung = keys
-				cur.PutHookSession(h)
-				return false, nil
-			}
-			if stop && h.LastBlock != 0 {
-				if since := a.Now().Sub(time.Unix(h.LastBlock, 0)); since >= 0 && since < hookStopEvery {
-					limited = true
-					h.Blocks = 0
+				items := itemsOf(mb.Pending(), s.server)
+				h := cur.HookSession(key)
+				keys = rungKeys(items)
+				fresh := false
+				for _, k := range keys {
+					fresh = fresh || !contains(h.Rung, k)
+				}
+				if !fresh {
+					if stop {
+						h.Blocks = 0
+					}
+					h.Rung = keys
 					cur.PutHookSession(h)
 					return false, nil
 				}
-			}
-			out, err = hookOutput(rt, ev, doorbellOf(items, s.server, members))
-			return err == nil, err
-		})
-		if err != nil || token == "" {
-			return err
-		}
-		if err = s.checkConnection(); err != nil {
-			return err
-		}
-		written, writeErr := io.WriteString(a.Stdout, out)
-		if writeErr == nil && written != len(out) {
-			writeErr = io.ErrShortWrite
-		}
-		if writeErr != nil {
-			if written == 0 {
-				if cancelErr := a.cancelNotification(ctx, s, deadline, token); cancelErr != nil {
-					return cancelErr
+				if stop && h.LastBlock != 0 {
+					if since := a.Now().Sub(time.Unix(h.LastBlock, 0)); since >= 0 && since < hookStopEvery {
+						limited = true
+						h.Blocks = 0
+						cur.PutHookSession(h)
+						return false, nil
+					}
 				}
-			}
-			return fmt.Errorf("write output: %w", writeErr)
-		}
-		if f, ok := a.Stdout.(interface{ Flush() error }); ok {
-			if err = f.Flush(); err != nil {
-				return fmt.Errorf("flush output: %w", err)
-			}
-		}
-		if stop {
-			*blocked = true
-		}
-		if a.afterPrint != nil {
-			if err = a.afterPrint(); err != nil {
+				out, err = hookOutput(rt, ev, doorbellOf(items, s.server, members))
+				return err == nil, err
+			})
+			if err != nil || token == "" {
 				return err
 			}
-		}
-		_, err = s.lockedDeliver(ctx, deadline, false, func(cur *config.State, mb *config.Mailbox) ([]string, error) {
-			if cur.Notification.Reservation == nil || cur.Notification.Reservation.Token != token {
-				return nil, config.ErrNotificationStale
+			if err = s.checkConnection(); err != nil {
+				return err
 			}
-			h := cur.HookSession(key)
-			// Muse Stop is UI-only. Preserve prior context eligibility so the
-			// same pending batch can reach Prompt/Start after shared cooldown.
-			// Notification completion below still records/spaces the UI notice.
-			if rt.name != "muse" || ev.arg != "stop" {
-				h.Rung = keys
+			written, writeErr := wakemute.WriteOutput(ctx, a.Stdout, []byte(out))
+			if writeErr == nil && written != len(out) {
+				writeErr = io.ErrShortWrite
+			}
+			if writeErr != nil {
+				if written == 0 {
+					if cancelErr := a.cancelNotification(ctx, s, deadline, token); cancelErr != nil {
+						return cancelErr
+					}
+				}
+				return fmt.Errorf("write output: %w", writeErr)
+			}
+			if f, ok := a.Stdout.(interface{ Flush() error }); ok {
+				if err = f.Flush(); err != nil {
+					return fmt.Errorf("flush output: %w", err)
+				}
 			}
 			if stop {
-				n := 0
-				if in.StopHookActive {
-					n = h.Blocks
-				}
-				h.Blocks, h.LastBlock = n+1, a.Now().Unix()
+				*blocked = true
 			}
-			cur.PutHookSession(h)
-			return nil, a.completeNotification(s, cur, token)
+			if a.afterPrint != nil {
+				if err = a.afterPrint(); err != nil {
+					return err
+				}
+			}
+			_, err = s.lockedDeliver(ctx, deadline, false, func(cur *config.State, mb *config.Mailbox) ([]string, error) {
+				if cur.Notification.Reservation == nil || cur.Notification.Reservation.Token != token {
+					return nil, config.ErrNotificationStale
+				}
+				h := cur.HookSession(key)
+				// Muse Stop is UI-only. Preserve prior context eligibility so the
+				// same pending batch can reach Prompt/Start after shared cooldown.
+				// Notification completion below still records/spaces the UI notice.
+				if rt.name != "muse" || ev.arg != "stop" {
+					h.Rung = keys
+				}
+				if stop {
+					n := 0
+					if in.StopHookActive {
+						n = h.Blocks
+					}
+					h.Blocks, h.LastBlock = n+1, a.Now().Unix()
+				}
+				cur.PutHookSession(h)
+				return nil, a.completeNotification(s, cur, token)
+			})
+			return err
 		})
-		return err
 	})
+	if errors.Is(err, wakemute.ErrMuted) {
+		return nil
+	}
 	if err == nil && limited {
 		fmt.Fprintf(a.Stderr, "a2a hook stop: this session was blocked less than %s ago; letting it stop, run `a2a inbox` to read what is pending\n", hookStopEvery)
 	}

@@ -42,14 +42,31 @@ go test ./...                      # unit tests (in-memory fake homeserver)
 - A rejected token exits with a sanitized instruction to ask the keeper for rotation. Neither commands nor hooks invoke password login.
 - `A2A_SECRET_STORE` accepts `file` (also the default) or `keychain` (macOS only). Unknown values refuse credential access and registration before Matrix calls.
 - Keychain service: `works.relux.a2a.relux.works`; account: full Matrix `user_id`, validated against the selected local identity. No file fallback, empty token or password retry.
-- Production always invokes `/usr/bin/security`. Reads use `find-generic-password -s SERVICE -a FULL_ID -w` with stdout captured in a pipe; writes use `security -i` with the command on stdin. Helper stdout/stderr never goes to the terminal or errors. The subprocess environment is limited to PATH and C locale; credentials never enter its argv/environment. Interactive command lines at or beyond security's 4096-byte limit and control characters are refused.
-- New items use `-T /usr/bin/security` without `-U`; existing items use `-U` without `-T`. A duplicate create permits one relookup/update. Per-identity writers serialize; every write is read back exactly. External same-UID deletion may cause `-U` recreation with creator trust. No preservation of a deleted prior item/ACL is claimed; never `-A`, empty `-T`, ACL/partition-list changes or unlocking.
-- A repo-built Swift status companion runs before EVERY security invocation, including migration lookup/new/update/relookup/readback. It calls `SecKeychainOpen` and `SecKeychainGetStatus` without accessing items, stdin, ACLs or unlock. Both processes explicitly address the OS user's `~/Library/Keychains/login.keychain-db`; search-list/default targets and HOME overrides are unsupported. A test-only fixture seam selects the same explicit throwaway path in both processes.
-- The fixed companion path is `a2a-keychain-status` beside `os.Executable()` after symlink resolution. Never PATH or an environment override. Only stdout `unlocked\n` with exit 0 and empty stderr admits security. `locked`/3 and `error`/2 refuse; missing/nonexecutable/helper failure, timeout, extra text, unknown output or mismatched status refuse too. Failure to resolve or launch the companion is local to that executable installation: it records neither identity nor host cooldown, so another correctly installed image of the same identity can proceed. Production non-Darwin Keychain selection refuses; file mode remains available. See README for the local `swiftc`/ad-hoc signing build; installation is held. Portable Go tests use fake processes, including on Linux; the hosted Go workflow runs on self-hosted macOS and does not require Swift. The status APIs are available in the current SDK but deprecated since macOS 10.10.
-- Every probe/security call has a 5-second hard process-group deadline. Remaining group members are also killed synchronously when the leader exits early, whether they retain or close its pipes. Successful leader exit stays successful after cleanup; pipe-completion failures refuse and set cooldown independently of the leader exit status, including missing/duplicate statuses. Owned stdin/stdout/stderr copies must finish within a 100ms post-exit drain bound; unfinished pipes are closed and all copy loops are joined before return. Timeout/interaction failures persist a secret-free 0600 per-identity marker under 0700 `<config>/keychain-state/`. A running probe returning locked/error, timing out, failing pipe completion/cleanup or refusing the exact protocol also sets a host-wide marker, bound to kernel host UUID and target path. The 5-minute cooldown suppresses ALL probes/security for that identity, or all identities on that host for a host marker, across CLI processes sharing this config directory. A host lock serializes preflight/access and marker publication. Other hosts are unaffected by a host marker; identity markers remain identity-wide. Separate config directories do not share markers. Expiry permits a bounded fresh attempt; corrupt/unreadable/symlink/public markers refuse. Refusals that set a cooldown and subsequent active-cooldown refusals include a closed `cause=TOKEN` and the UTC `retry after` deadline, without executable paths or helper output. Causes are `preflight_locked`, `preflight_error`, `preflight_timeout`, `preflight_io`, `preflight_refused`, `security_timeout`, `security_interaction` and `security_io`. Timestamp markers remain readable by older images; private `.reason` sidecars bind that closed cause to the marker deadline. Legacy or unreadable/unknown cause metadata projects `unknown` without bypassing the marker. Never delete markers to force a retry.
-- No-dialog operation is bounded to unlocked login Keychain plus an ACL trusting `/usr/bin/security`. Untrusted ACL and locking between probe and access remain accepted races. The first real sentinel left a dialog after child termination; A-lite prevents known-locked access. Reopen full helperA if the probe prompts/API is unavailable, host lock policy changes or a no-dialog domain is required. Fakes are not macOS UI proof. Phase 1 protects against file leaks, not same-UID impersonation; backups remain. Phase 2 broker, launcher-bound identity, isolated workers and revocation are deferred.
+- Human identities never use a2a's Keychain items: an item bound to the a2a binary is readable by every agent that runs a2a. `--human` in Keychain mode, `creds migrate` for a human, and named-profile secret reads or creates for a human all refuse before any Keychain operation. The file-mode human account is legacy and is being retired; an owner-only tool holds a future owner token.
+- Phase 2 (#138): the a2a binary performs every item operation in process through the Security framework (cgo), with user interaction disallowed. No helper process such as `/usr/bin/security` is ever run for item access. Backend errors never reach output; the store reports a fixed message per class (missing, duplicate, interaction/timeout, other). Tokens are passed as bytes; empty tokens and control characters are refused before any write. Every native length is checked against its destination type before conversion: UInt32 for service, account and secret, and C int for a returned secret. An out-of-range length refuses instead of truncating.
+- New items get the Keychain default ACL, which trusts only the creating binary's designated requirement; existing items are updated in place and keep their ACL. An update first reads the item's data, so an item the binary may not read is refused before the modify path. A duplicate create permits one relookup/update. Per-identity writers serialize; every write is read back exactly. An update of an item deleted after the lookup recreates it with the default ACL. Never unlocking, ACL or partition-list changes.
+- An untrusted item (another binary's, or this identity's item created by a differently signed a2a build) and a locked keychain return an interaction error instead of a prompt; it records the cooldown below. Keychain mode therefore needs a binary signed with a stable identity: an ad-hoc build is trusted only by its own code hash. Non-macOS selection refuses Keychain mode; Darwin without cgo currently refuses late through the unsupported backend. Early cgo-off selection refusal remains a pre-adoption follow-up. File mode remains available.
+- A repo-built Swift status companion runs before EVERY item operation, including migration lookup/new/update/relookup/readback. It calls `SecKeychainOpen` and `SecKeychainGetStatus` without accessing items, stdin, ACLs or unlock. The probe and the item operation both address the OS user's `~/Library/Keychains/login.keychain-db` explicitly; search-list/default targets and HOME overrides are unsupported. A test-only fixture seam selects the same explicit throwaway path for both.
+- The fixed companion path is `a2a-keychain-status` beside `os.Executable()` after symlink resolution. Never PATH or an environment override. Only stdout `unlocked\n` with exit 0 and empty stderr admits the item operation. `locked`/3 and `error`/2 refuse; missing/nonexecutable/helper failure, timeout, extra text, unknown output or mismatched status refuse too. Failure to resolve or launch the companion is local to that executable installation and records no cooldown; a correctly installed image can proceed. See README for the local `swiftc`/ad-hoc signing build; installation is held. Portable Go tests use a fake backend and fake probes, including on Linux; the hosted Go workflow runs on self-hosted macOS and does not require Swift. The Security APIs used are available in the current SDK but deprecated since macOS 10.10.
+- The probe has a 5-second hard process-group deadline. Remaining group members are also killed synchronously when the leader exits early, whether they retain or close its pipes. Successful leader exit stays successful after cleanup; pipe-completion failures refuse and set cooldown independently of the leader exit status. Owned stdin/stdout/stderr copies must finish within a 100ms post-exit drain bound; unfinished pipes are closed and all copy loops are joined before return. Each item operation has a 5-second hard deadline. An in-process call cannot be killed, so a late result is discarded and counted as a timeout. A late mutation can still land, even after this process exits, because its request may already sit in securityd. Every add and update therefore first records a durable per-identity write fence (`<config>/keychain-state/<id>.pending`, 0600). It holds the writer's pid and start time, the kernel boot-session UUID (`kern.bootsessionuuid`, empty when unavailable), and a SHA-256 digest of the value being written. Only the goroutine that ran the native call removes it, after that call returns. While the fence exists, every operation for that identity refuses, whatever the cooldown says. A value already present is never written again, so the intended value can only appear through that write. A fence never expires. `a2a --as <identity> creds reconcile` clears it only when its writer is confirmed gone AND the abandoned write can no longer land. Gone means no such pid, or a pid now held by a process with another start time, checked with a pinned `/bin/ps`, a fixed environment and `TZ=UTC`. Can no longer land means its intended value is observed in the item, or the boot-session UUID differs from the recorded one (the host restarted). The calendar boot time is never used, because a clock correction can move it. It keeps the fence when the writer lives, when its state is unknown (any inspection failure), when boot evidence is unavailable or was not recorded and the value is not observed, when the value differs or is missing, or when the keychain does not answer. Limits: observing the value assumes this config root's writers are the only ones writing it, since an out-of-band writer is not excluded; and a restart is assumed to drop securityd's queued requests. Timeout/interaction failures persist a secret-free 0600 per-identity marker under 0700 `<config>/keychain-state/`. Probe locked/error/timeout also sets a host-wide marker, bound to kernel host UUID and target path. The 5-minute cooldown suppresses ALL probes/item operations for that identity, or all identities on that host for a host marker, across CLI processes sharing this config directory. A host lock serializes preflight/access and marker publication. Other hosts are unaffected by a host marker; identity markers remain identity-wide. Separate config directories do not share markers. Expiry permits a bounded fresh attempt; corrupt/unreadable/symlink/public markers refuse. Current cooldown refusals retain closed cause tokens and UTC retry deadlines; timestamp-only legacy markers stay readable and unknown reason sidecars project unknown. Never delete markers to force a retry.
+- Phase 2 binds item access to the signed binary. That binding is only as strong as the signing key: a same-user process that can sign its own code with that identity without the owner present satisfies the requirement and reads the token, so how the key is protected is an owner decision for the signing sitting. Any same-user process can still run the genuine binary to act as the identity. Locking between probe and access remains an accepted race (it returns an interaction error, not a prompt). Fakes are not macOS UI proof; the gated `TestKeychainPhase2PlatformSentinel` exercises the real backend on one throwaway keychain under a separate allowance. Backups remain. Broker, launcher-bound identity, isolated workers and revocation are deferred.
 
 ## Commands
+
+Recorded pre-adoption limitations remain open: Darwin cgo-off late refusal;
+rare sync/deadline paths that strand an unstarted mutation fence; ACL
+change-authorization and update-not-found/add test gaps. The native sentinel
+has not run for this candidate. Native ACL/partition/no-dialog/refusal
+measurements, stable designated requirement and N-to-N+1 survival, item
+rotation/rollback and signing-key custody remain separate adoption gates.
+See README for the additional resource/reconciliation/test limitations.
+
+### `a2a --as <identity> creds reconcile`
+Clears the selected identity's Keychain write fence once the abandoned write can no longer land: legacy or named Keychain profile, never file or `--human`. Backend, identity/class, binding and migration checks run before constructing the adapter. Under the identity lock it reads the fence; with no fence it reports that.
+- If the writer still runs (same pid and start time), or its state cannot be determined, it refuses without touching the keychain.
+- For a confirmed-gone writer, a different boot-session UUID clears the fence. Unavailable boot evidence, or a fence recorded without it, never counts as a restart.
+- Otherwise it performs one lookup. The intended value (compared by digest) clears it. A different or missing value, an interaction refusal, a timeout or another failure keeps it, because the request may still land.
+It prints no secret and compares only digests.
 
 ### `a2a bind association --private-intent-fd=3 --json`
 
@@ -61,7 +78,7 @@ specified in [the association contract](terminal-association.md).
 
 ### `a2a --as <own-name> creds migrate`
 With `A2A_SECRET_STORE=keychain`, migrate exactly the selected identity. No wildcard
-or directory enumeration is supported. A human uses interactive `--human --as`.
+or directory enumeration is supported. `--human` is refused.
 The original 0600 regular file stays under its existing identity lock while the
 token is written and matching readback verified. Only then is it replaced with
 metadata using a same-directory temporary file, fsync, rename and directory sync.
@@ -87,7 +104,7 @@ Onboards a new orchestrator in one command (owner requirement, 2026-09-29): it p
 summary. Every step is printed; nothing is a hidden default; a re-run changes nothing and says `already` / `unchanged`.
 
 **Current onboarding policy:** the owner authorizes the identity; missing rooms are provisioned through the meta-keeper, with the product
-keeper coordinating product scope. Continue only when the required rooms and membership are ready. The sole agent room-creation exception is an admitted, verified owner-channel `owner-dm bind`: it creates only the pinned owner’s unencrypted private room (see Owner DM S1 below). The host terminal, not the agent, may also run `principal-dm ensure` for a host-pinned non-owner principal (Principal DM S1 below). Do not use `identity ensure` to create
+keeper coordinating product scope. Continue only when the required rooms and membership are ready. An admitted, verified owner-channel `owner-dm bind` creates only the pinned owner’s unencrypted private room (see Owner DM S1 below). Separately, [agent pair DM S1](agent-dm.md) permits only the designated creator of an exact host-admitted keeper/orchestrator pair to ensure that pair's private room. The host terminal, not the agent, may also run `principal-dm ensure` for a host-pinned non-owner principal (Principal DM S1 below). Do not use `identity ensure` to create
 a missing room. The implementation still has that capability (step 2 below); it does not enforce keeper approval or a readiness gate.
 
 1. **Identity.**
@@ -218,6 +235,60 @@ A refused, malformed or cancelled creation-state lookup stops the command withou
 If the space refuses the child link, the room exists but is NOT linked:
 the command exits 1 and names the space members who can link it, with the `a2a product adopt X <room>` command they would run.
 
+### `a2a room power <room> [--json]`
+
+Read one explicitly selected room on the caller's current connection (or
+`--profile NAME`). Resolve aliases once; full opaque/domainless room IDs are
+preserved without assuming a server suffix. One bounded original-endpoint
+`GET /rooms/{roomId}/state` supplies the complete current snapshot, including
+the caller's JOIN. This command never joins, invites, publishes state or
+account data, repairs subscriptions, changes identity, or writes delivery state.
+
+JSON is one object with `type: "room-power"`, `v: 1`, `server_name`, `room_id`,
+`caller`, `room_version`, `completeness: "complete-response"`,
+`observation: "current-state-response"`, `power_levels_present`, `creators`,
+`defaults`, `required`, and `users`. Creator rows contain `mxid` and `origin`
+(`legacy-create-content`, `create-sender`, or `additional-creator`). User rows
+contain `mxid`, nullable `membership`, nullable `explicit_level`, `effective`,
+and `origin`. Effective authority is exactly `{"kind":"finite","value":INTEGER}`
+or `{"kind":"creator-infinite","value":null}`. User origins are `explicit-user`,
+`users_default`, `initial-creator`, or `creator`. Creators and users are sorted
+by exact MXID. A historical creator label alone does not override finite levels.
+
+The user union includes joined/invited accounts, explicit power users, all
+creators and caller. A left creator or explicit user retains its observed
+membership; a user known only through creation/power has null membership.
+This is not an exhaustive list of everyone who could receive `users_default`.
+Defaults include `users_default`, `events_default` and `state_default`.
+Required thresholds include `ban`, `invite`, `kick`, `redact`, `power_levels`
+and `notifications_room`. An absent power event is distinct from an empty one:
+pre-v12 initial creator authority is100; v12 creator authority remains infinite.
+Other initial users receive0. Text output escapes identities and separately
+labels absent explicit entries, finite/default levels and creator authority.
+
+Known room versions1–12 are interpreted explicitly. Missing `room_version`
+means1. Versions1–10 use the create content's creator; version11 uses the
+create event sender; version12 adds `additional_creators`. Only versions1–9
+admit historical string power levels. This reader supports exact integers
+in `[-(2^53)+1, (2^53)-1]`, including historical strings, without float
+conversion or truncation. This conservative product limit also applies to
+room versions1–5, whose historical events may exceed the Canonical JSON
+range: those observations are unsupported and refuse without clamping.
+Unknown versions,
+malformed creator/level/member fields, duplicate JSON or `(type,state_key)`
+entries, ambiguous case variants, redacted/mismatched state, redirects,
+truncated/oversized responses and a nonjoined caller refuse without partial
+output. Fixed diagnostics distinguish access denied, incomplete observation
+and malformed/unsupported policy. There is no retry/fallback to another identity.
+
+Room v12 creator authority is immutable and remains after leave. A replacement
+user at100 therefore does not prove that a creator lost authority. No
+`sole_admin` or `safe_to_retire` conclusion is emitted. This is an observation
+from the selected server, not proof of server honesty or a lock against later
+state changes. See [room v12](https://spec.matrix.org/v1.16/rooms/v12/),
+[v10 integer rules](https://spec.matrix.org/v1.16/rooms/v10/), and
+[historical initial power](https://spec.matrix.org/v1.16/rooms/v1/).
+
 ### `a2a room members <room> [--membership join|invite|join,invite] [--json]`
 
 Read current joined/invited principals using the selected own identity and
@@ -280,7 +351,7 @@ command. The emptiness check follows filtered empty pages until the history ends
 The check covers only history visible to the caller; run retirement as the room's creator or a member since creation so earlier messages
 are not hidden by joined/invited history visibility.
 
-### `a2a product new X [--keeper NAME] [--projector NAME]` / `product adopt X <room>` / `product list` / `product show X`
+### `a2a product new X [--private] [--keeper NAME] [--projector NAME]` / `product adopt X <room>` / `product list` / `product show X`
 
 Products are Matrix spaces named `#X`; `X` matches `[a-z0-9-]{1,40}`. `new` creates the space and its `#X-lobby`, `#X-broadcast`, and
 `#X-system` rooms when absent. It adds reciprocal `m.space.child` / `m.space.parent` links and invites the named keeper and projector.
@@ -288,6 +359,21 @@ The lobby follows `room new` policy. The broadcast room sets `events_default` to
 post; the creator keeps admin power). The system projection room sets `events_default` to 50 and gives the optional projector level 50. Re-running prints `already`
 and does not change existing rooms or links. The named keeper gets power 50 in the space itself (enough to link the product's rooms, never 100);
 on an existing space, a keeper below 50 is raised when the caller has the power, otherwise a note is printed.
+
+With `--private`, `new` creates only the Space: `private_chat`, private directory
+visibility, invite-only joining, forbidden guest access and joined history.
+It creates no default rooms, invitations, subscriptions or explicit power changes.
+Do not combine this mode with `--keeper` or `--projector`; use explicit invitations
+and `product adopt` afterwards. The ordinary mode above is unchanged.
+
+An existing alias, including a create-alias race, is reused only after a complete
+current-state response proves a Space with those policies and the selected caller
+joined, followed by an explicit private directory-visibility response from the same
+server. Public, missing, malformed, inaccessible or incomplete observations refuse
+without conversion or a second create. A directory 404 is not alias absence.
+An uncertain create reports failure without an automatic retry. The checks observe
+current state on the selected server; they do not establish encryption, every
+federated directory's visibility or a guarantee against later policy changes.
 
 `adopt` adds an existing room to X without creating or renaming it. It prints `already` for an existing child. A room given by alias whose
 state the caller cannot read (not a member) is still linked from the space, with a note; a bare `!roomid` that cannot be verified is refused. If the caller cannot send the
@@ -300,6 +386,8 @@ that content. A lookup failure does not trigger a join or create a product. The 
 write can remain when the parent write fails, and the output reports the completed child step and any parent refusal or error.
 ```bash
 a2a product new alpha --keeper mini_alpha_keeper --projector a2a-projector
+a2a product new quiet --private
+a2a product adopt quiet existing-room
 a2a product adopt alpha tooling-room
 a2a product adopt '!aliasless-space:example.org' tooling-room
 a2a room new tooling-room --product '!aliasless-space:example.org'
@@ -328,7 +416,7 @@ session id: the hook's stdin `session_id` for hooks, otherwise `A2A_SESSION_ID` 
 `watch` and unbounded `wait --timeout 0` ignore both ambient native runtime IDs: unless explicitly owned through `A2A_SESSION_ID` (or a supplied hook id),
 their holder is their own PID with the process birth where supported below. All renewals, including retries, use that same process scope. Default `wait` (25 minutes), other finite waits,
 `inbox` and hooks retain session sharing. Every raw `wait` and `watch`, including default and finite waits from the monitor owner,
-refuses a retained non-stopped monitor before acquiring a lease or consumer lock. An enrolled station reports `courier_lease_conflict`.
+refuses a retained non-stopped monitor before acquiring a lease or consumer lock. An enrolled station reports `daemon_lease_conflict`.
 With a cleanly stopped monitor or no monitor record, default and finite station waits retain ambient runtime session evidence.
 A newly acquired lease records that runtime session as its holder.
 Native bound consumers already use the binding's explicit session id; this does not change their ownership or exclusive consumer locks.
@@ -1830,6 +1918,15 @@ compatible writers cannot clear or replace that first timestamp. Direct
 already-mutated State. Update callbacks use an independent working copy and the
 internal locked save, avoiding recursive state-lock acquisition.
 
+Within one cycle of a bound terminal consumer (from the start of the cycle until
+before its timer wait, and closed on every return), that consumer may reuse the
+typed decode of State bytes it has already parsed in the same cycle. Every read
+still opens and reads the complete file with its mode, path and validation
+checks; reuse requires the same state path and byte-for-byte identical content,
+and every reader or update callback receives its own independent copy. Seal,
+fence, lock and connection checks are never skipped or cached. Other commands,
+native runtimes and the time between cycles decode as before.
+
 The SHA-256 input is the deterministic JSON encoding of every State member except
 `writer.seal` itself, including `writer.protocol`, `writer.foreign_seen`, and
 complete opaque top-level values and their nested content. Deleting or zeroing
@@ -2270,7 +2367,24 @@ macOS inspection uses `/usr/sbin/lsof` executable vnode metadata; Linux uses `/p
 
 Timing and spend flags default to the same policy as SessionStart: `--interval 2s`, `--retry-max 30s`, `--max-wakes-per-hour 30`.
 Explicit flags still accept `--interval` 1s..60s, `--retry-max` interval..5m and `--max-wakes-per-hour` 1..3600. The process syncs and
-observes idle input at that interval, refreshes its own identity lease, and exponentially backs off sync errors to the chosen maximum. Hook pause,
+observes idle input at that interval, refreshes its own identity lease, and exponentially backs off sync errors to the chosen maximum.
+A consumer with nothing outstanding (no undelivered mail, attempt, reservation, cooldown, notice report or retry, idle sample, open
+availability episode or refresh candidate) that stays so for 30 seconds becomes quiescent: instead of a full cycle every interval it waits for a
+reason. Reasons are new server events (a `/sync` long-poll with a 25-second server timeout, ingested by the same mailbox-before-cursor path),
+a change to its own state or mailbox file by another writer, a change to its connection, credential, subscription-policy or owner files or
+to its launch alias, its owner's exit or replacement, and a full reconciliation at least every 60 seconds, which also renews the lease and
+refreshes observations. Each reason runs an ordinary full cycle with all of its guards; full cycles stay at least one interval apart, and the
+owner stays watched while that interval is held. Files are compared by metadata only. The consumer's own locked writes are recorded under
+the state lock so they do not wake it; if a locked operation finds the files already changed by another writer since its previous own record,
+that evidence is kept until the next full cycle, so a later own write never hides another writer's change. The owner is watched without forking
+every `min(interval, 1s)`, in quiescent waits and in ordinary waits. The consumer keeps the owner's native start token from its first
+successful read for its whole lifetime, across full cycles and both kinds of wait. The owner's absence, or a native start token that differs
+from that remembered token, is a known replacement and stops the consumer at once, even when the second-resolution canonical birth time is
+unchanged. An inspection error is unknown: it proves nothing, never sets or clears the remembered token, and leaves the ordinary checks to
+decide. The owner's absence at the consumer's first read stops it at once. A replacement whose valid token is read before anything
+is remembered is left to the canonical birth check. When a quiescent wait registers the owner, the native token is compared with the
+remembered one before the canonical birth checks run, and again between them, and the owner stays watched every `min(interval, 1s)`
+while each check runs, so a failing or slow canonical check never hides or delays a known replacement or the owner's exit. Any outstanding work returns the consumer to the per-interval loop. Hook pause,
 manual human/blocked/stopping gates and the hourly attempt limit retain mail. Fixed metadata outcomes are in `bind status`; the private 0600
 `state/NAME.binding.log` contains fixed errors and a `binding exit: REASON` line on each handled consumer exit, including vanished/replaced/stopped
 bindings, owner/target exit, cancellation and startup failure; it never contains captured screens or peer bodies. SIGKILL, a crash or host loss cannot
@@ -2294,7 +2408,16 @@ Terminal consumers on macOS and Linux automatically pick up a replacement execut
 On Linux, `os.Executable` resolves a launch symlink: retargeting that link is not observed unless the consumer's argv retains
 the link. Refresh is reliable for replacing the regular file at the retained executable path. When a matching absolute launch alias
 is available in argv, it is retained and resolved on each poll and before exec; only then can retargeting that alias trigger refresh.
-Exec uses the resolved path and retains the launch path as argv[0] for later refreshes. This applies only to
+Exec uses the resolved path and retains the launch path as argv[0] for later refreshes. The same rule applies when a manual
+or hook-started terminal `bind` spawns its consumer: the validated running image is executed, and the invoking absolute launch alias
+becomes the consumer's argv[0] only if it currently resolves to that image and passes the installed-command custody policy (the
+alias is owned by this user or root and links directly to the regular image, without a chain of links, and no directory above the
+alias, its link target or the image is writable by other users, foreign-owned or inside a source checkout). Refresh applies the
+same rule at the moment of each candidate and again before exec, on every platform: a symlink at the launch path that fails custody
+(even one that replaced a direct image later) is never observed or executed. A bare-name (`PATH`) or relative invocation, or an alias
+that fails custody, is not admitted and the consumer keeps the direct image, so invoke `bind` and configure hooks with the installed
+command's absolute path. A consumer started through an alias inside a source checkout no longer adopts a retarget of that alias;
+rebind it once through the installed command. This applies only to
 terminal `bind`; native Codex `runtime bind` consumers are out of scope. **One manual unbind/rebind from the owning session is still needed to
 get an already-running old consumer onto the first build containing this feature.** Later compatible replacements need no unbind, `--force`, new
 consumer or new generation. A pre-feature or incompatible candidate is refused and needs a manual rebind.
@@ -2356,6 +2479,27 @@ or bytes change, then requires stability again. No argv, environment, path, erro
 authority/state observations postpone refresh. Sync failures retain the existing bounded retry and do not by themselves block a safe refresh;
 refresh never drops the lease or starts a second consumer.
 
+After one or more failed startup/consumer attempts, the first complete successful
+consumer cycle logs exactly `binding consumer ready`. Credential recovery alone
+does not claim that target inspection, sync or dispatch has recovered. A first-try
+success logs no ready line. Existing `binding consumer unavailable; bounded retry
+cause=...` lines keep their format; `connection` here denotes owner-process or
+tmux-target inspection, before Matrix sync.
+
+Continuous unavailability for ten minutes queues a separate incident through the
+existing `mail-alarm` owner/optional-lead routes with the closed reason `consumer
+unavailable`, even when there is no stranded own notice. The binding journal
+retains this episode and its alarm fence through in-place re-exec. Each episode
+attempts alarm enqueue once; missing/invalid alarm routes log the existing
+`binding incident report: unavailable: ...` outcome once and leave consumer
+retries running. Queued sends retain the ordinary bounded mail-alarm retries and
+transaction deduplication. Recovery clears unsent jobs for that episode and
+rearms a later episode. Already in-flight sends cannot be recalled. Secret-store
+unavailability can queue locally but cannot send without credentials; unreadable
+or unwritable state can only produce the local unavailable diagnostic until it
+recovers. Persisted times use wall time across exec, so a clock rollback delays
+the threshold. These diagnostics grant no terminal input or receipt authority.
+
 The only typed text is `a2a: N new peer events; run a2a inbox`. Ordinary fresh delivery requires two consecutive qualified rendered-empty
 observations at least `--interval` apart on the same pinned target. Busy, unknown, draft, gate, session/generation/daemon or authority changes
 reset qualification; the first glimpse spends no typing, hourly reservation or retry. Codex empty admission requires its shortcuts hint;
@@ -2365,10 +2509,17 @@ Claude named-session top rules additionally require a registry record associated
 own-UID ancestry, owner birth and pane proof. Only that producer reads its inherited `CLAUDE_CONFIG_DIR`, or its own home `.claude` when
 unset. It stores the canonical proven root in the private binding; the detached consumer never guesses a home/root or scans profiles.
 Only `sessions/<owner-pid>.json` is opened, bounded to 64KiB, regular, owned by this UID and not a final-path symlink. Adjacent keys and
-messaging sockets are never opened. Root association compares the live PID, UTC `TZ=UTC LC_ALL=C ps -p PID -o lstart=` birth, record
-session ID and tmux pane with the already-pinned local target. The existing owner birth/UID fence is retained independently; `startedAt`
+messaging sockets are never opened. Root association compares the record PID, session ID and tmux pane with the already-pinned local target.
+On Darwin, process identity requires `pidDomain=darwin` and the UTC `TZ=UTC LC_ALL=C ps -p PID -o lstart=` birth.
+On Linux, it requires exact `pidDomain=linux:<machine-id>:<pidns>` from local `/etc/machine-id` and the pinned owner's
+`/proc/PID/ns/pid` link (for example, `pid:[123456]`), plus decimal `/proc/PID/stat` field-22 start ticks.
+The bounded stat parser handles parentheses and whitespace in `comm`; unavailable, malformed or unsupported local identity fails closed.
+Expected identity is collected independently of the registry, with start ticks checked around namespace collection and local identity
+rechecked across the registry read. The existing ps owner birth/UID and ancestry/pane fences remain independent; `startedAt`
 is not a process-birth substitute. A session handover clears the old root and readiness/idle observations; trusted rebind must prove the new
 association. A matching bind can associate a previously rootless binding without discarding its generation or attempt journal.
+Updating or re-executing only the detached consumer does not fill an already empty stored root; a trusted own association path is
+still required after the ordinary binary update. Neither source support nor synthetic tests establish restored live idle wake.
 
 Registry qualification follows observed structure, with no release allowlist. Any version matching `SafeRegistryVersion`
 (three dot-separated numeric components, each 1–5 digits) is admitted and retained in the assessment and readiness key.
@@ -3787,10 +3938,10 @@ configure or inspect this feature.
 
 ### Admin-room account registration
 
-`a2a --as ADMIN connection register NAME --via-admin-room` creates one new
+`a2a --as ADMIN connection register NAME --via-admin-room [--into /fresh/member-root]` creates one new
 agent account on the selected named connection using that connection's explicitly
 configured administrator session. `--as` is required and must agree with the
-session's `A2A_AGENT`, when set. The selected backend handles the new account's
+session's `A2A_AGENT`, when set. Without `--into`, the selected backend handles the new account's
 access token. Keychain retains the generated recovery password in its selected
 password service as before. With `credential_store.backend: "file"`, the password
 stays only in memory: nothing replaces the Keychain recovery-password store.
@@ -3804,7 +3955,59 @@ registration token stays in process memory: it is never written to
 never included in the posted command. Existing owner-issued-token registration
 continues to use its existing route.
 
-The public connection entry must contain all of these prerequisites, for example:
+`--into` explicitly selects a fresh member configuration root. Without it, the
+existing administrator-root registration/storage behavior is unchanged. The
+administrator may use either supported backend; the destination always uses
+the file backend. Only the destination receives the child access token and
+credential metadata: no child Keychain password/token or child credential copy
+is created in the administrator root. The password and single-use admission
+token remain in memory. Global `--profile` still selects the source administrator
+connection; its label is retained as the destination's sole/current profile.
+
+The destination `connections.json` contains only the selected connection's ID,
+homeserver URL, identity server, existing public card-room setting (needed by
+ordinary card operations), and `credential_store: {"backend":"file"}`. It omits
+admin admission policy, registration-token references, source Keychain services
+and every other profile. No administrator credentials, `matrix.env`, subscriptions,
+mutes, owner-DM pins, hooks, host files or state are copied. The member can use
+ordinary commands with its own `A2A_CONFIG_DIR` and `A2A_AGENT=NAME`, independently
+of the administrator root.
+
+On Linux and macOS, the destination must be a clean absolute path naming a
+nonexistent leaf under an existing trusted parent. Existing roots (even empty),
+symlink leaves/ancestors, path aliases, unsafe writable ancestors and overlap
+in either direction with the administrator root refuse before issue/registration.
+Use the canonical physical path, including on systems where `/tmp` or `/var`
+is a symlink. Other platforms refuse this opt-in route before creation. Root
+reservation uses exclusive directory creation, a credential lock and an exclusive
+recovery journal; concurrent callers cannot register twice for the same target.
+Directories and regular files are private `0700` and `0600`. Pinned directory
+descriptors prevent replacement from redirecting writes; changed directory
+identities or imported state refuse. Existing source child metadata, human
+identity, migration state or pending registration also refuse: this route does
+not migrate or export an existing identity. This separates configuration/handed-off
+credentials, not processes running as the same OS user.
+
+Every reserved root is retained on failure or interruption, including a failure
+before any remote attempt. Never automatically delete it or retry with that
+root. `<member-root>/registration.pending.json` is secret-free, binds the member
+and records the last durable stage: reservation/preflight, pending outcome,
+definite rejection or ambiguity, credential/registry publication pending, or
+complete. An interrupted journal write may leave only the preceding conservative
+stage; a crash during setup may leave a reserved root without a usable journal.
+Neither case proves a remote account was rolled back. Safe stage/recovery
+diagnostics require explicit owner inspection. A generated file-backend password
+is never retained for recovery.
+
+Publication writes member credentials first, then the minimal registry, verifies
+their binding, and completes the journal before reporting success. An incomplete
+root may retain only its own member credentials and recovery evidence. Ordinary
+member sessions refuse an incomplete or mismatched root completion journal,
+even if credential and registry publication already occurred. Subsequent
+registration into any retained root refuses without reissue or registration;
+recovery is an explicit owner operation, not another invocation with `--into`.
+
+The source administrator's public connection entry must contain all of these prerequisites, for example:
 
 ```json
 "admin_registration": {
@@ -3829,8 +4032,17 @@ required before landing; fake-server tests do not qualify an installed server.
 Before issue, the CLI verifies the selected session with the server, the room's
 local server-qualified ID and bot-created state, explicit `m.federate: false`,
 and exactly the configured joined members, including the administrator and bot.
-Invites, knocks, extra members, broad or room-specific subscriptions, retained
-relevant mailbox entries, and an overlapping owner-DM route refuse. Membership
+Invites, knocks, extra members, subscriptions explicitly targeting the configured
+admin room, retained relevant mailbox entries, and an overlapping owner-DM route
+refuse. An explicit admin-room selector refuses even when expired or restricted
+by sender, kind, topic, subject or all-events. Broad selectors whose typed sender
+is the configured server bot also refuse, including kind-restricted or expired
+rows; an explicit ordinary-room bot-sender selector retains the ordinary-room
+contract. Other valid broad exact-sender selectors (`room=all from=@user:server`,
+including owner-sender rows) may coexist with registration and remain unchanged:
+they are not deleted, trimmed, rewritten or muted, and existing mutes are preserved.
+Broad selectors without a valid typed sender retain the conservative
+refusal, including unrelated broad kind/subject selectors. Membership
 is a point-in-time observation; it does not lock the room against changes by
 another administrator. No local power-level check grants server administration
 rights. A server refusal reports a fixed stage, recognized Matrix errcode and
@@ -3873,6 +4085,9 @@ it, and owner-DM mirroring cannot target it. A retained mailbox entry from this
 room causes delivery to refuse for private owner recovery; it is never printed.
 These exclusions apply to the selected connection's configured room. Unrelated
 rooms retain normal read, delivery, projection and archive behavior.
+Protected-room exclusion is independent of sender matches and precedes ordinary
+delivery/history access; a broad sender subscription never makes that room an
+ordinary subscription source.
 
 ### Internal notice projection
 
@@ -3926,7 +4141,7 @@ digests, event type and transaction. The bytes sent are the verified reservation
 snapshot. A conflicting replacement before either gate refuses; an ACK mismatch
 remains UNKNOWN. These checks and cooperative locks do not isolate arbitrary
 code running as the same OS user. No journal lock spans remote I/O. A separate
-identity post-attempt lock spans the invocation to exclude Courier migration;
+identity post-attempt lock spans the invocation to exclude a2a daemon migration;
 concurrent active attempts refuse with no send, while local status remains
 available under the short journal lock.
 
@@ -4000,34 +4215,75 @@ or resend is implemented here. Issue #97 remains open. A separately decided
 future resume route requires a known server transaction-deduplication horizon;
 this feature makes no such assumption.
 
-## Courier authentication endpoint
+## Daemon authentication endpoint
 
-`a2a courier serve|register-station|unregister-station` is local-only and requires
-an explicit private `--home`. Registration emits only into an operator pipe with
-`--emit -`. See the [Courier wire and custody contract](courier.md) for framing,
+The a2a daemon (a2ad) exposes local-only operator commands:
+`a2a daemon serve|register-station|unregister-station` requires an explicit
+private `--home`. Registration emits only into an operator pipe with
+`--emit -`. See the [a2a daemon wire and custody contract](daemon.md) for framing,
 limits and the 0711 directory / 0666 socket access policy.
 
-## Courier station enrollment
+## Daemon station enrollment
 
-`a2a courier enroll --dir HOME/.a2a --from - [--rotate]` installs a station
+Service supervision is explicit and local:
+
+```
+a2a daemon service install --plan ROOT_PLAN
+a2a daemon service uninstall --plan ROOT_PLAN
+a2a daemon service status --plan ROOT_PLAN
+```
+
+These operations require root and use a pinned public plan; they never elevate
+privileges. Unknown supervisor state preserves unit files and returns an
+unresolved refusal. `serve` now requires `--owner-pin FILE`,
+`--owner-pin-sha256 HASH`, `--image-sha256 HASH` and `--service-gid GID` with its
+explicit `--home`, and runs only as the provisioned service account at the fixed
+platform socket. See [C6 service, run-dir, sweep and audit commands](daemon-service.md)
+for rendered templates, `prepare-run-dir`, read-only `daemon sweep`, counts-only
+`daemon rescue`, owner-selected `daemon soak`, and native qualification limits.
+
+`a2a daemon enroll --dir HOME/.a2a --from - [--rotate]` installs a station
 user enrollment from a closed v1 pipe payload without consulting credentials.
 The parent is canonicalized once; the final directory and its entries refuse
-symlinks. See the [station enrollment contract](courier-enroll.md) for byte
+symlinks. See the [station enrollment contract](daemon-enroll.md) for byte
 formats, canonical ownership checks, pinned readers and atomic rotation.
 
-### Courier identity migration (C4 constituent)
+### Daemon identity migration (C4 constituent)
 
-Upgrade the shared `a2a` binary first, then explicitly stop **every session of
-that identity** before running migration. Legacy binaries without the migration
+The CLI supports **selected file-backed migration only**. Keychain-backed
+initial migration, `--resume` and `--rollback`, for both legacy and named
+profiles, refuse with the closed `keychain_daemon_migration_deferred`
+diagnostic in preflight. Refusal precedes any native constructor/item/probe,
+credential materialization, migration lock/journal/fence/staging/destination
+or token delete/restore effect. An injected provider cannot bypass it, and no
+file fallback is selected. Existing Keychain items, metadata, pending source
+states and target journals remain untouched. This explicitly narrows the
+earlier proposed capability. Native Delete, pending-delete fencing and its
+reconcile/resume/rollback design are separate [#460](https://github.com/relux-works/a2a-swarm/issues/460),
+with no target date; none is implemented in this source change.
+
+**Pre-install/adoption gate:** before any host installs a build containing
+this successor, its operator must verify that there is **no pending Keychain
+Daemon-migration journal** in that host's actual configured roots. If a
+transaction exists, finish or roll it back using the **current binary before
+installing the new one**. Unknown or unexamined roots/journals cannot be called
+clear. This is an operator prerequisite, not permission for this source task
+to inventory a host, run migration as a check, clean files or install a build.
+No new status command is provided. All existing native sentinel, stable
+signing requirement/N-to-N+1 survival, rotation/key custody and L1/L2 gates
+remain separately required.
+
+After satisfying those gates, upgrade the shared `a2a` binary, then explicitly
+stop **every session of that file-backed identity** before running migration. Legacy binaries without the migration
 fence are unsupported during migration: they cannot enforce its exclusion.
 Do not treat the commands below as evidence that a host migration was run.
-This constituent provides migration only; Courier enrollment, serving, engine
+This constituent provides migration only; a2a daemon enrollment, serving, engine
 and service installation compose separately.
 
 ```
-a2a courier migrate <identity> --to <absolute-courier-base>
-a2a courier migrate <identity> --to <absolute-courier-base> --resume
-a2a courier migrate <identity> --to <absolute-courier-base> --rollback
+a2a daemon migrate <identity> --to <absolute-daemon-base>
+a2a daemon migrate <identity> --to <absolute-daemon-base> --resume
+a2a daemon migrate <identity> --to <absolute-daemon-base> --rollback
 ```
 
 The source is the selected config resolver's identity, including an explicit
@@ -4054,7 +4310,7 @@ paths and retain their inodes forever; migration and rollback never rename or
 unlink a lock.
 
 Before copying, migration durably writes a sealed source State record:
-`migration: {phase: "in_progress", courier_base, at}`. Successful completion
+`migration: {phase: "in_progress", daemon_base, at}`. Successful completion
 changes its phase to `done`. Both phases refuse compatible credential/session
 loading, cached-session connection checks, lease acquisition/renewal, consumer
 admission, hooks, wait, watch and bind with `identity_migrated`. Ordinary State
@@ -4071,7 +4327,7 @@ top-level fields and its
 sticky foreign-writer observation; migration does not reset that observation
 or authorize a monitor.
 
-The private target is `<courier-base>/identities/<identity>/`. Its `agents/`,
+The private target is `<daemon-base>/identities/<identity>/`. Its `agents/`,
 `state/`, `owner-dm/` and `post-operations/agents/<identity>/` directories retain
 per-identity files, including the mailbox. Acknowledged and quiesced unknown
 post journals are copied byte-for-byte and digest-verified; target journals
@@ -4082,47 +4338,45 @@ before retrying migration. The command never resubmits or deletes such evidence.
 Source locks, shared routing, registration credentials and other
 identities are excluded. Existing identity-prefixed `.migrated` copies refuse
 migration for explicit operator recovery; the command does not delete them.
-The sealed source State snapshot is recovery evidence, not a running Courier
+The sealed source State snapshot is recovery evidence, not a running a2a daemon
 State. `credential.json` is a verified file backend for subsequent composition;
 `agents/<identity>.json` is an identity snapshot. No daemon starts here.
 
 Before fencing, the credential file must use the admitted credential schema;
 unknown fields (including refresh tokens) and invalid optional metadata refuse
-with `source_credentials_contain_secrets`. Keychain metadata, including legacy
-metadata without a named binding, must contain no access token or password.
-Finish `creds migrate` or explicitly repair the source first. Migration never
-scrubs a remaining source secret to make preflight pass. File-backend access
-tokens and legacy passwords remain in place until the verified tombstone step.
+with `source_credentials_contain_secrets`. Selected Keychain metadata always
+reaches the preflight deferral above, even if already scrubbed; `creds migrate`
+is not admission to Daemon migration. File-backend access tokens and legacy
+passwords remain in place until the verified tombstone step. Migration never
+scrubs a remaining source secret merely to make preflight pass.
 
 Cutover holds all locks and the sealed `in_progress` fence throughout:
 1. Copy identity files into the private target and verify every digest.
 2. Write and digest-verify `rollback/source-credential.json` (byte-identical
    source file) and `rollback/credential.json` (materialized backend value).
-   Rollback material exists only inside this Courier-private `rollback/`
+   Rollback material exists only inside this a2a daemon-private `rollback/`
    directory, with 0700 directories and 0600 files. A separately owned service
    storage boundary is required operationally; directory fixtures do not prove
    cross-UID access control.
 3. For the file backend, atomically replace the source credential with the
-   closed nonsecret tombstone `{"migrated_to_courier":true,"at":...,"identity":...}`
+   closed nonsecret tombstone `{"migrated_to_daemon":true,"at":...,"identity":...}`
    at 0600, using nonsecret temp bytes, fsync and rename. No source `.migrated`
-   credential copy is made. For Keychain, delete the selected item only after
-   private verification, then verify again that the source file contains no secret
-   fields; any failure leaves `in_progress`. Clean source routing metadata stays
-   in place.
+   credential copy is made. Clean source routing metadata stays in place.
+   The CLI has no Keychain deletion path.
 4. Persist the sealed `done` fence.
 
 After private verification and before step 3, the same sealed source fence
 records nonsecret `cutover_started: true`. If the target is lost after that
-point, source metadata or a recreated Keychain item cannot prove a pre-cutover
+point, source metadata alone cannot prove a pre-cutover
 abort; recovery requires the private target. The phase remains `in_progress`
 until completion.
 
 Before step 3, source credentials remain in place and fenced. After step 3,
 rollback reads credentials only from the verified private rollback copies,
-restores the original backend (including byte-identical source metadata),
+restores the original file credentials and byte-identical source metadata,
 verifies restoration, and only then explicitly clears the sealed fence.
 Missing or damaged rollback credentials refuse even when redundant identity or
-runtime credential snapshots remain. Keychain errors stay closed; values are
+runtime credential snapshots remain. Migration errors stay closed; values are
 never printed. Source data and lock inodes remain in place. Private recovery
 copies remain after rollback for explicit operator disposition.
 
@@ -4136,9 +4390,12 @@ interrupted journal publication. It is not a live target; cleanup belongs to
 the operator after verified recovery. Metadata/journals are bounded to 1 MiB,
 individual payload files to 64 MiB, and copied payloads to 256 MiB and 4096 files.
 
-Qualification uses generated fixtures and injectable fake secret stores only.
-Native macOS Keychain behavior, cross-user handoff and complete Courier
-composition need their own qualification. Stopped sessions and a fully upgraded
+CLI regression code uses owned file-backed directory fixtures and early
+Keychain-refusal controls. Lower-level synthetic transaction tests exercise an
+abstract `DaemonSecretStore` interface, including interruption and rollback;
+they do not establish a supported CLI native migration path or qualify native
+Delete. Native macOS Keychain behavior, cross-user handoff and complete a2a
+daemon composition need their own qualification. Stopped sessions and a fully upgraded
 shared binary remain mandatory operational preconditions.
 
 The mandatory migration check also applies to authenticated read-only commands:
@@ -4148,28 +4405,28 @@ A running bind may retry such a read with its existing bounded diagnostics and
 no dispatch; a valid migration fence terminates admission with
 `identity_migrated`. Muse retains its runtime-specific closed diagnostic format.
 
-## Courier streaming, cancellation and station hooks
+## Daemon streaming, cancellation and station hooks
 
 In station mode, `A2A_CONFIG_DIR` is a2a's managed config base. Its `.a2a/`
-child contains exactly `courier.sock`, `identity`, `station.key`, and `station`.
-Commands execute in the authenticated identity's Courier home. The station
-never writes a mailbox, State, credentials, a journal or a saved inbox. The only
-additional station file is `state/courier-hook-failures.log` (0600), created on
-its first failed-open hook. `courier status` reads local hook counts and queries
+child contains exactly `daemon.sock`, `identity`, `station.key`, and `station`.
+Commands execute in the authenticated identity's a2a daemon home. The station
+never writes a mailbox, State, credentials, a journal or a saved inbox. The station also writes `state/daemon-hook-failures.log` (0600) on its first
+failed-open hook and `state/daemon-notice-listener.endpoint` (0600) while
+the notice listener runs. `daemon status` reads local hook counts and queries
 the authenticated endpoint for `log_dropped`; it loads no identity credentials.
 
-Silent `wait` and `watch` invocations have no Courier execution idle cutoff.
+Silent `wait` and `watch` invocations have no a2a daemon execution idle cutoff.
 The command's own timeout decides when it ends. The daemon sends invisible
 `keepalive` frames every 20 seconds; the station read deadline is three intervals
-(60 seconds). Missing liveness yields `courier_idle_timeout`. Disconnect cancels
+(60 seconds). Missing liveness yields `daemon_idle_timeout`. Disconnect cancels
 the invocation context. Its consumer and state/lease locks must release within
 five seconds. SIGINT closes the station connection and returns 130. SIGTERM
-cancels the daemon's in-flight invocations, which report `courier_unavailable`.
+cancels the daemon's in-flight invocations, which report `daemon_unavailable`.
 An unacknowledged receipt is never completed by shutdown.
 
 Output is sent in bounded chunks, with one chunk awaiting a flow ACK after the
 station writes and flushes it. The daemon blocks the command writer until that
-ACK arrives. A stalled reader gets a framed `courier_idle_timeout`; there is no
+ACK arrives. A stalled reader gets a framed `daemon_idle_timeout`; there is no
 unbounded output queue. Flow ACKs are bound to invocation, chunk batch and
 identity, and cannot complete receipts. Receipts still require the separate
 `delivery`/`ack` barrier after stdout write and flush. Watch, wait and hook
@@ -4189,12 +4446,12 @@ The station errors form a closed set and contain no request operands:
 | Class | Meaning |
 | --- | --- |
 | `enrollment_invalid` | Invalid/incomplete enrollment or authentication; the only class that suggests re-running enroll |
-| `courier_unavailable` | Endpoint unavailable, shutdown, or a closed execution failure |
+| `daemon_unavailable` | Endpoint unavailable, shutdown, or a closed execution failure |
 | `identity_mismatch` | Requested `--as` differs from the authenticated binding |
 | `not_allowed` | Command, option, input or connection assertion is outside the closed schema |
-| `courier_idle_timeout` | Missing liveness, stalled output/ACK, or exhausted hook work budget |
-| `courier_busy` | Per-station, global invocation, or execution connection capacity reached |
-| `courier_lease_conflict` | Another owner holds this identity's lease; the active monitor refused the claimed session |
+| `daemon_idle_timeout` | Missing liveness, stalled output/ACK, or exhausted hook work budget |
+| `daemon_busy` | Per-station, global invocation, or execution connection capacity reached |
+| `daemon_lease_conflict` | Another owner holds this identity's lease; the active monitor refused the claimed session |
 
 The seven classes above are the complete station diagnostic set. Invocation
 session evidence is optional and negotiated per connection. A station that has
@@ -4234,18 +4491,18 @@ in bounded memory until a successful exit. A successful hook preserves its
 existing `--as` and doorbell output contract.
 
 Each failed-open delivery appends a UTC timestamp, one fixed hook event name and
-one closed error class to `state/courier-hook-failures.log`. No bodies, tokens,
+one closed error class to `state/daemon-hook-failures.log`. No bodies, tokens,
 argv or paths are recorded. The newest 256 failure lines are retained, dropping
 oldest lines at the cap. Pending count and oldest unreported UTC time are stored
-in the same file's `user.a2a.courier-hook-gap` extended attribute, under the file's
+in the same file's `user.a2a.daemon-hook-gap` extended attribute, under the file's
 lock, so no counter sidecar or fifth enrolled entry is created. The local
 filesystem must support file extended attributes. Accounting errors are visible
-as a closed `courier_unavailable` line on stderr; hooks still exit 0.
+as a closed `daemon_unavailable` line on stderr; hooks still exit 0.
 
 The next successful hook emits one counts-only line on stderr:
-`courier: N hook deliveries failed open since UTC_TIME`. The gap counter is reset under the log lock before emitting the line,
+`daemon: N hook deliveries failed open since UTC_TIME`. The gap counter is reset under the log lock before emitting the line,
 so a failed reset cannot duplicate it. Failure history is retained. With no failures there is no log file or
-gap line. `a2a courier status` prints `hook_failures`, `oldest_unreported` and the
+gap line. `a2a daemon status` prints `hook_failures`, `oldest_unreported` and the
 daemon sink's `log_dropped` counter.
 No native idle-wake reliability is established by a doorbell or these tests;
 external watchdog, sweep and soak qualification are separate work.
@@ -4279,7 +4536,7 @@ that owns a duplicate of the destination descriptor. The sink does not set
 a blocking write may retain one worker and its descriptors until its reader
 resumes; shutdown does not wait for that worker. The queue and pipe remain
 bounded. In-process embeddings can supply
-`NonblockingLogWriter` with a promptly returning `TryCourierLog`; unclassified
+`NonblockingLogWriter` with a promptly returning `TryDaemonLog`; unclassified
 writer adapters are dropped and counted rather than called without a cancellation
 contract. In-memory byte buffers and discarded output are also supported.
 Registry lookup uses shared locks so valid station hellos can run concurrently.
@@ -4287,3 +4544,77 @@ New registry and lock files use explicit modes regardless of umask. A startup
 refusal after binding removes only the socket inode it created.
 
 Per-identity credential metadata may set `admission_policy` (default `none`); `a2a status admission --json` shows refusal counts only. See [admission](admission.md).
+
+## Daemon notice monitor
+
+`a2a watch --notices [--json]` runs a counts-only, owner-bound engine watch.
+An enrolled station may add `--listen` to serve one output-only WebSocket
+client on an ephemeral IPv4 loopback port. It requires an explicit
+`A2A_SESSION_ID` matching the identity's existing, unexpired Muse owner lease;
+it renews that lease and never takes a different owner's lease. Raw watch
+keeps its existing behavior. `--listen` requires `--notices` and station mode.
+
+The engine emits the closed L01 projection (counts, kinds and verified
+same-server names), with no event ID, body, topic or display name. Empty mail
+emits nothing. A fixed 30-second window coalesces a burst; subsequent messages
+do not extend it. Only a message whose **exact Matrix sender ID equals the
+identity's pinned owner** closes the window early. Urgency alone, display names,
+matching localparts and normalized IDs confer no priority. A second burst opens
+a new window. Watch marks notices shown but never receipts mail. The first
+owner `inbox` still prints the untrusted body and receipts the exact event; the
+second inbox does not repeat it.
+
+The listener atomically publishes a single line, `ws://127.0.0.1:PORT/ CAPABILITY`
+plus LF, in `<A2A_CONFIG_DIR>/state/daemon-notice-listener.endpoint`. The state
+directory is 0700; the file is 0600, owned by the station user. Treat the entire
+file as a secret: never print, log or forward it to a2a daemon. A local controller
+reads it privately and uses `Authorization: Bearer CAPABILITY` for the WebSocket
+upgrade. The sole path is `/`, with no query. Invalid credentials get HTTP 403
+`not_allowed`; a second authenticated client gets HTTP 409 `daemon_busy`.
+Malformed upgrades return a closed `not_allowed` body. Client data frames close
+with policy reason `not_allowed`; ping/pong control frames remain allowed.
+Each server text frame contains one canonical L01 JSON object. No remote
+command interface is exposed.
+
+The engine invocation starts only after authentication. A successfully forwarded
+notice records `monitor.last_notice_at`; refused, stale, empty and failed
+outputs do not. This is transport delivery evidence, not an application receipt
+or proof that the controller woke the agent. Disconnect cancels the invocation
+and releases its consumer locks within five seconds. a2a daemon death closes the
+WebSocket with `daemon_unavailable`; absent keepalives close it with
+`daemon_idle_timeout` at the 60-second C5 read deadline. Listener death drops
+the socket; reconnect/alert policy belongs to the external controller.
+
+Normal stop removes only this generation's endpoint inode. SIGKILL cannot run
+cleanup and can leave a stale file; an operator must verify the listener is
+stopped before explicitly removing it. Startup never adopts or overwrites a
+stale endpoint. Installed Claude/Codex hook command lines work unchanged through
+the station; hook installation/uninstallation remains a local project operation.
+The next successful hook retains C5's counts-only failure-gap line. The C6 sweep
+is a separate read-only audit layer, not the notifier.
+
+**TODO — native Muse qualification:** pin the installed Muse version and its
+SessionStart/prompt/stop events, stdin/stdout JSON, and real monitor WebSocket
+handshake/close handling before qualification. No Muse installation or pinned
+native fixture is available here. Synthetic hook and WebSocket tests do not
+claim native Muse E2E or idle-wake reliability. No shim is provided.
+
+
+## Scope wake mute leases: `a2a host mute|unmute`
+
+Use `host mute capability` for the versioned image handshake. Explicit
+`host mute enroll --scope FILE --run RUN --budget DUR` admits compatible
+consumers for selected roots/connections; each `host mute` requires a fresh
+owner TTY confirmation with the same required flags. Inspect with
+`host mute status --scope FILE --budget DUR`, and clean up only that operation
+with `host unmute --scope FILE --run RUN --budget DUR --token OPERATION_ID`.
+The ID is public correlation, not bearer authority. There are no implicit roots,
+connection selections, budgets, approval flags, TTLs or automatic thaw.
+
+The [full contract](host-mute.md) defines the JSON scope file, required launch
+version, owner/host/run binding, durability and partial recovery, every effect
+sink, bounded waits and coverage limits. Mail, receipts, subscriptions and
+independent pauses remain separate. Every result says `quiesced=false`;
+already admitted async work may complete. Read-only status does not repair or
+expire state. An installed image and exact scope still require independent
+admission; this capability does not stop processes or authorize a live run.

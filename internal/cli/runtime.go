@@ -16,6 +16,7 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/codexwake"
 	"github.com/relux-works/a2a-swarm/internal/config"
+	"github.com/relux-works/a2a-swarm/internal/wakemute"
 )
 
 const nativeRPCTimeout = 10 * time.Second
@@ -494,6 +495,13 @@ func (a *App) dispatchNative(ctx context.Context, s *session, generation string)
 				return a.runtimeOutcome(s, generation, "unavailable: accepted turn lifecycle")
 			}
 		}
+		// Explicit dispatch may use a fresh session without a preceding sync.
+		// Qualify retained pair mail before forming notification metadata.
+		gate, err := s.refreshAgentGate(probe)
+		if err != nil {
+			return err
+		}
+		s.agentDelivery = &gate
 		var items []waitItem
 		_, err = s.lockedDeliver(ctx, time.Now().Add(nativeRPCTimeout), false, func(cur *config.State, mb *config.Mailbox) ([]string, error) {
 			for _, entry := range mb.Pending() {
@@ -511,6 +519,14 @@ func (a *App) dispatchNative(ctx context.Context, s *session, generation string)
 		}
 		notice := doorbellText(doorbellOf(items, s.server, s.verifySenders(probe, items)))
 		ids := itemIDs(items)
+		// Avoid manufacturing a new uncertain attempt on ordinary muted polls.
+		// This early check is supplemented by the final trigger fence below.
+		if err := a.withWakeAdmission(probe, s.paths, func(uint64) error { return nil }); err != nil {
+			if errors.Is(err, wakemute.ErrMuted) {
+				return a.runtimeOutcome(s, generation, "wake suppressed: scope muted")
+			}
+			return err
+		}
 		var attempt *codexwake.Attempt
 		_, err = a.reserveNotification(ctx, s, time.Now().Add(nativeRPCTimeout), "native", b.SessionID, generation, false, func(cur *config.State, mb *config.Mailbox, token string) (bool, error) {
 			if cur.Runtime == nil || cur.Runtime.Generation != generation {
@@ -560,7 +576,15 @@ func (a *App) dispatchNative(ctx context.Context, s *session, generation string)
 		if err := s.checkConnection(); err != nil {
 			return err
 		}
-		turn, err := client.Wake(probe, b.ThreadID, attempt.Output)
+		var turn string
+		err = a.withWakeAdmission(probe, s.paths, func(_ uint64) error {
+			var wakeErr error
+			turn, wakeErr = client.Wake(probe, b.ThreadID, attempt.Output)
+			return wakeErr
+		})
+		if errors.Is(err, wakemute.ErrMuted) {
+			return a.runtimeOutcome(s, generation, "wake suppressed: scope muted; attempt retained")
+		}
 		if err != nil {
 			if codexwake.DefinitiveRefusal(err) {
 				_, updateErr := a.updateState(s.paths, s.name, func(cur *config.State) error {
@@ -722,6 +746,9 @@ func (a *App) runNative(ctx context.Context, s *session, generation string) erro
 		}
 		poll := a.notificationWait(st, min(maxPoll, st.Runtime.HeartbeatEvery))
 		s.principals = s.readDeliveryPrincipals()
+		if err := s.pauseAgentReplay(ctx, time.Time{}); err != nil {
+			return err
+		}
 		resp, err := s.client.Sync(ctx, st.NextBatch, poll, deliverySyncFilter(st.NextBatch))
 		if err != nil {
 			if ctx.Err() != nil {

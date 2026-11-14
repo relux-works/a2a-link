@@ -55,6 +55,14 @@ func (a *App) registerAgent(ctx context.Context, p config.Paths, mx config.Matri
 	if err != nil {
 		return config.Credentials{}, "", err
 	}
+	if store == "keychain" && a.human {
+		// Preserve the existing source fence before human policy, without
+		// reserving credentials. Agent writes still recheck in the reservation.
+		if err := config.CheckIdentityMigration(p, name); err != nil {
+			return config.Credentials{}, "", err
+		}
+		return config.Credentials{}, "", errHumanKeychain
+	}
 	if mx.URL == "" {
 		return config.Credentials{}, "", fmt.Errorf("no homeserver URL: set %s in %s", config.EnvMatrixURL, p.EnvFile())
 	}
@@ -184,6 +192,11 @@ func cmdJoin(ctx context.Context, a *App, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Retain any pair context before joining: a transient observation failure
+	// must not admit this room through existing broad subscriptions either.
+	if err := s.captureAgentJoinedRoom(ctx, id); err != nil {
+		return err
+	}
 	if _, err := s.client.Join(ctx, id); err != nil {
 		if matrix.IsCode(err, "M_FORBIDDEN") {
 			return fmt.Errorf("join %s: forbidden (the room is invite-only; ask a member: a2a invite %s %s)", label, label, s.name)
@@ -273,6 +286,9 @@ func cmdLeave(ctx context.Context, a *App, args []string) error {
 
 // cmdCreds: a2a creds move-human <name>
 func cmdCreds(ctx context.Context, a *App, args []string) error {
+	if len(args) > 0 && args[0] == "reconcile" {
+		return a.reconcileCredentials(ctx, args[1:])
+	}
 	if c, e := a.selectedConnection(); e != nil {
 		return e
 	} else if c != nil {

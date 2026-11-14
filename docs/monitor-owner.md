@@ -54,16 +54,17 @@ State and lease checks still apply and reject that malformed State. Start
 returns the error. Neither path repairs bytes or grants monitor authority.
 
 Watch, sweep, bind and service paths cannot write an owner through ordinary
-State writer APIs. There is currently no production sweep command; the CLI
-refuses both `sweep` and `hook sweep` without writing owner metadata. Environment session ids, PIDs, process birth, terminal
+State writer APIs. The separate [`a2a daemon sweep`](daemon-service.md) reads
+mailbox counts and daemon liveness without writing owner metadata. Top-level
+`sweep` and `hook sweep` remain refused. Environment session ids, PIDs, process birth, terminal
 observations and stored bind associations supply no owner evidence. Existing
 monitor metadata validation remains a separate generation constraint. This
 record proves what the local runtime declared under the host account's trust;
 it does not authenticate beyond that account or distinguish callers sharing
-its UID. No Courier station channel or live monitor command is enabled here.
+its UID. No a2a daemon station channel or live monitor command is enabled here.
 
 Run local owner and fence tests with
 `go test ./internal/config ./internal/cli -run 'TestMonitor' -count=1`.
 These fixtures exercise the actual disk locks, sealed writers, hook admission,
 pending mailbox, and sink guard. They do not prove native hook installation,
-runtime exit emission, external notice delivery, or Courier authentication.
+runtime exit emission, external notice delivery, or a2a daemon authentication.

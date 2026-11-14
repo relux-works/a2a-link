@@ -147,14 +147,112 @@ func (r *terminalRefresh) initializePath() {
 	// Executable may already have resolved the launch symlink (notably on
 	// Linux). Retain an absolute argv[0] alias of that same executable, including
 	// across our own exec, so subsequent symlink retargets remain observable.
-	if len(os.Args) > 0 && filepath.IsAbs(os.Args[0]) {
-		launch, launchErr := filepath.EvalSymlinks(os.Args[0])
-		actual, actualErr := filepath.EvalSymlinks(r.path)
-		if launchErr == nil && actualErr == nil && launch == actual {
-			r.path = os.Args[0]
+	if len(os.Args) > 0 {
+		if alias, ok := admittedLaunchAlias(os.Args[0], r.path); ok {
+			r.path = alias
 		}
 	}
 }
+
+// pending reports a changed executable that is still stabilizing, waiting
+// for its safety re-check or probe retry. Such a candidate keeps its 1s, 30s
+// and 60s schedule in the active loop. Current and failed images are settled.
+func (r *terminalRefresh) pending() bool {
+	return r != nil && r.seen != (terminalExecutable{})
+}
+
+// aliasStamps observes the retained launch path and the file it resolves to
+// without reading either, so a quiescent consumer notices a retarget or an
+// in-place replacement and runs the ordinary refresh poll.
+func (r *terminalRefresh) aliasStamps() [2]config.FileStamp {
+	if r == nil || r.path == "" {
+		return [2]config.FileStamp{{Known: true}, {Known: true}}
+	}
+	return [2]config.FileStamp{config.StampFile(r.path), config.StampTarget(r.path)}
+}
+
+// admittedLaunchAlias admits argv0 as the launch alias of executable only when
+// it is absolute, currently resolves to the same file, and passes the same
+// custody policy as an installed hook command: the alias is owned by this UID
+// or root, and no directory above it or above its image is writable by other
+// users, foreign-owned or inside a source checkout. Bare or relative names are
+// never searched in PATH, and an alias of another image is refused. The
+// detached consumer spawn and refresh share this one admission rule; a refused
+// alias keeps the direct image.
+func admittedLaunchAlias(argv0, executable string) (string, bool) {
+	if argv0 == "" || executable == "" || !filepath.IsAbs(argv0) {
+		return "", false
+	}
+	launch, err := filepath.EvalSymlinks(argv0)
+	if err != nil {
+		return "", false
+	}
+	actual, err := filepath.EvalSymlinks(executable)
+	if err != nil || launch != actual {
+		return "", false
+	}
+	if !launchAliasCustody(argv0, actual) {
+		return "", false
+	}
+	return argv0, true
+}
+
+// launchAliasCustody reports whether alias and the image it resolves to pass
+// the installed-command custody policy: the alias is owned by this UID or
+// root; a symlink alias links DIRECTLY to the regular image (directory aliases
+// such as /var -> /private/var are resolved, but a chain of file aliases is
+// refused, so no unchecked hop exists); and no directory above the alias, its
+// link target or the image is writable by other users, foreign-owned or
+// inside a source checkout.
+func launchAliasCustody(alias, resolved string) bool {
+	info, err := os.Lstat(alias)
+	if err != nil {
+		return false
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); !ok || st.Uid != 0 && st.Uid != uint32(os.Getuid()) {
+		return false
+	}
+	paths := []string{alias, resolved}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(alias)
+		if err != nil {
+			return false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(alias), target)
+		}
+		parent, err := filepath.EvalSymlinks(filepath.Dir(target))
+		if err != nil || filepath.Join(parent, filepath.Base(target)) != resolved {
+			return false
+		}
+		image, err := os.Lstat(resolved)
+		if err != nil || !image.Mode().IsRegular() {
+			return false
+		}
+		paths = append(paths, target)
+	case !info.Mode().IsRegular():
+		return false
+	}
+	return launchAliasCustodyParents(paths...) == nil
+}
+
+// aliasCustodyRefused decides, at the moment of use and never from a cached
+// startup observation, whether path is a symlink that fails launch-alias
+// custody. A regular file at path is the direct image and keeps the ordinary
+// executable checks; an unreadable path is refused.
+func aliasCustodyRefused(path, resolved string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return true
+	}
+	return info.Mode()&os.ModeSymlink != 0 && !launchAliasCustody(path, resolved)
+}
+
+// launchAliasCustodyParents is the installed-command ancestry policy. It is a
+// package-private seam only so timing tests whose test binary lives in shared
+// temporary ancestry can isolate refresh timing; production never changes it.
+var launchAliasCustodyParents = hookExecutableParents
 
 func (r *terminalRefresh) poll(ctx context.Context, a *App, s *session, generation string, lock *os.File) {
 	if ctx.Err() != nil {
@@ -203,6 +301,13 @@ func (r *terminalRefresh) poll(ctx context.Context, a *App, s *session, generati
 	}
 	if metadata == r.failed.metadata() {
 		diagnostic = r.failedStatus
+		r.seen = terminalExecutable{}
+		return
+	}
+	// A symlink at the launch path that fails custody now (whatever it was at
+	// startup) names no candidate: nothing is observed, probed or executed.
+	if aliasCustodyRefused(r.path, resolved) {
+		diagnostic = "changed_candidate_unavailable"
 		r.seen = terminalExecutable{}
 		return
 	}
@@ -313,7 +418,7 @@ func (r *terminalRefresh) poll(ctx context.Context, a *App, s *session, generati
 	args := append([]string{r.path}, pin...)
 	args = append(args, "--as", s.name, "bind", "--run-generation", generation, "--consumer-lock-fd", strconv.Itoa(int(lock.Fd())))
 	finalPath, err := filepath.EvalSymlinks(r.path)
-	if err != nil || finalPath != resolved {
+	if err != nil || finalPath != resolved || aliasCustodyRefused(r.path, resolved) {
 		diagnostic = "changed_candidate_unavailable"
 		r.seen = terminalExecutable{}
 		return

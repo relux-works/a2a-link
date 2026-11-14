@@ -18,6 +18,7 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 	"github.com/relux-works/a2a-swarm/internal/tmuxwake"
+	"github.com/relux-works/a2a-swarm/internal/wakemute"
 )
 
 // descendant inspects PID/PPID only, never command arguments or environment.
@@ -312,6 +313,14 @@ func (a *App) bindTerminal(ctx context.Context, args []string, mode bindingMode)
 			return err
 		}
 		child = exec.Command(exe, append(pin, "--as", s.name, "bind", "--run-generation", b.Generation)...)
+		// Execute the validated running image. Only an admitted absolute launch
+		// alias travels as argv[0], so the consumer's refresh can observe a later
+		// retarget of that alias (os.Executable resolves it on Linux).
+		if len(os.Args) > 0 {
+			if alias, ok := admittedLaunchAlias(os.Args[0], exe); ok {
+				child.Args[0] = alias
+			}
+		}
 		child.Env = detachedConsumerEnv(os.Environ(), s.paths.ConfigRoot(), b.SessionID)
 		child.ExtraFiles = []*os.File{writer}
 		child.Stdout = log
@@ -421,7 +430,7 @@ func runBoundChild(ctx context.Context, a *App, generation string, inherited int
 			fmt.Fprintln(a.Stderr, "binding re-exec: executable changed")
 		}
 		var runErr error
-		reason, runErr = a.runTerminalWithRefresh(ctx, s, generation, initial, func() { refresh.poll(ctx, a, s, generation, lock) })
+		reason, runErr = a.runTerminalLoop(ctx, s, generation, initial, func() { refresh.poll(ctx, a, s, generation, lock) }, refresh)
 		return runErr
 	})
 	if errors.Is(err, errBindingStaleConsumer) {
@@ -493,6 +502,8 @@ func cmdUnbind(ctx context.Context, a *App, args []string) error {
 	return nil
 }
 
+var errTerminalBindingRetired = errors.New("binding retired")
+
 func (a *App) terminalUpdate(s *session, generation string, fn func(*config.TerminalBinding)) error {
 	if err := s.checkConnection(); err != nil {
 		return err
@@ -502,7 +513,7 @@ func (a *App) terminalUpdate(s *session, generation string, fn func(*config.Term
 			return err
 		}
 		if st.Terminal == nil || st.Terminal.Generation != generation || st.Terminal.Stopped {
-			return errors.New("binding retired")
+			return errTerminalBindingRetired
 		}
 		fn(st.Terminal)
 		dropRetiredStrandedAlarms(st)
@@ -538,15 +549,55 @@ func (a *App) runTerminal(ctx context.Context, s *session, generation string, in
 	return a.runTerminalWithRefresh(ctx, s, generation, initial, nil)
 }
 
+// terminalStateMemo is a package-private test seam for matched comparisons;
+// production code, flags and environment never change it.
+var terminalStateMemo = true
+
 func (a *App) runTerminalWithRefresh(ctx context.Context, s *session, generation string, initial config.TerminalBinding, refresh func()) (string, error) {
+	return a.runTerminalLoop(ctx, s, generation, initial, refresh, nil)
+}
+
+// runTerminalLoop is the consumer loop. view, when present, is the refresh
+// state behind refresh; a pending candidate keeps the active schedule.
+func (a *App) runTerminalLoop(ctx context.Context, s *session, generation string, initial config.TerminalBinding, refresh func(), view terminalRefreshView) (string, error) {
 	policy := initial
+	// This consumer's private State decode memo. It is attached once, before
+	// the alarm worker starts, and holds data only inside one cycle's epoch:
+	// opened before the first guard/read, closed before the timer wait and on
+	// every return. It never replaces a read, guard, seal or fence.
+	memo := s.paths.StateDecodeScope()
+	if memo == nil && terminalStateMemo {
+		memo = config.NewStateDecodeScope(s.name)
+		s.paths = s.paths.WithStateDecodeScope(memo)
+	}
+	defer memo.Close()
 	alarmCtx, stopAlarm := context.WithCancel(ctx)
 	defer stopAlarm()
 	alarmWake := make(chan struct{}, 1)
 	go a.runMailAlarm(alarmCtx, s, generation, alarmWake)
 	delay := policy.Interval
+	availability := &bindingAvailability{}
 	qualificationInterrupted := true
+	var quietSince time.Time
+	// The owner's native identity is taken once, before the first cycle, and
+	// kept for this consumer's lifetime; an unknown read leaves it to the
+	// first successful read of a later wait. The owner's absence at that first
+	// read is a known end: a PID reused before the next canonical check must
+	// never become the baseline.
+	owner := &ownerIdentity{}
+	if owner.observe(policy.OwnerPID) == ownerTokenReplaced && terminalInitialOwnerAbsenceStops {
+		if outcome, stopped := a.quiescentOwnerTeardown(ctx, s, generation, policy, true); stopped {
+			return outcome, nil
+		}
+	}
 	for ctx.Err() == nil {
+		cycleStart := time.Now()
+		quiet := false
+		a.traceTerminal("cycle")
+		// A full cycle reads everything afresh, so earlier foreign-write
+		// evidence is consumed here and nowhere else.
+		memo.ClearForeignWrites()
+		memo.Open()
 		if err := s.checkConnection(); err != nil && !errors.Is(err, config.ErrMigrationStateUnavailable) {
 			return "selected connection unavailable", err
 		}
@@ -628,10 +679,13 @@ func (a *App) runTerminalWithRefresh(ctx context.Context, s *session, generation
 			// fresh state and reacquire its lease before it may touch the terminal.
 			a.unknownTerminalNotice(ctx, s, generation, true)
 			fmt.Fprintf(a.Stderr, "binding consumer unavailable; bounded retry cause=%s\n", bindingRetryCause(stage, err))
+			a.observeBindingConsumer(s, generation, availability, false)
 		} else {
+			a.observeBindingConsumer(s, generation, availability, true)
 			delay = policy.Interval
 			if fresh, readErr := config.LoadState(s.paths, s.name); readErr == nil {
 				delay = a.notificationWait(fresh, delay)
+				quiet = s.terminalUndelivered == 0 && terminalQuiescent(fresh, generation, os.Getpid(), a.Now())
 			}
 		}
 		// Dispatch (including Send, finish and all notice publication) returned;
@@ -641,23 +695,100 @@ func (a *App) runTerminalWithRefresh(ctx context.Context, s *session, generation
 		if refresh != nil {
 			refresh()
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		memo.Close()
+		// A quiescent streak is measured on the monotonic clock; any active or
+		// failed cycle, or a refresh candidate in progress, restarts it.
+		if quiet && (view == nil || !view.pending()) {
+			if quietSince.IsZero() {
+				quietSince = cycleStart
+			}
+		} else {
+			quietSince = time.Time{}
+		}
+		if terminalQuiescence && !quietSince.IsZero() && time.Since(quietSince) >= terminalQuietAfter {
+			result, reason := a.waitQuiescent(ctx, s, policy, owner, cycleStart, view)
+			if result == quiescentCancelled {
+				return "cancelled", nil
+			}
+			if result == quiescentReconcile && (reason == "owner" || reason == "owner-replaced") {
+				if outcome, stopped := a.quiescentOwnerTeardown(ctx, s, generation, policy, reason == "owner-replaced"); stopped {
+					return outcome, nil
+				}
+			}
+			if result == quiescentReconcile {
+				// waitQuiescent already held every non-owner reason until one
+				// Interval after the last full cycle, with the owner watched.
+				continue
+			}
+		}
+		switch a.waitActive(ctx, delay, policy, owner) {
+		case "cancelled":
 			return "cancelled", nil
-		case <-timer.C:
+		case "owner-replaced":
+			if outcome, stopped := a.quiescentOwnerTeardown(ctx, s, generation, policy, true); stopped {
+				return outcome, nil
+			}
 		}
 	}
 	return "cancelled", nil
 }
 
+// waitActive is the ordinary inter-cycle wait. It also keeps the fork-free
+// owner watch of min(Interval, 1s) for the whole wait, whatever the first
+// read returned: a known owner replacement or absence ends the wait at once
+// (the prior-consumer path of a SessionStart rebind has seconds), while an
+// unknown inspection result is ignored, proves nothing and is retried on the
+// next tick. The token is compared with the consumer's lifetime owner
+// identity, never re-baselined per wait.
+func (a *App) waitActive(ctx context.Context, delay time.Duration, policy config.TerminalBinding, owner *ownerIdentity) string {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	var tick <-chan time.Time
+	if terminalWatchOwnerWhileHeld {
+		ticker := time.NewTicker(min(policy.Interval, terminalQuietTickMax))
+		defer ticker.Stop()
+		tick = ticker.C
+	}
+	// An unknown read proves nothing and is retried on the next bounded tick;
+	// absence or a token differing from the lifetime identity is a known end.
+	owner.beginWait()
+	observe := func() bool {
+		return owner.observe(policy.OwnerPID) == ownerTokenReplaced
+	}
+	if terminalWatchOwnerWhileHeld && observe() {
+		return "owner-replaced"
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return "cancelled"
+		case <-timer.C:
+			return ""
+		case <-tick:
+			a.traceTerminal("watch")
+			if observe() {
+				return "owner-replaced"
+			}
+		}
+	}
+}
+
 func (a *App) dispatchTerminal(ctx context.Context, s *session, generation string, alarmWakes ...chan<- struct{}) error {
+	// State/control waits inside and after root admission share one finite cycle
+	// budget. Copy only the App; preserve the shared monotonic spacing clock.
+	ctx, cancelCycle := context.WithTimeout(ctx, nativeRPCTimeout)
+	defer cancelCycle()
+	a.notificationClockState()
+	scoped := *a
+	scoped.wakeContext = ctx
+	a = &scoped
+
 	// Only the consumer supplies a wake channel for alarm observation.
 	var alarmWake chan<- struct{}
 	if len(alarmWakes) > 0 {
 		alarmWake = alarmWakes[0]
 	}
+	s.terminalUndelivered = -1
 	if err := s.checkConnection(); err != nil {
 		return err
 	}
@@ -714,6 +845,7 @@ func (a *App) dispatchTerminal(ctx context.Context, s *session, generation strin
 		if err != nil {
 			return err
 		}
+		s.terminalUndelivered = len(ids)
 		attemptIDs := slices.DeleteFunc(slices.Clone(b.AttemptIDs), func(id string) bool { return !slices.Contains(pendingIDs, id) })
 		b.AttemptIDs = attemptIDs
 		if err = a.terminalUpdate(s, generation, func(b *config.TerminalBinding) {
@@ -722,40 +854,59 @@ func (a *App) dispatchTerminal(ctx context.Context, s *session, generation strin
 		}); err != nil {
 			return err
 		}
-		// Diagnostics never grant ownership; continuation below independently
-		// checks the persisted generation-scoped typing origin.
-		readiness := boundTerminal(*b).ObserveReadiness(ctx, b.Notice)
-		observation := readinessInput(readiness)
-		if alarmWake != nil {
-			a.observeMailAlarm(s, generation, alarmObservation(alarm, readiness))
-			select {
-			case alarmWake <- struct{}{}:
-			default:
-			}
-		}
-		if err := a.observeTerminalReadiness(s, *b, readiness); err != nil {
-			return err
-		}
-		observed = true
-		if err := a.observeTerminalNotice(s, generation, *b, observation); err != nil {
-			return err
-		}
-		// Only an aged empty observation disproves continuous presence. A redraw
-		// inside the recovery window must retain lost-ACK typing authority.
-		if observation == "empty" && !a.Now().Before(b.AttemptAt.Add(max(2*b.Interval, b.RetryMax))) {
-			if err := a.terminalUpdate(s, generation, func(current *config.TerminalBinding) {
-				current.NoticeOrigin = nil
-				current.NoticePosition = nil
-				current.TypingStarted = false
-			}); err != nil {
+		admissionCtx, cancelAdmission := context.WithTimeout(ctx, nativeRPCTimeout)
+		defer cancelAdmission()
+		admissionErr := a.withWakeAdmission(admissionCtx, s.paths, func(scopeGeneration uint64) error {
+			if held, err := a.requalifyWakeScope(s, generation, scopeGeneration, *b); err != nil || held {
 				return err
 			}
-			b.NoticeOrigin = nil
-			b.NoticePosition = nil
-			b.TypingStarted = false
-		}
-		if observation == "empty" && b.Typed && !a.Now().Before(b.AttemptAt.Add(max(2*b.Interval, b.RetryMax))) && len(b.AttemptIDs) < b.NoticeCount {
-			if err := a.terminalUpdate(s, generation, func(b *config.TerminalBinding) {
+			// Diagnostics never grant ownership; continuation below independently
+			// checks the persisted generation-scoped typing origin.
+			readiness := a.terminalEffects(*b).ObserveReadiness(ctx, b.Notice)
+			observation := readinessInput(readiness)
+			if alarmWake != nil {
+				a.observeMailAlarm(s, generation, alarmObservation(alarm, readiness))
+				select {
+				case alarmWake <- struct{}{}:
+				default:
+				}
+			}
+			if err := a.observeTerminalReadiness(s, *b, readiness); err != nil {
+				return err
+			}
+			observed = true
+			if err := a.observeTerminalNotice(s, generation, *b, observation); err != nil {
+				return err
+			}
+			// Only an aged empty observation disproves continuous presence. A redraw
+			// inside the recovery window must retain lost-ACK typing authority.
+			if observation == "empty" && !a.Now().Before(b.AttemptAt.Add(max(2*b.Interval, b.RetryMax))) {
+				if err := a.terminalUpdate(s, generation, func(current *config.TerminalBinding) {
+					current.NoticeOrigin = nil
+					current.NoticePosition = nil
+					current.TypingStarted = false
+				}); err != nil {
+					return err
+				}
+				b.NoticeOrigin = nil
+				b.NoticePosition = nil
+				b.TypingStarted = false
+			}
+			if observation == "empty" && b.Typed && !a.Now().Before(b.AttemptAt.Add(max(2*b.Interval, b.RetryMax))) && len(b.AttemptIDs) < b.NoticeCount {
+				if err := a.terminalUpdate(s, generation, func(b *config.TerminalBinding) {
+					b.Typed = false
+					b.AttemptIDs = nil
+					b.Notice = ""
+					b.NoticeCount = 0
+					b.NoticeOrigin = nil
+					b.NoticePosition = nil
+					b.TypingStarted = false
+					b.AttemptAt = time.Time{}
+					b.Retried = false
+					b.Idle = nil
+				}); err != nil {
+					return err
+				}
 				b.Typed = false
 				b.AttemptIDs = nil
 				b.Notice = ""
@@ -763,98 +914,112 @@ func (a *App) dispatchTerminal(ctx context.Context, s *session, generation strin
 				b.NoticeOrigin = nil
 				b.NoticePosition = nil
 				b.TypingStarted = false
-				b.AttemptAt = time.Time{}
-				b.Retried = false
 				b.Idle = nil
-			}); err != nil {
+			}
+			if len(b.AttemptIDs) > 0 || b.NoticeOrigin != nil && b.Notice != "" {
+				return a.recoverTerminal(ctx, s, generation, *b, readiness)
+			}
+			if len(ids) == 0 {
+				return a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil; b.Outcome = "armed: no new mail" })
+			}
+			// Screen admission precedes the durable attempt fence. A busy target
+			// retains IDs for the next idle observation without spending its rate.
+			if !readiness.Eligible() {
+				return a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil; b.Outcome = "suppressed: busy, draft or unknown input" })
+			}
+			now := a.Now()
+			if qualified, err := a.qualifyTerminalIdle(s, generation, *b, readiness); err != nil || !qualified {
 				return err
 			}
-			b.Typed = false
-			b.AttemptIDs = nil
-			b.Notice = ""
-			b.NoticeCount = 0
-			b.NoticeOrigin = nil
-			b.NoticePosition = nil
-			b.TypingStarted = false
-			b.Idle = nil
-		}
-		if len(b.AttemptIDs) > 0 || b.NoticeOrigin != nil && b.Notice != "" {
-			return a.recoverTerminal(ctx, s, generation, *b, readiness)
-		}
-		if len(ids) == 0 {
-			return a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil; b.Outcome = "armed: no new mail" })
-		}
-		// Screen admission precedes the durable attempt fence. A busy target
-		// retains IDs for the next idle observation without spending its rate.
-		if !readiness.Eligible() {
-			return a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil; b.Outcome = "suppressed: busy, draft or unknown input" })
-		}
-		now := a.Now()
-		if qualified, err := a.qualifyTerminalIdle(s, generation, *b, readiness); err != nil || !qualified {
-			return err
-		}
-		reservations := slices.DeleteFunc(slices.Clone(b.Reservations), func(t time.Time) bool { return now.Sub(t) >= time.Hour })
-		if len(reservations) >= b.MaxWakes {
-			return a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil; b.Outcome = "suppressed: hourly rate" })
-		}
-		var reservedAttempt config.TerminalBinding
-		token, reserveErr := a.reserveNotification(ctx, s, time.Now().Add(nativeRPCTimeout), "terminal", b.SessionID, generation, false, func(st *config.State, mb *config.Mailbox, token string) (bool, error) {
-			current := st.Terminal
-			if current == nil || current.Stopped || current.Generation != generation || current.SessionID != b.SessionID || !ownTerminalTarget(current, b.Target) || !sameTerminalScope(*current, *b) || !sameTerminalIdle(current.Idle, b.Idle) {
-				return false, errors.New("binding retired")
+			reservations := slices.DeleteFunc(slices.Clone(b.Reservations), func(t time.Time) bool { return now.Sub(t) >= time.Hour })
+			if len(reservations) >= b.MaxWakes {
+				return a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil; b.Outcome = "suppressed: hourly rate" })
 			}
-			if st.HooksPaused || manualWakeGate(*st) != "" {
-				current.Outcome = "suppressed: manual gate"
-				return false, nil
-			}
-			if l := st.Lease; l == nil || l.Holder != b.SessionID || l.Host != machineLabel() || !l.Expires.After(a.Now()) {
-				return false, errors.New("terminal lease changed")
-			}
-			if len(current.AttemptIDs) > 0 {
-				return false, errors.New("terminal attempt changed")
-			}
-			pending := mb.Pending()
-			ids = slices.DeleteFunc(ids, func(id string) bool {
-				return !slices.ContainsFunc(pending, func(en config.MailEntry) bool { return en.ID == id }) || slices.Contains(current.Rung, id)
-			})
-			if len(ids) == 0 {
+			var reservedAttempt config.TerminalBinding
+			token, reserveErr := a.reserveNotification(ctx, s, time.Now().Add(nativeRPCTimeout), "terminal", b.SessionID, generation, false, func(st *config.State, mb *config.Mailbox, token string) (bool, error) {
+				current := st.Terminal
+				if current == nil || current.Stopped || current.Generation != generation || current.SessionID != b.SessionID || !ownTerminalTarget(current, b.Target) || !sameTerminalScope(*current, *b) || !sameTerminalIdle(current.Idle, b.Idle) {
+					return false, errors.New("binding retired")
+				}
+				if st.HooksPaused || manualWakeGate(*st) != "" {
+					current.Outcome = "suppressed: manual gate"
+					return false, nil
+				}
+				if l := st.Lease; l == nil || l.Holder != b.SessionID || l.Host != machineLabel() || !l.Expires.After(a.Now()) {
+					return false, errors.New("terminal lease changed")
+				}
+				if len(current.AttemptIDs) > 0 {
+					return false, errors.New("terminal attempt changed")
+				}
+				pending := mb.Pending()
+				ids = slices.DeleteFunc(ids, func(id string) bool {
+					return !slices.ContainsFunc(pending, func(en config.MailEntry) bool { return en.ID == id }) || slices.Contains(current.Rung, id)
+				})
+				if len(ids) == 0 {
+					current.Idle = nil
+					current.Outcome = "armed: no new mail"
+					return false, nil
+				}
+				current.NoticeOrigin = current.Idle
+				current.NoticePosition = nil
+				current.TypingStarted = false
 				current.Idle = nil
-				current.Outcome = "armed: no new mail"
-				return false, nil
+				current.AttemptIDs = ids
+				current.Notice = tmuxwake.Notice(len(ids))
+				current.NoticeCount = len(ids)
+				current.AttemptAt = now
+				current.Retried = false
+				current.Typed = false
+				current.Reservations = append(reservations, now)
+				current.NotificationToken = token
+				current.Outcome = "attempt reserved"
+				reservedAttempt = *current
+				reservedAttempt.AttemptIDs = slices.Clone(current.AttemptIDs)
+				return true, nil
+			})
+			if reserveErr != nil || token == "" {
+				return reserveErr
 			}
-			current.NoticeOrigin = current.Idle
-			current.NoticePosition = nil
-			current.TypingStarted = false
-			current.Idle = nil
-			current.AttemptIDs = ids
-			current.Notice = tmuxwake.Notice(len(ids))
-			current.NoticeCount = len(ids)
-			current.AttemptAt = now
-			current.Retried = false
-			current.Typed = false
-			current.Reservations = append(reservations, now)
-			current.NotificationToken = token
-			current.Outcome = "attempt reserved"
-			reservedAttempt = *current
-			reservedAttempt.AttemptIDs = slices.Clone(current.AttemptIDs)
-			return true, nil
+			if err := s.checkConnection(); err != nil {
+				return err
+			}
+			outcome, sendErr := a.sendTerminalAttempt(ctx, s, reservedAttempt, readiness.Key)
+			return a.finishTerminal(s, generation, outcome, sendErr, false, reservedAttempt)
 		})
-		if reserveErr != nil || token == "" {
-			return reserveErr
+		if errors.Is(admissionErr, wakemute.ErrMuted) && alarmWake != nil {
+			// Muting local input must not stop mailbox incident observations.
+			// No terminal readiness or input authority is inferred while muted.
+			alarm.Reason = "scope muted"
+			a.observeMailAlarm(s, generation, alarm)
+			select {
+			case alarmWake <- struct{}{}:
+			default:
+			}
 		}
-		if err := s.checkConnection(); err != nil {
-			return err
-		}
-		outcome, sendErr := a.sendTerminalAttempt(ctx, s, reservedAttempt, readiness.Key)
-		return a.finishTerminal(s, generation, outcome, sendErr, false, reservedAttempt)
+		return admissionErr
 	})
 	if err != nil {
-		_ = a.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil })
+		// Cancellation stops admission, but cannot cancel its safety cleanup.
+		// A failed reset is returned to the consumer's qualificationInterrupted
+		// fence, which retries the reset before dispatch (also on restart).
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), nativeRPCTimeout)
+		cleanup := *a
+		cleanup.wakeContext = cleanupCtx
+		cleanupErr := cleanup.terminalUpdate(s, generation, func(b *config.TerminalBinding) { b.Idle = nil })
+		cancelCleanup()
+		// A retired generation no longer has wake authority to invalidate.
+		// Do not touch its replacement or alter the original rejection contract.
+		if cleanupErr != nil && !errors.Is(cleanupErr, errTerminalBindingRetired) {
+			return errors.Join(err, fmt.Errorf("terminal idle invalidation failed: %w", cleanupErr))
+		}
 	}
 	if err != nil || !observed {
 		a.unknownTerminalNotice(ctx, s, generation, false)
 	} else {
 		return a.completeTerminalObservation(ctx, s, generation)
+	}
+	if errors.Is(err, wakemute.ErrMuted) {
+		return nil
 	}
 	return err
 }

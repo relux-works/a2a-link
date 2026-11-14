@@ -33,6 +33,14 @@ func TestTerminalRefreshDetachedLifecycle(t *testing.T) {
 	testTerminalRefreshDetachedLifecycle(t, "direct")
 }
 
+// W2 witness: a real atomic executable replacement crosses exec while the
+// private tmux connection is unavailable. Once that same connection recovers,
+// the new image dispatches and logs one ready line, preserving pending mail.
+func TestTerminalRefreshConnectionRecovery(t *testing.T) {
+	isolateBindTest(t)
+	testTerminalRefreshDetachedLifecycle(t, "connection-recovery")
+}
+
 // Real consumers launched through a symlink refresh after atomic target
 // replacement or symlink retargeting, retaining the lifecycle guarantees above.
 func TestTerminalRefreshSymlinkLifecycle(t *testing.T) {
@@ -46,7 +54,11 @@ func TestTerminalRefreshSymlinkLifecycle(t *testing.T) {
 // build overlay, never a production flag or environment override. Each poll
 // advances past the safety throttle (and eventually the probe retry cooldown).
 // The safety wrapper records an actual rejection, not a guessed cycle count.
-func buildRefreshLifecycleCLI(t *testing.T, exe string) {
+// overlayEdit replaces one unique anchor in one package source file of the
+// test-built CLI. Calibration mutants use it; production never sees it.
+type overlayEdit struct{ file, anchor, replacement string }
+
+func buildRefreshLifecycleCLI(t *testing.T, exe string, extra ...overlayEdit) {
 	t.Helper()
 	source, err := filepath.Abs("bind_refresh.go")
 	if err != nil {
@@ -87,7 +99,26 @@ func buildRefreshLifecycleCLI(t *testing.T, exe string) {
 	if err := os.WriteFile(patched, []byte(strings.Replace(string(raw), anchor, replacement, 1)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{source: patched}})
+	replace := map[string]string{source: patched}
+	for i, edit := range extra {
+		file, err := filepath.Abs(edit.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(string(raw), edit.anchor) != 1 || replace[file] != "" {
+			t.Fatalf("setup: nonunique overlay anchor in %s", edit.file)
+		}
+		edited := filepath.Join(dir, strconv.Itoa(i)+"-"+filepath.Base(file))
+		if err := os.WriteFile(edited, []byte(strings.Replace(string(raw), edit.anchor, edit.replacement, 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		replace[file] = edited
+	}
+	overlay, err := json.Marshal(map[string]any{"Replace": replace})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,14 +140,27 @@ func testTerminalRefreshDetachedLifecycle(t *testing.T, mode string) {
 	}
 	f := newOrphanDispatchFixture(t)
 	f.a.Now = time.Now
+	gate := ""
+	if mode == "connection-recovery" {
+		gate = consumerConnectionGate(t)
+	}
 	exe := filepath.Join(f.dir, "a2a")
+	aliased := mode != "direct" && mode != "connection-recovery"
+	var custody string
+	if aliased {
+		// A retained launch alias must pass the custody policy, which refuses
+		// shared temporary ancestry: keep image and alias in a private root.
+		custody = launchAliasCustodyRoot(t)
+		mkdirs(t, filepath.Join(custody, "images"), filepath.Join(custody, "installed"))
+		exe = filepath.Join(custody, "images", "a2a")
+	}
 	buildRefreshLifecycleCLI(t, exe)
 	// A cold build must not spend the consumer's lifecycle deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	launch := exe
-	if mode != "direct" {
-		launch = filepath.Join(t.TempDir(), "a2a")
+	if aliased {
+		launch = filepath.Join(custody, "installed", "a2a")
 		if err := os.Symlink(exe, launch); err != nil {
 			t.Fatal(err)
 		}
@@ -216,6 +260,16 @@ func testTerminalRefreshDetachedLifecycle(t *testing.T, mode string) {
 	if strings.Contains(logs, "binding re-exec:") {
 		t.Fatal("unsafe journal crossed exec")
 	}
+	if gate != "" {
+		setConsumerConnectionGate(t, gate, true)
+		until = time.Now().Add(testDeadline)
+		for !strings.Contains(readFile(t, logPath), "binding consumer unavailable; bounded retry cause=connection\n") && time.Now().Before(until) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !strings.Contains(readFile(t, logPath), "binding consumer unavailable; bounded retry cause=connection\n") {
+			t.Fatal("connection-failure control never reached the consumer")
+		}
+	}
 	f.update(func(st *config.State) {
 		st.Terminal.AttemptIDs = nil
 		st.Terminal.Notice = ""
@@ -246,6 +300,19 @@ func testTerminalRefreshDetachedLifecycle(t *testing.T, mode string) {
 	current, err := bindingImage(ctx, child.Process.Pid)
 	if err != nil || current != candidate.Image {
 		t.Fatal("scanner still sees old image")
+	}
+	if gate != "" {
+		if strings.Contains(readFile(t, logPath), "binding consumer ready\n") {
+			t.Fatal("new image claimed recovery before the connection recovered")
+		}
+		setConsumerConnectionGate(t, gate, false)
+		until = time.Now().Add(testDeadline)
+		for !strings.Contains(readFile(t, logPath), "binding consumer ready\n") && time.Now().Before(until) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if strings.Count(readFile(t, logPath), "binding consumer ready\n") != 1 {
+			t.Fatalf("new image did not log recovery once: %s", readFile(t, logPath))
+		}
 	}
 	// A command launched from the new image now sees a same-image binding rather
 	// than ErrBindingOldImage; the ordinary wait-while-bound fence still applies.
@@ -289,6 +356,9 @@ func testTerminalRefreshDetachedLifecycle(t *testing.T, mode string) {
 	}
 	if strings.Count(readFile(t, logPath), "binding re-exec: executable changed\n") != 1 {
 		t.Fatal("replacement image entered exec loop")
+	}
+	if gate != "" && strings.Count(readFile(t, logPath), "binding consumer ready\n") != 1 {
+		t.Fatal("healthy replacement cycles repeated the recovery line")
 	}
 }
 

@@ -133,3 +133,48 @@ func TestNostrNamespacePreservesAnonymousRouting(t *testing.T) {
 		}
 	}
 }
+
+// Proves the upstream daemon command and engine bypass Nostr selection even with malformed host Nostr metadata.
+func TestNostrNamespacePreservesDaemonRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		engine bool
+	}{
+		{name: "help", args: []string{"daemon", "--help"}},
+		{name: "invalid-enrollment", args: []string{"daemon", "enroll"}},
+		{name: "engine", args: []string{"whoami"}, engine: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := fx.Root(t)
+			run := func() result {
+				var out, err bytes.Buffer
+				a := nostrApp(base, &out, &err)
+				a.daemonEngine = tc.engine
+				code := a.Run(context.Background(), tc.args)
+				return result{code: code, stdout: out.String(), stderr: err.String()}
+			}
+			baseline := run()
+			if tc.name == "help" && (baseline.code != ExitOK || !strings.Contains(baseline.stdout, "usage: a2a daemon")) {
+				t.Fatal("daemon help positive control", baseline)
+			}
+			if tc.name == "invalid-enrollment" && baseline.code != ExitUsage {
+				t.Fatal("invalid enrollment must remain a usage refusal", baseline)
+			}
+			if tc.engine && baseline.code == ExitOK {
+				t.Fatal("unprovisioned daemon identity unexpectedly succeeded")
+			}
+			root := filepath.Join(base, "nostr", "alice")
+			fx.Write(t, filepath.Join(root, "session.json"), []byte(`{}`))
+			if got := run(); got.code != baseline.code || got.stdout != baseline.stdout || got.stderr != baseline.stderr {
+				t.Fatalf("Nostr intercepted daemon routing: got %+v, want %+v", got, baseline)
+			}
+			if _, err := os.Lstat(filepath.Join(root, "transport")); !os.IsNotExist(err) {
+				t.Fatal("daemon route opened Nostr transport")
+			}
+			if raw, err := os.ReadFile(filepath.Join(root, "session.json")); err != nil || string(raw) != `{}` {
+				t.Fatal("daemon route changed Nostr metadata")
+			}
+		})
+	}
+}

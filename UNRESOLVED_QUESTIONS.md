@@ -1,5 +1,54 @@
 # Unresolved questions
 
+## Issue #308: Q4 and foundation runner gates
+
+Q1/Q2/Q3/Q5/Q6 are recorded in `docs/e2ee.md` section 11. Q4 still needs an
+owner decision on automatic versus explicit future-device admission and the
+authority for approval changes. It gates U2b and later; it does not gate U1
+foundations or U2a cross-signing bootstrap / public identity evidence.
+
+The offline U1 worker cannot run tests, benchmarks or network advisory queries.
+Source must obtain runner results, 1/8MiB operational p95 <=500ms and 64MiB
+capacity p95 <=10s evidence for the optimized Save/Load path,
+and external security-history review before treating the foundation as admitted.
+These two-tier bounds are Source's engineering decision, not owner ratification.
+A full-cap save can exceed the existing 5-second hook budget. U2a/U3 must keep
+full-cap saves off the hook path with a pre-mutation size/latency guard or an
+equivalent separately admitted design; this wiring remains unresolved. Hosted CI
+does not run the capacity benchmark, and this follow-up supplies no new latency
+measurements. Native and full-hook qualification remain separate gates.
+The repository declares Go 1.25.12; this bench supplies 1.25.14. Exact 1.25.12
+execution remains unverified. mautrix v0.31.0/v0.32.0 require Go 1.26 and are
+excluded without a separate toolchain decision. No E2EE activation is delivered.
+
+Source's U1 r2 resolution closes the server-only USK visibility assumption:
+`/keys/query` exposes USKs only for the requesting user's own keys. The host pin
+provides owner MSK/USK, both fingerprinted, and the MSK signature on the USK.
+U2a verifies that evidence and the USK signature on the agent's own queried MSK.
+A live Element ceremony witness still gates U2a shipment; it does not block U1.
+U1 validates retained public shape only. No private owner credentials or trust
+boolean substitute is authorized. Under A1, U2a must also enforce a2ad-only
+custody under the dedicated service-user daemon, excluding agent access; local
+identities outside a2ad get no custody and no home/local-base/env fallback.
+
+U2a must additionally enforce the 0700-parent creation and ACL exclusion
+provisioning contract, add a monotonic anchor outside snapshot rollback, and
+derive signing keys with concrete goolm/pk. An executable no-OlmMachine/no-libolm
+import-boundary test belongs to U2a or a dedicated follow-up. U4 owns composite
+lock-order integration and full hook latency, beyond U1's Save/Load benchmark.
+The full 64MiB cap is capacity evidence, not an interactive latency promise or a
+larger hook deadline. Hooks must skip before crypto mutation when measured
+prepare/commit time cannot be reserved, preserve the cursor and leave at least
+one second for cancellation/output; interactive consumers recover.
+
+Typed secret-inventory equivalence covers canonical snapshot-writer encodings
+only. An altered AEAD-valid snapshot requires the per-generation wrapping key,
+but accepted noncanonical JSON can lose overwritten values or stored spellings
+through case-insensitive struct-member aliases, numeric map-key spelling aliases
+and base64 normalization. Rejecting or otherwise inventorying those forms remains
+future hardening; the legacy compatibility oracle shares alias gaps and does not
+prove them absent. Issue #447 documents this limit without changing the decoder.
+
 ## Issue #258: cross-topic citations after #219
 
 The current #219 reply contract in `docs/cli.md` and
@@ -166,3 +215,63 @@ upgrade limits. Deferred media/room/account capabilities remain unresolved.
 Upstream PR251 was open at licensing source commit
 5880b68929d3f83c64fb13719707e894ea1dec16. Public release remains conditional on
 its landing or explicit authorization from both owners. AL1 delivery is local.
+
+## C6: host and native qualification evidence
+
+C6's repository implementation and inert unit fixtures are documented in
+[daemon-service.md](docs/daemon-service.md). This disposable producer bench is
+not authorized to execute tests, start/install a unit, reboot, provision root
+files or inspect an installed native runtime. Source/Meta and host keepers must
+supply these remaining evidence artifacts before native sign-off:
+
+- Mac precheck and CI test execution, including planted negative controls.
+- Provisioned `_a2a`/Linux account, final Infra owner-policy path/hash and reviewed
+  script alignment; service-UID policy/image/directory ACL write-denial check.
+- Recorded native `launchctl print`/`systemctl show` shapes for the conservative
+  matching parser, then explicit install/status/uninstall checks.
+- A removed-run-dir/reboot-equivalent boot followed by a real station connect,
+  crash restart, bounded SIGTERM cancellation and next-cadence sweep detection.
+- Controller integration that records actual recovered-delivery/traffic counts
+  in the existing service context, followed by owner-selected real-traffic soak.
+  C6-r3/P3-rescue-caller: the controller needs an authorized service-context
+  reporting/accounting channel; C6 must not grant agents write access or add C7.
+  C6-r3/P3-daily-soak: the owner must choose calendar days versus rolling 24-hour
+  windows and minimum daily traffic; the current artifact uses interval totals
+  and cannot certify daily traffic or authorize fallback removal.
+- C6-r3/ACL-native: verify Darwin fgetattrlist ACL decoding on the installed
+  target and Linux kernel faccessat2/no-extended-ACL assumptions. The private
+  grant seam and SDK-shaped parser fixtures do not qualify native ACL denial.
+- Exact installed Muse hook stdin/stdout and monitor websocket fixtures. This
+  producer does not invent an installed version pin, upstream issue, local shim
+  or native qualification verdict. Existing Claude/Codex fixtures remain.
+
+Infra owns the operator `--check` exemption for an absent boot-volatile run
+directory. Source owns acceptance of the documented preparation fallback;
+there is no launchd inherited-listener path in this producer patch.
+
+## Darwin release: custody and native qualification
+
+The source workflow/gates do not grant Apple-key custody, provisioning, tag or
+publication authority. Direct-owner scope approval is recorded. Actual owner
+repository provisioning and GitHub policy-read access remain prerequisites.
+A protected deployment environment is separately owned optional hardening, not a
+first-release prerequisite. The first proposed0.1.0 release has not been signed/notarized/published by this source unit.
+Actual native keychain import/codesign/notary execution, full DR on final images,
+legacy ACL consent/refusal, no-UI and owner-controlled OS-user fixture remain
+unverified. N-to-N+1 needs a second different admitted image pair and full native
+comparison plus item-access evidence; parser fixtures cannot close it. Archive
+publication does not authorize installing or switching a live consumer. The approved broader Linux/tap/package delivery still needs the concrete shared
+release-standard integration; no duplicate standard or guessed pin is delivered here. See
+[the bounded release contract](docs/darwin-release.md).
+
+## G1-GATE-1: reviewed BIP-340 envelope profile needed
+
+The [catch-up and prerequisite record](docs/g1-gate-1.md) identifies the exact
+protocol mismatch: current waggle main specifies Ed25519 message authors and
+one carrier recipient id, while G1 Matrix admission requires the verifying
+BIP-340 sender key. A protected exact carrier-id/key pin is the proposed
+recipient source; it does not change the envelope signature algorithm. The
+protocol owner must supply or approve a reviewed sender profile, or explicitly
+change that acceptance requirement, including grant presentation carriage. Until then,
+Matrix CG1 remains refused at startup. Chain-lab PR #100 is an API input, not
+a wire-schema decision or live-grant acceptance evidence.

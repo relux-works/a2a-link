@@ -39,7 +39,7 @@ func startupFixture(t *testing.T) (*App, *session, *env, string, *time.Time, *ke
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	a.Now = func() time.Time { return now }
 	dir := fakeKeychain(e, map[string]string{s.creds.UserID: e.tokens["alice"]}, "")
-	k := isolatedKeychainStore(keychainStore{paths: s.paths, probeCommand: unlockedProbe, command: securityCommand(dir), now: a.Now, cooldown: 11 * time.Second})
+	k := isolatedKeychainStore(keychainStore{paths: s.paths, probeCommand: unlockedProbe, backend: fakeBackend{dir}, now: a.Now, cooldown: 11 * time.Second})
 	a.keychain = func(config.Paths) *keychainStore { return k }
 	_, err := config.UpdateState(s.paths, s.name, func(st *config.State) error {
 		st.Terminal.RetryMax = 4 * time.Second
@@ -146,6 +146,7 @@ func TestBoundReexecCredentialRecovery(t *testing.T) {
 // Fake time keeps retrying just before the deadline, caps the final sleep, and
 // refuses recovery at the deadline. Earlier recovery still arms the same binding.
 // Timeout uses the real child route to verify its exit log and flock release.
+// The unavailable episode is diagnostic only; the rest of the state is retained.
 func TestBoundStartupCredentialRetryLimit(t *testing.T) {
 	if startupCredentialRetryLimit != 30*time.Minute {
 		t.Fatal("startup retry limit must be 30 minutes")
@@ -220,7 +221,13 @@ func TestBoundStartupCredentialRetryLimit(t *testing.T) {
 			if mode == "timeout" && !strings.HasSuffix(log.String(), "binding exit: startup credentials unavailable\n") {
 				t.Fatalf("timeout exit log=%q", log.String())
 			}
-			if !reflect.DeepEqual(withoutRefreshDiagnostic(before), withoutRefreshDiagnostic(e.state("alice"))) {
+			after := e.state("alice")
+			r := after.Terminal.ConsumerReport
+			if r == nil || r.Since != firstRefusal.UTC().Format(time.RFC3339Nano) || r.Outcome != "unavailable: alarm destination missing" || r.Alarm || strings.Count(log.String(), "binding incident report: unavailable: alarm destination missing\n") != 1 || strings.Contains(log.String(), "binding consumer ready\n") {
+				t.Fatalf("startup lost its diagnostic episode or claimed full consumer recovery: %+v log=%q", r, log.String())
+			}
+			after.Terminal.ConsumerReport = nil
+			if !reflect.DeepEqual(withoutRefreshDiagnostic(before), withoutRefreshDiagnostic(after)) {
 				t.Fatal("startup changed binding, lease or delivery state beyond diagnostic")
 			}
 			if err := config.WithRuntimeLock(s.paths, s.name, "consumer", time.Now(), func() error { return nil }); err != nil {

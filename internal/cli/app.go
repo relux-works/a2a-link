@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
-	"github.com/relux-works/a2a-swarm/internal/courier"
+	"github.com/relux-works/a2a-swarm/internal/daemon"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 	"github.com/relux-works/a2a-swarm/internal/redact"
 	"github.com/relux-works/a2a-swarm/internal/voice"
+	"github.com/relux-works/a2a-swarm/internal/wakemute"
 )
 
 // Exit codes.
@@ -30,10 +31,15 @@ const (
 
 // App carries the process environment so tests can run commands in-process.
 type App struct {
+	wakeRequiredVersion      string                                       // Immutable process-start admission; never read from a daemon request or ambient selector.
+	wakeContext              context.Context                              // Bounded terminal dispatch copy; never changes ambient command cleanup.
+	terminalFixture          func(config.TerminalBinding) terminalEffects // Isolated tests only; production always uses the bound terminal.
 	admissionSessions        []*identityAdmission
-	courierEngine            bool
-	courierLeaseConflict     bool
-	courierFiles             map[string]courier.InputFile
+	daemonEngine             bool
+	daemonOwner              string // Root policy snapshot, inherited by requests only.
+	daemonOwnerEpoch         *daemonOwnerEpoch
+	daemonLeaseConflict      bool
+	daemonFiles              map[string]daemon.InputFile
 	Stdout                   io.Writer
 	Stderr                   io.Writer
 	Stdin                    io.Reader
@@ -54,14 +60,15 @@ type App struct {
 	connectionError       error
 	authorizeRegistration bool
 	beforeNamedPublish    func() error
+	beforeMemberRegistry  func() error // In-process publication interruption seam.
 	connectionSecretStore connectionSecretStore
-	courierSecrets        config.CourierSecretStore // package-test-only; no external fake selection
+	daemonSecrets         config.DaemonSecretStore // retained test input; CLI migration never consults it
 	// human selects a human operator's own account (humans/<name>.json); never
 	// set by agents. It needs --as and ignores A2A_AGENT.
 	human   bool
 	secrets redact.Set
 
-	// keychain is a package-test-only factory. Production stays pinned to security.
+	// keychain is a package-test-only factory. Production uses the in-process Security framework.
 	keychain              func(config.Paths) *keychainStore
 	bindStartupWait       func(context.Context, time.Duration) error // deterministic startup retry seam
 	beforeCredentialScrub func() error
@@ -80,6 +87,11 @@ type App struct {
 	// before it takes the state lock to persist and print: tests use it to let
 	// a concurrent consumer win the race.
 	beforeDeliver func()
+	// terminalTrace, when set by a test, observes consumer loop events.
+	terminalTrace func(string)
+	// quiescentExchangeHook, when set by a test, runs before each quiescent
+	// exchange (foreign-writer fixtures).
+	quiescentExchangeHook func()
 	// hookBudget, when set (tests only), replaces the hook budget.
 	hookBudget time.Duration
 	// hookSelection replaces executable selection in installer merge tests only.
@@ -120,12 +132,13 @@ type App struct {
 // NewApp returns an App bound to the real process environment.
 func NewApp() *App {
 	return &App{
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-		Stdin:  os.Stdin,
-		Getenv: os.Getenv,
-		HTTP:   &http.Client{},
-		Now:    time.Now,
+		wakeRequiredVersion: os.Getenv(wakemute.EnvRequiredVersion),
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		Stdin:               os.Stdin,
+		Getenv:              os.Getenv,
+		HTTP:                &http.Client{},
+		Now:                 time.Now,
 	}
 }
 
@@ -144,20 +157,21 @@ type command struct {
 
 func commands() []command {
 	return []command{
-		{"courier", "courier serve|register-station|unregister-station|enroll | migrate <identity> --to <courier-base> [--resume|--rollback]   local Courier, station enrollment and quiesced identity migration", cmdCourier},
-		{"connection", "connection list|show NAME|add NAME --file FILE|use NAME|register NAME --via-admin-room   named Matrix routing", cmdConnection},
+		{"daemon", "daemon serve|register-station|unregister-station|enroll|status | migrate <identity> --to <daemon-base> [--resume|--rollback]   local a2a daemon (a2ad), station enrollment and file-backed identity migration (Keychain deferred; #460)", cmdDaemon},
+		{"connection", "connection list|show NAME|add NAME --file FILE|use NAME|register NAME --via-admin-room [--into /fresh/member-root]   named Matrix routing", cmdConnection},
 		{"voice", "voice status [--json] | voice config --enable | voice install   optional local voice replies (180s cap)", cmdVoice},
 		{"mail-alarm", "mail-alarm set|unset|status   per-identity stale addressed mailbox alarm", cmdMailAlarm},
 		{"owner-dm", "owner-dm bind|unbind --event ROOM EVENT | ensure|set|unset|status   per-identity owner channel (default off)", cmdOwnerDM},
 		{"principal-dm", "principal-dm ensure|unset @user:server | status [@user:server] | say @user:server <text|@file|->   direct room with a host-pinned principal (default off)", cmdPrincipalDM},
+		{"agent-dm", "agent-dm ensure|status|say|unset|leave FULL_PEER   exact admitted agent pair (default off)", cmdAgentDM},
 		{"register", "register <name>                      create a Matrix account and a 0600 credential file (low level: use identity ensure)", cmdRegister},
 		{"availability", "availability <localpart|@localpart:server> [--json]   read selected-server registration availability (no existence guarantee)", cmdAvailability},
-		{"host", "host init <slug> [--force] | host show | host principals set|show|clear   this machine's host slug, the first part of every identity", cmdHost},
+		{"host", "host init <slug> [--force] | host show | host principals set|show|clear | host mute|unmute   host identity, principal policy and owner-confirmed scope wake mute leases", cmdHost},
 		{"identity", "identity ensure --role R [--project P] [--runtime R] [--product X --preset P] [--resource ROOM] | identity release   onboard a stable or preset identity; its lease", cmdIdentity},
 		{"whoami", "whoami                               show the current identity", cmdWhoami},
 		{"rooms", "rooms                                list joined rooms (alias, name, id)", cmdRooms},
-		{"room", "room new <alias> [--name N] [--topic T] [--invite a,b] [--product X] | room retire <alias> | room members <room> [--membership join|invite|join,invite] [--json]   create, retire an EMPTY room, or read current members", cmdRoom},
-		{"product", "product new X [--keeper NAME] [--projector NAME] | adopt X <room> | list | show X   manage product spaces and rooms", cmdProduct},
+		{"room", "room new <alias> [--name N] [--topic T] [--invite a,b] [--product X] | room retire <alias> | room members <room> [--membership join|invite|join,invite] [--json] | room power <room> [--json]   create, retire an EMPTY room, or read current members/power", cmdRoom},
+		{"product", "product new X [--private] [--keeper NAME] [--projector NAME] | adopt X <room> | list | show X   manage product spaces and rooms", cmdProduct},
 		{"broadcast-room", "broadcast-room init   create the global #broadcast room", cmdBroadcastRoom},
 		{"join", "join <room>                          join a room", cmdJoin},
 		{"leave", "leave <room> [--force]               leave a room (card room only with --force)", cmdLeave},
@@ -189,7 +203,7 @@ func commands() []command {
 		{"sub-accept", "sub-accept <room> <$event>           accept a subscription request addressed to me", cmdSubAccept},
 		{"project", "project --system R --source R [--source R...] [--kind k1,k2] [--once]   project allowed sources to one explicit target", cmdProject},
 		{"skill", "skill install [--force] | skill print   install the a2a agent skill into ~/.agents, ~/.claude, ~/.codex", cmdSkill},
-		{"creds", "creds migrate | move-human <name>   migrate selected credentials to Keychain, or move HUMAN metadata into humans/", cmdCreds},
+		{"creds", "creds migrate | reconcile | move-human <name>   migrate selected credentials to Keychain, or move HUMAN metadata into humans/", cmdCreds},
 		{"card", "card set --file card.md | card get <name> | card room init [--room R]   configured card store", cmdCard},
 		{"status", "status init | set STATE TEXT --heartbeat DUR --runtime R --hooks H --doorbell D [--product X] | get [name] (legacy presence)", cmdStatus},
 		{"who", "who --stale-after DUR [--product X] [--json]   read self-written agent liveness", cmdWho},
@@ -214,6 +228,12 @@ func (a *App) usage(w io.Writer) {
 // Run executes one a2a invocation and returns the exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	defer a.closeAdmission()
+	if hostMuteInvocation(args) {
+		return a.fail(cmdHostMute(ctx, a, args[1:]))
+	}
+	if hostMuteInvocation(stationArgs(args)) {
+		return a.fail(usagef("host mute requires canonical argv without global identity selectors"))
+	}
 	// This exact hidden probe must bypass connection preflight and owner-DM
 	// diagnostics: neither state nor credentials may be consulted by negotiation.
 	if len(args) == 2 && args[0] == "bind" && args[1] == "--consumer-protocol" {
@@ -230,7 +250,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		a.HTTP = &http.Client{}
 	}
 	command := stationCommand(args)
-	if command != "fetch" && command != "courier" && command != "help" && command != "--help" && command != "-h" && command != "" && !a.courierEngine {
+	if command != "fetch" && command != "daemon" && command != "help" && command != "--help" && command != "-h" && command != "" && !a.daemonEngine {
 		if handled, code := a.stationInvocation(ctx, args); handled {
 			return code
 		}
@@ -254,13 +274,13 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	}
 	if len(rest) > 0 && rest[0] == "fetch" {
 		// Fetch help and flag errors have always been environment-free. Parse
-		// them before discovery; an executable fetch still reaches Courier's
+		// them before discovery; an executable fetch still reaches Daemon's
 		// closed command allowlist before credentials or filesystem effects.
 		if _, err := parseFetchFlags(a, rest[1:]); err != nil {
 			return a.fail(err)
 		}
 	}
-	if command == "fetch" && !a.courierEngine {
+	if command == "fetch" && !a.daemonEngine {
 		if handled, code := a.stationInvocation(ctx, args); handled {
 			return code
 		}
@@ -279,8 +299,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		a.usage(a.Stdout)
 		return ExitOK
 	}
-	// Local Courier/association protocols retain their environment-free boundary.
-	if !a.courierEngine && rest[0] != "courier" && associationInvocation(args) == nil {
+	// Local Daemon/association protocols retain their environment-free boundary.
+	if !a.daemonEngine && rest[0] != "daemon" && associationInvocation(args) == nil {
 		if handled, err := a.nostrInvocation(ctx, args); handled {
 			return a.fail(err)
 		}
@@ -289,7 +309,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		if c.name == rest[0] {
 			// Enrollment is a local operator command; it must not read a
 			// connection, credentials, environment identity or owner-DM state.
-			if c.name == "courier" && len(rest) > 1 && rest[1] == "enroll" {
+			if c.name == "daemon" && len(rest) > 1 && rest[1] == "enroll" {
 				return a.fail(c.run(ctx, a, rest[1:]))
 			}
 			// Stored association is effect-free and has its own closed JSON
@@ -297,9 +317,9 @@ func (a *App) Run(ctx context.Context, args []string) int {
 			if c.name == "bind" && len(rest) > 1 && rest[1] == "association" {
 				return a.bindAssociation(rest[2:])
 			}
-			// Courier manages only its explicit local home and socket. Never run
+			// Daemon manages only its explicit local home and socket. Never run
 			// connection preflight or owner diagnostics on this path.
-			if c.name == "courier" {
+			if c.name == "daemon" {
 				return a.fail(c.run(ctx, a, rest[1:]))
 			}
 			// These inspections have their own routing-only validation. They
@@ -537,18 +557,25 @@ func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
 // session is an authenticated identity bound to one homeserver.
 type session struct {
-	admission        *identityAdmission
-	app              *App
-	paths            config.Paths
-	mx               config.Matrix
-	name             string
-	creds            config.Credentials
-	client           *matrix.Client
-	server           string
-	checkBinding     func() error // Immutable operational snapshot; nil for legacy sessions.
-	principals       []string     // Local snapshot for this delivery cycle; no lock spans I/O.
-	principalWarning bool         // Emit malformed/unreadable metadata warning once per session.
-	longConsumer     bool         // Process-owned watch/unbounded wait; ignore ambient runtime session IDs.
+	// terminalUndelivered is set by each terminal dispatch from its fresh,
+	// generation-consistent delivery view: un-rung pending entries, or -1
+	// when that dispatch did not compute the view.
+	terminalUndelivered int
+	agentDelivery       *agentDMDelivery
+	agentDeliveryWarned bool
+	agentReplayDeferred bool
+	admission           *identityAdmission
+	app                 *App
+	paths               config.Paths
+	mx                  config.Matrix
+	name                string
+	creds               config.Credentials
+	client              *matrix.Client
+	server              string
+	checkBinding        func() error // Immutable operational snapshot; nil for legacy sessions.
+	principals          []string     // Local snapshot for this delivery cycle; no lock spans I/O.
+	principalWarning    bool         // Emit malformed/unreadable metadata warning once per session.
+	longConsumer        bool         // Process-owned watch/unbounded wait; ignore ambient runtime session IDs.
 }
 
 func (a *App) paths() (config.Paths, error) {

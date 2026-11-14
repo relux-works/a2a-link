@@ -13,10 +13,12 @@ require (
 	github.com/relux-works/swarma-chain-lab/experiments/sealwatch v0.1.0
 	github.com/relux-works/swarma-chain-lab/experiments/single-use v0.1.0
 	github.com/yuin/goldmark v1.8.7
-	golang.org/x/net v0.57.0
+	golang.org/x/net v0.58.0
+	maunium.net/go/mautrix v0.30.0
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/btcsuite/btcd v0.24.2 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
@@ -24,6 +26,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.1.0 // indirect
+	go.mau.fi/util v0.10.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 )
 

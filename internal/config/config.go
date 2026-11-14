@@ -59,10 +59,15 @@ type Getenv func(string) string
 
 // Paths resolves files under the base directory.
 type Paths struct {
-	Base           string
-	Root           string // Original registry and host root in named mode.
-	MetadataBase   string // Connection-scoped identity metadata root.
-	AgentStateBase string // Resolver-selected agent State root for a named human.
+	WakeMuteVersion int    // Explicit embedding/daemon launch admission; 0 is legacy/uninstalled, 1 requires retained control state.
+	DaemonOwner     string // Immutable service-start policy; never loaded from State.
+	Base            string
+	Root            string // Original registry and host root in named mode.
+	MetadataBase    string // Connection-scoped identity metadata root.
+	AgentStateBase  string // Resolver-selected agent State root for a named human.
+	// stateDecode is the owning terminal consumer's private decode memo; nil
+	// for every resolved Paths value. It changes no path or routing result.
+	stateDecode *StateDecodeScope
 }
 
 // ResolvePaths returns the base directory from A2A_CONFIG_DIR or ~/.config/a2a-swarm.
@@ -388,6 +393,10 @@ type State struct {
 	NextBatch string `json:"next_batch,omitempty"`
 	// LastInbox names the last explicitly saved inbox frame; it grants no delivery authority.
 	LastInbox string `json:"last_inbox,omitempty"`
+	// AgentDMContexts is conservative room classification, never authority.
+	// Keep its JSON opaque here: a feature-local shape fault must not prevent
+	// otherwise valid principal delivery or erase the original recovery input.
+	AgentDMContexts json.RawMessage `json:"agent_dm_contexts,omitempty"`
 	// LegacyPending is the pre-mailbox pending wait batch. It is dropped at the
 	// first sync: the cursor never moved past it, so its events are synced
 	// into the mailbox again.
@@ -614,6 +623,7 @@ func (s *State) AddThread(root string) bool {
 
 // LoadState reads state/<name>.json. A missing file yields an empty state.
 func LoadState(p Paths, name string) (State, error) {
+	globalStateStats.loadStateCalls.Add(1)
 	path := p.StateFile(name)
 	if err := checkSecretFile(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -621,10 +631,13 @@ func LoadState(p Paths, name string) (State, error) {
 		}
 		return State{}, err
 	}
+	globalStateStats.stateReadAttempts.Add(1)
 	data, err := os.ReadFile(path)
 	if err != nil {
+		globalStateStats.stateReadErrors.Add(1)
 		return State{}, err
 	}
+	globalStateStats.stateReadBytes.Add(int64(len(data)))
 	var envelope map[string]json.RawMessage
 	if json.Unmarshal(data, &envelope) == nil {
 		// Match every spelling accepted by the typed JSON decoder. A later
@@ -635,8 +648,10 @@ func LoadState(p Paths, name string) (State, error) {
 			}
 		}
 	}
-	var s State
-	if err := unmarshalState(data, &s); err != nil {
+	// The scoped decode reuses parsed data only for these exact fresh bytes and
+	// returns an owned copy; the supplemental checks above and below still run.
+	s, err := decodeFreshState(p, name, path, data)
+	if err != nil {
 		return State{}, fmt.Errorf("%s is not valid state JSON: %w", path, err)
 	}
 	if err := s.validateHostNotifications(); err != nil {
@@ -676,6 +691,18 @@ func SaveState(p Paths, name string, s State) error {
 // saveStateLocked never reacquires the state lock. Only monitor lifecycle code
 // may alter the monitor record or explicitly clear the sticky writer fence.
 func saveStateLocked(p Paths, name string, old, s State, fence time.Time, monitor, migration bool) (State, error) {
+	return persistStateLocked(p, name, old, s, fence, monitor, migration, false)
+}
+
+// persistStateLocked is saveStateLocked with one ordinary-transaction option.
+// inputSealed reports that the caller verified old's compatible-writer seal
+// under this same lock (ordinaryWriterFenceSealed). After every refusal below
+// has passed, an ordinary non-Host-v2 save whose sealed bytes would equal that
+// verified input is not replaced when elideUnchangedOrdinaryState establishes
+// the replacement's postconditions on the existing file: same path, mode and
+// bytes, file content synced, directory entries synced. Any other outcome
+// runs the ordinary replacement or returns its directory sync error taxonomy.
+func persistStateLocked(p Paths, name string, old, s State, fence time.Time, monitor, migration, inputSealed bool) (State, error) {
 	if !migration && (old.Migration != nil || s.Migration != nil) {
 		return old, ErrIdentityMigrated
 	}
@@ -707,6 +734,17 @@ func saveStateLocked(p Paths, name string, old, s State, fence time.Time, monito
 	}
 	// Caller-supplied writer metadata never erases an observed fence.
 	s.Writer = &StateWriter{Protocol: stateProtocol, ForeignSeen: fence}
+	if inputSealed && !strict && unchangedSealedState(old, s) {
+		elided, err := elideUnchangedOrdinaryState(path, old.rawState, ordinaryStateSync)
+		if err != nil {
+			return old, err
+		}
+		if elided {
+			// old is the independent snapshot decoded from these exact bytes; the
+			// callback only ever received a separately decoded working copy.
+			return old, nil
+		}
+	}
 	data, err := sealedState(s)
 	if err != nil {
 		return old, err
@@ -721,8 +759,8 @@ func saveStateLocked(p Paths, name string, old, s State, fence time.Time, monito
 	}
 	// Return only the representation that successfully persisted, including its
 	// fresh seal/input. A failed save makes no durable-fence claim.
-	var saved State
-	if err := unmarshalState(data, &saved); err != nil {
+	saved, err := decodeFreshState(p, name, path, data)
+	if err != nil {
 		return old, err
 	}
 	return saved, nil
@@ -861,13 +899,14 @@ func updateState(p Paths, name string, lock func(string) (func(), error), fn fun
 		if old.Migration != nil {
 			return old, ErrIdentityMigrated
 		}
-		fence := ordinaryWriterFence(old, time.Now())
+		fence, sealed := ordinaryWriterFenceSealed(old, time.Now())
 		// A callback must not mutate the comparison snapshot through shared
-		// lease/runtime/terminal pointers or slices. Decode the same disk input
-		// into an independent working copy before handing it to ordinary code.
+		// lease/runtime/terminal pointers or slices. Derive an independent
+		// working copy of the same disk input before handing it to ordinary code.
 		var s State
 		if len(old.rawState) != 0 {
-			if err := unmarshalState(old.rawState, &s); err != nil {
+			var err error
+			if s, err = writerWorkingCopy(p, name, &old); err != nil {
 				return old, err
 			}
 		}
@@ -875,7 +914,7 @@ func updateState(p Paths, name string, lock func(string) (func(), error), fn fun
 		if err := fn(&s); err != nil {
 			return old, err
 		}
-		return saveStateLocked(p, name, old, s, fence, false, false)
+		return persistStateLocked(p, name, old, s, fence, false, false, sealed)
 	})
 }
 
@@ -892,6 +931,11 @@ func withStateLock(p Paths, name string, lock func(string) (func(), error), fn f
 		return State{}, err
 	}
 	defer unlock()
+	// Record, still under the lock, the files this holder found and leaves
+	// behind; a consumer compares them later to tell its own writes from
+	// others', and keeps evidence of a change it found but did not make.
+	before := p.stateDecode.stampOwnFiles(p, name)
+	defer p.stateDecode.noteOwnFiles(p, name, before)
 	s, err := LoadState(p, name)
 	if err != nil {
 		return State{}, err

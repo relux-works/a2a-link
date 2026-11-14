@@ -73,13 +73,14 @@ func TestMonitorSealOracle(t *testing.T) {
 // new typed fields from silently escaping this test. No old executable is run.
 func TestMonitorSealEveryStateField(t *testing.T) {
 	edits := map[string]string{
-		"migration":         `{"phase":"in_progress","courier_base":"/fixture","at":"2026-01-02T03:04:05Z"}`,
+		"migration":         `{"phase":"in_progress","daemon_base":"/fixture","at":"2026-01-02T03:04:05Z"}`,
 		"monitor_owner":     `{"runtime":"muse","session_id_hash":"` + ownerHash("replacement-session") + `","first_seen":"2026-11-09T00:00:00Z","last_hook_at":"2026-11-09T00:01:00Z"}`,
 		"monitor_config":    `{"owner_ttl":3600000000000}`,
 		"mail_alarm_config": `{"minutes":20,"owner":"auto"}`,
 		"mail_alarm":        `{"active":true}`, "notification": `{"version":1}`,
 		"next_batch": `"old-cursor"`, "last_inbox": `"old-frame"`,
-		"pending": `[{"old":true}]`, "acked": `["old-id"]`, "threads": `["old-thread"]`,
+		"agent_dm_contexts": `{"contract":"a2a-agent-dm/v1","rooms":["!retained"]}`,
+		"pending":           `[{"old":true}]`, "acked": `["old-id"]`, "threads": `["old-thread"]`,
 		"thread_events": `[{"room":"r","event_id":"e","root":"t"}]`,
 		"muted":         `["old-muted"]`, "subscriptions": `{"r":["message"]}`,
 		"hook_sessions": `[{"id":"old-session","blocks":1}]`, "hooks_paused": `true`,

@@ -69,7 +69,12 @@ func (a *App) selectedConnection() (*config.Connection, error) {
 	a.connection = &c
 	return &c, nil
 }
-func (a *App) pathsFor(name string) (config.Paths, error) {
+func (a *App) pathsFor(name string) (result config.Paths, err error) {
+	defer func() {
+		if a.daemonEngine {
+			result.DaemonOwner = a.daemonOwner
+		}
+	}()
 	p, e := config.ResolvePaths(a.Getenv)
 	if e != nil {
 		return p, e
@@ -96,6 +101,9 @@ func (a *App) namedMetadata(p config.Paths, name string) (config.Credentials, er
 	}
 	b, e := c.Binding(name, a.human)
 	if e != nil {
+		return config.Credentials{}, e
+	}
+	if e = config.CheckMemberRegistration(p, b); e != nil {
 		return config.Credentials{}, e
 	}
 	if !a.human {
@@ -163,7 +171,7 @@ func (a *App) pinnedArgs(name string) ([]string, error) {
 }
 func cmdConnection(ctx context.Context, a *App, args []string) error {
 	if len(args) == 0 {
-		return usagef("usage: a2a connection list|show NAME|add NAME --file FILE|use NAME|register NAME --via-admin-room")
+		return usagef("usage: a2a connection list|show NAME|add NAME --file FILE|use NAME|register NAME --via-admin-room [--into /fresh/member-root]")
 	}
 	p, e := config.ResolvePaths(a.Getenv)
 	if e != nil {
