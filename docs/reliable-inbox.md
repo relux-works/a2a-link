@@ -103,19 +103,29 @@ separate fields. Federated rooms MUST work without changing owner authority.
 Existing owner answer-first policy remains in force at permitted boundaries.
 
 Thread mute remains the emergency opt-out for the thread-only reason. Direct-to,
-mentions, pinned owner delivery and independently matching explicit subscription
-reasons retain their existing semantics. For v1, explicit `follow` also clears
-that thread's mute, matching the existing operation; its result/status MUST
-visibly report that consequence. A post MUST NOT clear a mute. A broad explicit
-subscription is independent of a thread follow and MUST be shown as an effective
-reason, so an operator can see why traffic still arrives.
+mentions and pinned owner delivery retain their existing semantics. A mute also
+applies to subscriptions, exactly as current main does (`internal/cli/wait.go`,
+`classify`): for an event in a muted thread (the canonical root, including the
+root event itself), a plain room-scoped subscription for that room, with no
+sender filter and not `--all-events`, does NOT deliver it. Still delivering
+despite the mute: a subscription with an explicit sender filter (`--from`), an
+`--all-events` subscription, a roomless subscription, and, for a projection
+header, a projection-eligible subscription. For v1, explicit `follow` also
+clears that thread's mute, matching the existing operation; its result/status
+MUST visibly report that consequence. A post MUST NOT clear a mute. A broad
+explicit subscription is independent of a thread follow and MUST be shown as an
+effective reason, so an operator can see why traffic still arrives; a muted
+thread's traffic reaches it only through one of the exempt subscription kinds
+above.
 
 `unfollow` is a proposed operation, absent at the inspected baseline. It
 withdraws explicit thread intent without creating a mute: future thread-only
 traffic stops, and later posting still does not follow. `mute` additionally
 records the sticky opt-out above. Neither operation suppresses direct-to,
-mentions, pinned owner delivery or independent subscription reasons. Repeated
-unfollow is idempotent and preserves any pre-existing mute.
+mentions, pinned owner delivery or the mute-exempt subscription kinds above
+(sender-filtered, `--all-events`, roomless, projection-eligible); a mute does
+suppress a plain room-scoped subscription for that thread, as stated above.
+Repeated unfollow is idempotent and preserves any pre-existing mute.
 
 There are two distinct subscription stores at the inspected baseline:
 
