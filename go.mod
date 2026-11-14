@@ -48,7 +48,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261114114327-f2a20c40a817
+	github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261114150118-3baa201bafb6
 	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway/kernelbind v0.1.1-0.20261113084500-b55fa5151e75
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect

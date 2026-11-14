@@ -108,8 +108,8 @@ github.com/relux-works/a2a-transport-nostr v0.3.0 h1:/WKseKvl7rg6HE4ewxVXmXFzOZw
 github.com/relux-works/a2a-transport-nostr v0.3.0/go.mod h1:crg/UvdyyeZiRNiGbCh0/Lm8bPVM/vvQfDDYMp1wcpQ=
 github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1 h1:T3iD+MHLRxHp9Oj2BJfuBudZFVzbVgxh8Cv1P6xUw1U=
 github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1/go.mod h1:eskmRagIK80UL3welr4n8HITS/BAZz4lyT4LoBESN+8=
-github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261114114327-f2a20c40a817 h1:mRZNUHGf8ipImunKyPpdVDcrbv6AoBKZ1mDK8aTxfsM=
-github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261114114327-f2a20c40a817/go.mod h1:WvD/+OF/bveKX2WizHvqNdkkQY6zIoBur8NjhsBRV68=
+github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261114150118-3baa201bafb6 h1:5KfohTd7BY6RQOMlP9l3VaExNDD/VSKygoLbcILcTi4=
+github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261114150118-3baa201bafb6/go.mod h1:WvD/+OF/bveKX2WizHvqNdkkQY6zIoBur8NjhsBRV68=
 github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.2.1-0.20261111181054-288d63e191fe h1:io482B6ia4yxUYmxwRH44gZ57/wnzexjQBHTwhQJxSw=
 github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.2.1-0.20261111181054-288d63e191fe/go.mod h1:W92/atFej2jhIPtMr8Yd7ccPEJOJQLx2PK7X6t2phZQ=
 github.com/relux-works/swarma-chain-lab/experiments/rental v0.5.1-0.20261111181054-288d63e191fe h1:+1syWOT2HuOuawutDoZn04I/lMT9s/rFOqg22BumiO0=
