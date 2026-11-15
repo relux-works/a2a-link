@@ -59,3 +59,50 @@ func TestProductionCosignRealIdentityControls(t *testing.T) {
 		})
 	}
 }
+
+// The actual Linux-side consumer accepts the authenticated public Darwin bundle;
+// wrong tag-object evidence and altered checksummed bytes refuse by named gates.
+// This verifies input consumption only, not a new native build or release.
+func TestRealDarwinProducerInput(t *testing.T) {
+	fixture := os.Getenv("A2A_DISTRIBUTION_COSIGN_FIXTURE")
+	if fixture == "" {
+		t.Skip("complete immutable Darwin fixture and pinned cosign required on hosted CI")
+	}
+	binding := Binding{"v0.1.1", "3c3c3d1c8c6fd8386fa4a740dbdb6f99a92bb8d1", "ccb3786d57d59cf1b7980808c80013b4c10fc7c5"}
+	for _, tc := range []struct{ name, want string }{
+		{"valid", ""},
+		{"tag-object", "darwin-producer-source-binding"},
+		{"archive-bytes", "checksum-asset-bytes-mismatch: a2a_0.1.1_darwin_arm64.tar.gz"},
+		{"evidence-bytes", "checksum-asset-bytes-mismatch: release-evidence.json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range DarwinMembers(binding.Version()) {
+				raw, e := os.ReadFile(filepath.Join(fixture, name))
+				if e != nil {
+					t.Fatal(e)
+				}
+				if tc.name == "archive-bytes" && name == "a2a_0.1.1_darwin_arm64.tar.gz" || tc.name == "evidence-bytes" && name == "release-evidence.json" {
+					raw = append(raw, '\n')
+				}
+				if e = os.WriteFile(filepath.Join(dir, name), raw, 0600); e != nil {
+					t.Fatal(e)
+				}
+			}
+			b := binding
+			if tc.name == "tag-object" {
+				b.TagObject = strings.Repeat("a", 40)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			e := VerifyDarwinProducerInput(ctx, b, dir)
+			if tc.want == "" {
+				if e != nil {
+					t.Fatal("authentic consumer control refused", e)
+				}
+			} else if e == nil || e.Error() != tc.want {
+				t.Fatalf("want %s, got %v", tc.want, e)
+			}
+		})
+	}
+}

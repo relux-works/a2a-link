@@ -71,10 +71,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/keyless-fixture"
-          for name in checksums.txt checksums.txt.sig checksums.txt.pem; do
+          for name in checksums.txt checksums.txt.sig checksums.txt.pem a2a_0.1.1_darwin_arm64.tar.gz evidence.tar.gz release-evidence.json; do
             curl -fsSL --retry 2 -o "$RUNNER_TEMP/keyless-fixture/$name" "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/$name"
           done
-          A2A_PUBLIC_DOWNLOAD_FIXTURE=1 A2A_DISTRIBUTION_COSIGN_FIXTURE="$RUNNER_TEMP/keyless-fixture" go test -p 1 -parallel 2 -v -count=1 -timeout=3m -run '^(TestProductionCosignRealIdentityControls|TestRealPublicDownloadDigest)$' ./internal/sharedrelease
+          A2A_PUBLIC_DOWNLOAD_FIXTURE=1 A2A_DISTRIBUTION_COSIGN_FIXTURE="$RUNNER_TEMP/keyless-fixture" go test -p 1 -parallel 2 -v -count=1 -timeout=5m -run '^(TestProductionCosignRealIdentityControls|TestRealDarwinProducerInput|TestRealPublicDownloadDigest)$' ./internal/sharedrelease
       - name: Build and vet repository distribution tools
         run: |
           set -euo pipefail
