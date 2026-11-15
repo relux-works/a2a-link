@@ -112,7 +112,7 @@ func TestObserveVectorOracle(t *testing.T) {
 // Proves valid and neighboring invalid/unknown/unsigned cases remain distinct;
 // tampered-body must fail if the pinned verifier call is planted always-success.
 func TestObserveLabels(t *testing.T) {
-	for _, name := range []string{"valid", "tampered-body", "wrong-author", "unknown-author", "missing-envelope", "missing-roster", "oversize", "malformed", "duplicate-content", "alias-body", "expired", "unavailable-time", "missing-journal", "redacted"} {
+	for _, name := range []string{"valid", "carrier-numbers", "tampered-body", "wrong-author", "unknown-author", "missing-envelope", "missing-roster", "oversize", "malformed", "duplicate-content", "alias-body", "expired", "unavailable-time", "missing-journal", "redacted"} {
 		t.Run(name, func(t *testing.T) {
 			o, ev, room, to, now := fromVector(t, loadVector(t, "PA1"))
 			var m map[string]any
@@ -121,6 +121,8 @@ func TestObserveLabels(t *testing.T) {
 			}
 			want := "verified: @author:test.invalid"
 			switch name {
+			case "carrier-numbers":
+				m["unrelated"] = map[string]any{"fraction": 1.5, "exponent": 1e100}
 			case "tampered-body":
 				m["body"] = "HELLO"
 				want = invalid("message_text_mismatch")

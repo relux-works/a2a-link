@@ -47,7 +47,7 @@ func (o *Observer) Observe(ev matrix.Event, room, recipient string, now time.Tim
 	if len(ev.Content) > matrix.EnvelopeEventContentBudget {
 		return invalid("content_too_large")
 	}
-	content, err := record.Parse(ev.Content, matrix.EnvelopeEventContentBudget, 16)
+	content, err := matrix.ParseStrictJSON(ev.Content)
 	if err != nil {
 		return invalid("content_malformed")
 	}
