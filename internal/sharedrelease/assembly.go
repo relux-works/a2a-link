@@ -35,7 +35,7 @@ func AssembleInputs(ctx context.Context, root, out, sourceArchive string, b Bind
 	if e := b.Validate(); e != nil {
 		return zero, e
 	}
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" || runtime.Version() != "go1.25.12" {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" || runtime.Version() != qualifiedGoVersion {
 		return zero, errors.New("assembly-native-toolchain-required")
 	}
 	if inputs.Darwin.Artifact.Platform != "darwin" || inputs.Linux.Artifact.Platform != "linux" || inputs.Darwin.Artifact.RunID != inputs.Linux.Artifact.RunID {
@@ -117,7 +117,7 @@ func AssembleInputs(ctx context.Context, root, out, sourceArchive string, b Bind
 // BuildIndependentLinux runs the approved compiler on macOS, offline and with
 // explicit portable settings. A caller cannot substitute an extracted binary.
 func BuildIndependentLinux(ctx context.Context, root, out, arch string) error {
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" || runtime.Version() != "go1.25.12" {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" || runtime.Version() != qualifiedGoVersion {
 		return errors.New("crossbuild-native-toolchain-required")
 	}
 	if arch != "amd64" && arch != "arm64" {
@@ -155,7 +155,7 @@ func BuildIndependentLinux(ctx context.Context, root, out, arch string) error {
 	version.Env = cmd.Env
 	version.Dir = root
 	reported, e := version.Output()
-	if e != nil || strings.TrimSpace(string(reported)) != "go version go1.25.12 darwin/arm64" {
+	if e != nil || strings.TrimSpace(string(reported)) != "go version "+qualifiedGoVersion+" darwin/arm64" {
 		return errors.New("crossbuild-compiler-toolchain")
 	}
 	if e := cmd.Run(); e != nil {

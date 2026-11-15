@@ -24,7 +24,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
         with:
@@ -95,7 +95,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       - name: Verify immutable upstream archives and executable pins before use
         shell: bash
@@ -257,7 +257,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
         with:
@@ -286,6 +286,7 @@ jobs:
       - name: Real immutable artifact service ZIP consumer
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          A2A_DOWNLOAD_ARTIFACT_REPOSITORY: ${{ github.repository }}
           A2A_DOWNLOAD_ARTIFACT_ID: ${{ needs.linux-production-packages.outputs.artifact-id }}
           A2A_DOWNLOAD_ARTIFACT_SHA256: ${{ needs.linux-production-packages.outputs.artifact-digest }}
         run: go test -p 1 -parallel 2 -v -count=1 -timeout=3m -run '^TestRealArtifactDownload$' ./internal/darwinrelease
@@ -323,7 +324,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       - name: Real pinned Homebrew effective installer fields and known-bad casks
         run: .github/distribution-controls/brew-fields.sh

@@ -1,6 +1,6 @@
 {
   "schema": "a2a-linux-tools/1",
-  "go": "go1.25.12",
+  "go": "go1.26.0",
   "cosign": "v2.6.1",
   "goreleaser": {
     "version": "v2.20.2",

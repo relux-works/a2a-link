@@ -21,6 +21,15 @@ func DownloadArtifactZIP(ctx context.Context, id int64, sha, out string) error {
 	return newGitHub(os.Getenv("GITHUB_TOKEN")).downloadArtifactZIP(ctx, id, sha, out)
 }
 func (g *githubAPI) downloadArtifactZIP(ctx context.Context, id int64, sha, out string) error {
+	return g.downloadArtifactZIPForRepository(ctx, "relux-works/a2a-swarm", id, sha, out)
+}
+
+// Qualification may fetch the fork's own immutable service ZIP. Production
+// callers retain the upstream wrapper and independent artifact/source admission.
+func (g *githubAPI) downloadArtifactZIPForRepository(ctx context.Context, repository string, id int64, sha, out string) error {
+	if repository != "relux-works/a2a-swarm" && repository != "relux-works/a2a-link" {
+		return errors.New("artifact-download-repository")
+	}
 	if id <= 0 || !sha256Text.MatchString(sha) || out == "" {
 		return errors.New("artifact-download-input")
 	}
@@ -32,7 +41,7 @@ func (g *githubAPI) downloadArtifactZIP(ctx context.Context, id int64, sha, out 
 		Digest  string
 		Expired *bool
 	}
-	prefix := fmt.Sprintf("/repos/relux-works/a2a-swarm/actions/artifacts/%d", id)
+	prefix := fmt.Sprintf("/repos/%s/actions/artifacts/%d", repository, id)
 	if e := g.get(ctx, prefix, &meta); e != nil {
 		return e
 	}

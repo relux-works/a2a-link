@@ -385,7 +385,7 @@ func TestLinuxBundleFailureIsAtomic(t *testing.T) {
 	put(t, root, "source.tar", []byte("source archive"))
 	dist := t.TempDir()
 	out := filepath.Join(root, "bundle")
-	e := PrepareLinux(root, dist, out, archive, binding(), 1700000000, "qualification", Tools{Go: "go1.25.12"})
+	e := PrepareLinux(root, dist, out, archive, binding(), 1700000000, "qualification", Tools{Go: qualifiedGoVersion})
 	if e == nil || !strings.Contains(e.Error(), "asset-type-or-missing") {
 		t.Fatal(e)
 	}

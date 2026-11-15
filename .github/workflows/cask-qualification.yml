@@ -83,7 +83,9 @@ jobs:
           # digests and source binding and signed with an ephemeral fixture key:
           # fixture trust only, never production authority, never keyless.
           "$Q" gate cosign-pinned-version -- sh -c "cosign version 2>&1 | tee /dev/stderr | grep -qE '^GitVersion:[[:space:]]+v2\.6\.1[[:space:]]*$'"
-          go build -o "$T/a2a-cask" ./cmd/a2a-cask
+          # The immutable v0.1.1 payload/cross-build stays on Go 1.25.12.
+          # Only the current renderer needs the fork's exact Go 1.26.0 compiler.
+          GOTOOLCHAIN=go1.26.0 go build -p 1 -o "$T/a2a-cask" ./cmd/a2a-cask
           mkdir -p "$T/assets" "$T/fx" && cp "$T/$DARWIN_ASSET" "$D"/a2a_0.1.1_linux_*.tar.gz "$T/assets/"
           ( cd "$T/fx" && COSIGN_PASSWORD= cosign generate-key-pair >/dev/null )
           ONLY="a2a_0.1.1_darwin_arm64.tar.gz a2a_0.1.1_linux_amd64.tar.gz a2a_0.1.1_linux_arm64.tar.gz a2a_0.1.1_amd64.deb a2a_0.1.1_arm64.deb a2a-0.1.1-1.x86_64.rpm a2a-0.1.1-1.aarch64.rpm"

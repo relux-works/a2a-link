@@ -18,7 +18,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       - run: go test -p 1 -parallel 2 -race -count=1 -timeout=3m ./internal/darwinrelease
   release-native-controls:
@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       # Compile requirements and reject self-created ad-hoc fixtures only.
       # No real Developer ID/import/notary/user-Keychain operation.
@@ -50,7 +50,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.0'
           cache: false
       - name: Toolchain
         run: |
