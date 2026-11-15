@@ -131,8 +131,8 @@ voice configuration; unrelated credential and owner-DM state is not consulted.
 The closed status fields are:
 
 - `config`: `enabled`, `missing`, `invalid` or `unavailable`.
-- `native`: `compiled` for a Darwin/CGO/Sherpa build, otherwise `unavailable`.
-  Compiled support does not prove a native engine will initialize successfully.
+- `native`: always `unavailable` in the shared CLI. Native inference runs in a
+  separately released helper; status does not inspect or execute that helper.
 - `model`: `missing`, `invalid`, `unavailable` or `present_unverified`.
   A directory's presence does not authenticate its manifest or assets.
 - `encoder`: `found_unverified` or `unavailable`, from PATH lookup only.
@@ -223,11 +223,13 @@ are sent. See the [MSC3245 transitional format](https://github.com/matrix-org/ma
 
 Missing config/helper, changed helper/dylib/manifest, synthesis/encoding/upload/fetch failure, mismatched bytes,
 or failed/ambiguous audio-send acknowledgement emit one stderr line marked
-`[VOICE_TEXT_ONLY]` and exit 0: the text already succeeded. Helper verification,
-model and synthesis failures share the fixed warning:
+`[VOICE_TEXT_ONLY]` and exit 0: the text already succeeded. Synthesis warnings
+use only closed parent-observed categories. Helper verification or spawn refusal
+is reported as executable resolution/spawn refused; model/config validation is
+reported separately. Neither category claims a precise native-engine cause.
 
 ```text
-a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed or timed out; check the local engine and installed model; text retained
+a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed: executable resolution or spawn refused; text retained
 ```
 
 An ambiguous audio
@@ -240,7 +242,8 @@ render 4 min, upload/fetch/audio-send 60 s, explicit install 5 min. Native infer
 runs in a reapable subprocess because CGO Generate has no context cancellation.
 The synthesis deadline is fixed: it does not scale with host load. Neither
 `voice config --enable` nor `voice/config.json` offers a timeout setting;
-the strict config accepts only `enabled` and the fixed `max_seconds: 180`.
+the strict config accepts `enabled`, the fixed `max_seconds: 180`, and optional
+all-or-none helper path and SHA256 pins.
 These are also the affected bb71277 source's limits. A short failed attempt,
 reported load, or earlier successful synthesis does not establish its cause.
 
