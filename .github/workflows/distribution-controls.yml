@@ -31,6 +31,27 @@ jobs:
           cosign-release: 'v2.6.1'
       - name: Focused positive and negative distribution contracts
         run: go test -p 1 -parallel 2 -race -count=1 -timeout=8m ./internal/sharedrelease ./internal/cask ./internal/caskbrew ./internal/darwinrelease ./cmd/a2a-cask ./cmd/a2a-distribution
+      - name: Cask resolved-target gate detects its narrowing mutant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYMUTANT'
+          import json,os,pathlib
+          source=pathlib.Path('internal/caskbrew/verify.go').resolve()
+          before=source.read_text();needle='target != filepath.Join(prefix, "bin", n)'
+          assert before.count(needle)==1, 'resolved-target mutant must apply exactly once'
+          mutant=pathlib.Path(os.environ['RUNNER_TEMP'])/'cask-target-mutant.go'
+          mutant.write_text(before.replace(needle,'false'))
+          (mutant.parent/'cask-target-overlay.json').write_text(json.dumps({'Replace':{str(source):str(mutant)}}))
+          PYMUTANT
+          set +e
+          go test -p 1 -parallel 2 -overlay "$RUNNER_TEMP/cask-target-overlay.json" -count=1 -run '^TestBrewInstallerFields/binary-target$' ./internal/caskbrew > "$RUNNER_TEMP/cask-target-mutant.log" 2>&1
+          mutant_exit=$?
+          set -e
+          cat "$RUNNER_TEMP/cask-target-mutant.log"
+          test "$mutant_exit" -eq 1
+          grep -F -- '--- FAIL: TestBrewInstallerFields/binary-target' "$RUNNER_TEMP/cask-target-mutant.log"
+          grep -F -- 'want brew-effective-binary-target, got <nil>' "$RUNNER_TEMP/cask-target-mutant.log"
       - name: Immutable public keyless fixture, expected source and wrong-identity controls
         shell: bash
         run: |

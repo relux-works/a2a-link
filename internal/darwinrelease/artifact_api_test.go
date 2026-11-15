@@ -11,7 +11,7 @@ import (
 
 // Actual client reads require a unique successful producer job and matching immutable artifact/run/repository identities.
 func TestArtifactAPIAssociation(t *testing.T) {
-	for _, tc := range []struct{ name, want string }{{"valid", ""}, {"expired", "artifact-metadata-association"}, {"unknown-expiry", "artifact-metadata-association"}, {"wrong-run", "artifact-metadata-association"}, {"wrong-repository", "artifact-run-association"}, {"unknown-state", "artifact-run-state"}, {"pending-producer", "artifact-producer-job-not-success"}, {"duplicate-producer", "artifact-producer-job-ambiguous"}, {"truncated-list", "artifact-job-list-incomplete"}, {"api-error", "api-status"}} {
+	for _, tc := range []struct{ name, want string }{{"valid", ""}, {"expired", "artifact-metadata-association"}, {"unknown-expiry", "artifact-metadata-association"}, {"wrong-run", "artifact-metadata-association"}, {"wrong-repository", "artifact-run-association"}, {"wrong-event", "artifact-run-association"}, {"unknown-state", "artifact-run-state"}, {"pending-producer", "artifact-producer-job-not-success"}, {"duplicate-producer", "artifact-producer-job-ambiguous"}, {"truncated-list", "artifact-job-list-incomplete"}, {"api-error", "api-status"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			sha := strings.Repeat("a", 40)
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +57,11 @@ func TestArtifactAPIAssociation(t *testing.T) {
 					if tc.name == "unknown-state" {
 						state = "unknown"
 					}
-					body = map[string]any{"id": 2, "head_sha": sha, "head_branch": "v0.1.2", "path": ".github/workflows/shared-release.yml", "event": "push", "status": state, "conclusion": "", "repository": map[string]any{"id": 9, "full_name": repo}, "head_repository": map[string]any{"id": 9, "full_name": repo}}
+					event := "push"
+					if tc.name == "wrong-event" {
+						event = "workflow_dispatch"
+					}
+					body = map[string]any{"id": 2, "head_sha": sha, "head_branch": "v0.1.2", "path": ".github/workflows/shared-release.yml", "event": event, "status": state, "conclusion": "", "repository": map[string]any{"id": 9, "full_name": repo}, "head_repository": map[string]any{"id": 9, "full_name": repo}}
 				}
 				json.NewEncoder(w).Encode(body)
 			}))
