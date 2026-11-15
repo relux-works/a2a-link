@@ -238,17 +238,19 @@ isolated prefix, then capture public `brew info` JSON. Never evaluate an untrust
 proposal before the canonical byte comparison.
 
 Run the same production flags plus `-proposed a2a.rb -brew-info INFO.json
--brew-prefix PREFIX -brew-platform darwin/arm64 -tap-diff DIFF_PATHS
--renderer-revision COMMIT`, without `-out`. `DIFF_PATHS` is the exact
-`git diff --name-only` output from the proposed tap change. The verifier repeats
+-brew-prefix PREFIX -brew-platform darwin/arm64 -tap-dir TAP_CHECKOUT
+-tap-base TAP_MAIN_COMMIT -renderer-revision COMMIT`, without `-out`. The tap checkout is an existing signed feature branch, with fresh independently
+fetched `origin/main` at `TAP_MAIN_COMMIT`. The verifier repeats
 manifest authenticity, all asset bindings, canonical cask derivation, effective
-installer fields and the exact `Casks/a2a.rb` path restriction; it requires a
+installer fields and the complete committed tap diff against that base. It
+requires a clean tap feature checkout, verified bot signatures for every
+introduced commit and exactly `Casks/a2a.rb` equal to the canonical cask; it requires a
 clean renderer checkout at the recorded release revision. It emits a receipt
 with manifest SHA256, renderer revision, cask SHA256 and tag object. It writes no
 cask or tap file. This is a prepared verification step, not public-download
 reconciliation or delivery evidence.
 
-Custody then uses the existing configured bot key for a signed feature branch,
+Custody uses the existing configured bot key for the feature commits, then
 independent tap PR review/checks, nonforced FF and readback. Independent review
 repeats authenticated download and renderer equality. No TAP_GITHUB_TOKEN,
 exported signing key, new secret or owner provisioning is required. Tap delivery
@@ -315,7 +317,7 @@ bullets; none is silently treated as out of contract.
 | Independent Linux build and full source/archive binding | hosted macOS `crossbuild`, `TestIndependentLinuxByteControl`, `TestCrossBuildSourceBinding` | Both targets compared; no native arm64 Linux installation claim |
 | Premature publication, changed digest/membership, changed admission and unknown outcome | `TestPublisherClosedTransition`, `TestReadOnlyReconciliation`, `TestFinalCandidateDerivation` | Isolated HTTP fixture; combined production caller remains held |
 | Effective brew URL/hash/version/source/resolved target and closed stanzas | `TestBrewInstallerFields`, `TestBrewLinuxEvaluatedProjection`, real `TestRealBrewEvaluation` on Linux/macOS | Exact pinned Homebrew; evaluation does not install |
-| Manifest/renderer/cask/tap mismatch | retained production cask authenticity tests, `TestFinalCandidateDerivation`, `TestCustodyTapDiff` | Manual custody command is prepared, no tap mutation |
+| Manifest/renderer/cask/tap mismatch | retained production cask authenticity tests, `TestFinalCandidateDerivation`, `TestCustodyTapDiff`, `TestCustodyRepositoryReadGate` | Manual custody command is prepared, no tap mutation |
 | Public download integrity | `TestPublicAssetDownloadBinding`, `TestRealPublicDownloadDigest` | Real immutable Darwin download; a real published Linux download cannot run before the first separately authorized combined release |
 
 The cask resolved-target narrowing mutant removes only target equality. The

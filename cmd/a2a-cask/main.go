@@ -80,7 +80,8 @@ func run(args []string, log io.Writer, verify verifier) error {
 	brewInfo := fs.String("brew-info", "", "custody: pinned Homebrew evaluated JSON")
 	brewPrefix := fs.String("brew-prefix", "", "custody: isolated evaluation prefix")
 	brewPlatform := fs.String("brew-platform", "", "custody: evaluated OS/architecture")
-	tapDiff := fs.String("tap-diff", "", "custody: git diff --name-only output")
+	tapDir := fs.String("tap-dir", "", "custody: existing signed tap feature checkout (read-only)")
+	tapBase := fs.String("tap-base", "", "custody: independently fetched tap main commit")
 	rendererRevision := fs.String("renderer-revision", "", "custody: clean renderer checkout revision")
 	var sums files
 	fs.Var(&sums, "checksums", "qualified platform checksum file (repeatable)")
@@ -177,7 +178,9 @@ func run(args []string, log io.Writer, verify verifier) error {
 	}
 	// Custody is read-only and repeats production authentication and binding.
 	if *proposed != "" {
-		if !keyless || *brewInfo == "" || *brewPrefix == "" || *brewPlatform == "" || *tapDiff == "" || *rendererRevision != bound.Commit || *out != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if !keyless || *brewInfo == "" || *brewPrefix == "" || *brewPlatform == "" || *tapDir == "" || *tapBase == "" || *rendererRevision != bound.Commit || *out != "" {
 			return errors.New("custody-input-contract")
 		}
 		head, e := exec.Command("git", "rev-parse", "HEAD").Output()
@@ -199,16 +202,12 @@ func run(args []string, log io.Writer, verify verifier) error {
 		if e = caskbrew.Verify(info, ruby, m, *brewPrefix, *brewPlatform); e != nil {
 			return e
 		}
-		diff, e := os.ReadFile(*tapDiff)
-		if e != nil {
-			return e
-		}
-		if e = caskbrew.VerifyTapDiff(strings.Split(strings.TrimSuffix(string(diff), "\n"), "\n")); e != nil {
+		if e = caskbrew.VerifyTapRepository(ctx, *tapDir, *tapBase, ruby); e != nil {
 			return e
 		}
 		return json.NewEncoder(log).Encode(map[string]string{"result": "custody-prepared-not-published", "manifest_sha256": sharedrelease.Hash(raw), "renderer_revision": *rendererRevision, "cask_sha256": sharedrelease.Hash(ruby), "tag": bound.Tag, "tag_object": bound.TagObject})
 	}
-	if *brewInfo != "" || *brewPrefix != "" || *brewPlatform != "" || *tapDiff != "" || *rendererRevision != "" {
+	if *brewInfo != "" || *brewPrefix != "" || *brewPlatform != "" || *tapDir != "" || *tapBase != "" || *rendererRevision != "" {
 		return errors.New("custody-input-contract")
 	}
 	// 4. Render and write atomically.
