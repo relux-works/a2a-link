@@ -1,6 +1,7 @@
 package caskbrew
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -174,6 +175,30 @@ func TestBrewLinuxEvaluatedProjection(t *testing.T) {
 		t.Fatal(e)
 	}
 	if e = Verify(raw, ruby, m, "/isolated/brew", "linux/amd64"); e != nil {
+		t.Fatal(e)
+	}
+}
+
+// The concrete controller evaluator uses the pinned public brew CLI on
+// canonical qualification data, with no fixture-to-production trust promotion.
+func TestRealBrewControllerEvaluation(t *testing.T) {
+	prefix := os.Getenv("A2A_BREW_PREFIX")
+	if prefix == "" {
+		t.Skip("hosted pinned brew prefix required")
+	}
+	raw, e := os.ReadFile(os.Getenv("A2A_BREW_MANIFEST"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	m, e := cask.ParseManifest(raw)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ruby, e := cask.Render(m)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = Evaluate(context.Background(), prefix, ruby, m); e != nil {
 		t.Fatal(e)
 	}
 }

@@ -570,3 +570,20 @@ artifacts, and `crosscheck` compares independent Linux builds. The combined
 publication hold remains active. The cask custody verifier is read-only and
 never writes to the tap. Hosted distribution controls exercise actual Homebrew
 installer fields in isolated prefixes; their logs are uploaded as job artifacts.
+
+## Shared release orchestration (slice 3, held)
+
+The shared tag workflow is .github/workflows/shared-release.yml. Its ordered
+controller and consumer fixtures are documented in
+[shared distribution](docs/shared-distribution.md#slice-3-ordered-route-and-retained-hold).
+The publication hold remains active until an enforceable custody-main-lease
+authority is integrated.
+
+| Repository tool | Entry point | Result |
+| --- | --- | --- |
+| Event/activation gates | go run -p 1 ./cmd/a2a-distribution controller-event / controller-admit | Read-only event check; partial production refuses before signing authority |
+| Artifact transport | a2a-distribution fetch -artifact-id ID -artifact-sha256 SHA256 -out NEW.zip | Private ZIP after metadata and complete-byte verification |
+| Linux Darwin consumer | a2a-distribution consume-darwin with admitted binding and artifact arguments | Authenticated private input, before Linux production |
+| Ordered controller | a2a-distribution controller with source/binding/inputs/brew/output arguments | Held; fixture-qualified ordered adapter |
+| Workflow validation | Hosted python3 .github/release/controller-tools.py, then pinned actionlint | Verified tool under RUNNER_TEMP/controller-tools; no host installation |
+| Controller fixtures | go test -p 1 -parallel 2 ./internal/releasecontroller | Stage/consumer negatives; hosted dry-run JSON, fixture trust only |

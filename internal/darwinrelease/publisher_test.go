@@ -19,7 +19,7 @@ func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 
 // The real HTTP client publishes one verified draft only; exact digest/member, re-admission and ambiguity plants never trigger a retry or deletion.
 func TestPublisherClosedTransition(t *testing.T) {
-	for _, tc := range []struct{ name, want string }{{"valid", ""}, {"unverified", "candidate-refused"}, {"existing", "release-already-exists"}, {"changed-main", "publication-admission-changed"}, {"upload-digest", "uploaded-bytes-mismatch"}, {"extra-upload", "release-readback-members"}, {"missing-upload", "release-readback-members"}, {"premature", "premature-publication"}, {"readback-digest", "release-readback-digest"}, {"unknown-public", "publication-outcome-unknown; read-only reconciliation: public; no retry"}, {"unknown-draft", "publication-outcome-unknown; read-only reconciliation: draft; no retry"}, {"unknown-read", "publication-outcome-unknown; read-only reconciliation inconclusive"}, {"readback-draft", "publication-readback-still-draft"}} {
+	for _, tc := range []struct{ name, want string }{{"valid", ""}, {"unverified", "candidate-refused"}, {"existing", "release-already-exists"}, {"tag-missing", "release-tag-object-missing-or-moved"}, {"tag-lightweight", "release-tag-object-missing-or-moved"}, {"tag-moved", "release-tag-object-missing-or-moved"}, {"changed-main", "publication-admission-changed"}, {"upload-digest", "uploaded-bytes-mismatch"}, {"extra-upload", "release-readback-members"}, {"missing-upload", "release-readback-members"}, {"premature", "premature-publication"}, {"readback-digest", "release-readback-digest"}, {"unknown-public", "publication-outcome-unknown; read-only reconciliation: public; no retry"}, {"unknown-draft", "publication-outcome-unknown; read-only reconciliation: draft; no retry"}, {"unknown-read", "publication-outcome-unknown; read-only reconciliation inconclusive"}, {"readback-draft", "publication-readback-still-draft"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			data := []byte("verified fixture")
@@ -42,6 +42,20 @@ func TestPublisherClosedTransition(t *testing.T) {
 					return
 				}
 				switch {
+				case strings.Contains(r.URL.Path, "/git/ref/tags/"):
+					if tc.name == "tag-missing" {
+						w.WriteHeader(404)
+						return
+					}
+					kind := "tag"
+					object := a.TagObject
+					if tc.name == "tag-lightweight" {
+						kind = "commit"
+					}
+					if tc.name == "tag-moved" {
+						object = strings.Repeat("c", 40)
+					}
+					response(map[string]any{"object": map[string]string{"sha": object, "type": kind}})
 				case strings.Contains(r.URL.Path, "/tags/"):
 					if tc.name == "existing" {
 						response(map[string]any{"id": 7})
@@ -140,7 +154,7 @@ func TestPublisherClosedTransition(t *testing.T) {
 			if drafts > 1 || uploads > 1 || transitions > 1 || unexpected {
 				t.Fatal("repeated or forbidden mutation", drafts, uploads, transitions, unexpected)
 			}
-			if tc.name == "unverified" || tc.name == "existing" {
+			if tc.name == "unverified" || tc.name == "existing" || strings.HasPrefix(tc.name, "tag-") {
 				if drafts != 0 || uploads != 0 || transitions != 0 {
 					t.Fatal("premature effects")
 				}

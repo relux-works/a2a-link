@@ -42,8 +42,17 @@ type releaseFile struct {
 // protocol. The combined route remains held until its trusted controller calls
 // this boundary with all production verification gates and a custody lease.
 func PublishPreparedAssets(ctx context.Context, root, tag, tagObject, dir string, names []string, notes string, verify PublicationGate) error {
+	_, e := PublishPreparedAssetsWithID(ctx, root, tag, tagObject, dir, names, notes, verify)
+	return e
+}
+
+// PublishPreparedAssetsWithID retains the original draft identity even when
+// publication is ambiguous, so custody can reconcile the original candidate.
+func PublishPreparedAssetsWithID(ctx context.Context, root, tag, tagObject, dir string, names []string, notes string, verify PublicationGate) (int64, error) {
+	id := int64(0)
 	admit := func() (Admission, error) { return Admit(ctx, root, tag, tagObject) }
-	return publishPrepared(ctx, newGitHub(os.Getenv("GITHUB_TOKEN")), admit, tag, tagObject, dir, names, notes, verify)
+	e := publishPreparedCore(ctx, newGitHub(os.Getenv("GITHUB_TOKEN")), admit, tag, tagObject, dir, names, notes, verify, func(value int64) { id = value })
+	return id, e
 }
 
 func captureRelease(dir string, names []string) (string, map[string]releaseFile, error) {
@@ -91,6 +100,9 @@ func sameAdmission(a, b Admission) bool {
 }
 
 func publishPrepared(ctx context.Context, g *githubAPI, admit func() (Admission, error), tag, tagObject, dir string, names []string, notes string, verify PublicationGate) error {
+	return publishPreparedCore(ctx, g, admit, tag, tagObject, dir, names, notes, verify, nil)
+}
+func publishPreparedCore(ctx context.Context, g *githubAPI, admit func() (Admission, error), tag, tagObject, dir string, names []string, notes string, verify PublicationGate, record func(int64)) error {
 	if verify == nil {
 		return errors.New("publication-verifier-required")
 	}
@@ -126,6 +138,14 @@ func publishPrepared(ctx context.Context, g *githubAPI, admit func() (Admission,
 	if !sameAdmission(a, current) {
 		return errors.New("publication-admission-changed")
 	}
+	// GitHub's create-release API may create a lightweight tag when absent.
+	// Require the independently verified annotated object immediately before POST.
+	if e = g.requireReleaseTag(ctx, tag, tagObject); e != nil {
+		return e
+	}
+	if e = verify(ctx, captured); e != nil {
+		return e
+	}
 	var draft releaseState
 	status, e = g.request(ctx, "POST", prefix, map[string]any{"tag_name": tag, "target_commitish": a.Commit, "name": "a2a " + tag, "draft": true, "prerelease": false, "body": notes}, &draft)
 	if e != nil {
@@ -133,6 +153,9 @@ func publishPrepared(ctx context.Context, g *githubAPI, admit func() (Admission,
 	}
 	if status != 201 || draft.ID <= 0 || draft.Draft == nil || !*draft.Draft || draft.Tag != tag || draft.Commit != a.Commit || draft.Prerelease == nil || *draft.Prerelease {
 		return errors.New("release-draft-response")
+	}
+	if record != nil {
+		record(draft.ID)
 	}
 	for _, n := range names {
 		if e = g.upload(ctx, draft.ID, n, files[n]); e != nil {
@@ -251,4 +274,18 @@ func ReconcilePreparedAssets(ctx context.Context, id int64, tag, commit, dir str
 		return "", e
 	}
 	return newGitHub(os.Getenv("GITHUB_TOKEN")).reconcile(ctx, id, tag, commit, files, false)
+}
+
+// This read is defense in depth; only an enforced immutable-tag policy closes
+// the deletion race between the read and create-release. The combined hold
+// remains until the custody/protection authority is integrated.
+func (g *githubAPI) requireReleaseTag(ctx context.Context, tag, object string) error {
+	var ref struct{ Object struct{ SHA, Type string } }
+	if e := g.get(ctx, "/repos/relux-works/a2a-swarm/git/ref/tags/"+url.PathEscape(tag), &ref); e != nil {
+		return errors.New("release-tag-object-missing-or-moved")
+	}
+	if ref.Object.SHA != object || ref.Object.Type != "tag" {
+		return errors.New("release-tag-object-missing-or-moved")
+	}
+	return nil
 }

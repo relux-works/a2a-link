@@ -12,7 +12,7 @@ before native/signing effects. Its native producer and original controls remain.
 Do not use that legacy publisher for a combined release. The reserved keyless
 identity for Linux checksums and the aggregate is
 `.github/workflows/shared-release.yml@refs/tags/vX.Y.Z`; that workflow is
-deliberately not supplied until the combined controller is integrated and reviewed.
+now supplied behind the explicit production hold.
 
 The proposed combined successor is v0.1.2. The unused ref was checked during
 implementation, but that check expires: custody must check it again. `release/VERSION`
@@ -337,3 +337,89 @@ x86_64 Linux archive SHA256
 New workflows reuse the existing full-commit action pins. Fixture asset digests
 are recorded in `release/darwin-fixture.json`. Native Xcode 16.4/Swift 6.1.2
 pins and their qualified path remain unchanged.
+
+## Slice 3 ordered route and retained hold
+
+The shared workflow supplies the complete job graph: tag event/admission,
+the sole reusable Darwin producer, Linux production after authenticated private
+Darwin consumption, and macOS assembly/publication after both producers succeed.
+One global production concurrency group has cancellation disabled. Only the
+native producer receives the five existing Apple fields. Only the final job
+requests contents-write. OIDC is scoped to signing jobs; no tap token is used.
+Every action reference is the existing reviewed full commit. New actionlint
+1.7.7 source/archive/executable/checksum-list pins are in
+release/controller-tools.json; it executes only on an isolated hosted runner.
+
+GitHub's tag push filter alone does not prove an annotated signed tag. The first
+job also calls the existing real Git verification/admission path: actual tag
+object type, SSH signature with the pinned tag authority, exact source checkout,
+current main, history, whole-release review and eligible main checks. A dispatch,
+branch push, foreign repository or prerelease refuses. The hold then refuses
+before any native signing authority can enter a process.
+
+The ordered controller has one stage owner for each boundary: admission and
+lease; captured producer/native/independent-build verification; signed platform
+aggregate; cask derived from its verified signature; real pinned brew consumer
+evaluation; captured immutable candidate; re-admission/lease; one publication;
+actual public readback; final re-admission/lease. Every stage error stops all
+later operations. The publisher preserves the original draft ID on an ambiguous
+transition, and the complete authenticated candidate is retained before any
+draft mutation. The existing one-transition/no-retry semantics remain.
+
+The create-release consumer can create a tag if one is absent; target_commitish
+is not an existing-tag guarantee. The publisher now separately refuses a missing,
+lightweight or moved remote tag object immediately before creating a draft.
+That check does not close a concurrent deletion race: actual immutable tag
+protection and the custody lease are still required. See
+[GitHub CLI release semantics](https://cli.github.com/manual/gh_release_create)
+and [the release API](https://docs.github.com/en/rest/releases/releases#create-a-release).
+No gh release create command substitutes for the reviewed publisher.
+
+### Continuous main lease: unresolved authority
+
+**ProductionReady remains false. The slice-1 hold is kept ON.** The live lease
+method refuses with custody-main-lease-contract-unavailable; there is no
+environment/dispatch/fixture switch that can authorize a partial route.
+
+The selected token can read current repository rules but lacks administration.
+The actual main ruleset permits forward updates, and its public projection omits
+the full bypass-actor list. current_user_can_bypass: never describes only that
+caller, not other actors. The read-only history probe returned HTTP 403.
+GitHub requires Administration:write for ruleset history/version reads.
+[Primary API contract](https://docs.github.com/en/rest/repos/rules#get-repository-ruleset-history).
+
+Consequently a sampled OID, a local mutex, a current rule name or an unsigned
+operator flag cannot establish that main never moved and returned between the
+tag and public readback. Granting CI administration-write or inventing a new
+signing authority would change the selected route; neither is done here.
+
+The proposed protection consumer requires an active exact-ref update/deletion
+block (plus non-fast-forward block for main), a complete empty bypass list,
+no fetch/merge exception, and a pinned unchanged rule-history version dating
+before the authenticated tag. It rejects evaluate-only rules, hidden bypass
+data, wrong/excluded refs, unknown rule exceptions, denied history and
+move-and-restore histories. These are policy-consumer fixtures, not a live lease.
+
+Activation needs the reference and fencing/expiry/continuity contract of an
+existing machine-verifiable custody lease authority, or a separately reviewed
+authority design. No new secret is requested in this PR. The controller's
+production hold must remain until that authority is integrated, consumer-tested
+and reviewed. Main and tag protections are not modified by this implementation.
+
+### Dry-run and evidence bounds
+
+Controller fixture tests call the same ordered runner with simulated ports
+and plant failure at every stage. Their JSON is labelled
+fixture-control-flow-only, never production authority or a fake Darwin build.
+The existing actual tag-signature fixtures, native public Darwin verification,
+real Linux package/header controls, independent macOS builds and both real brew
+jobs remain separate required witnesses. Concrete immutable artifact download
+and brew evaluation adapters are exercised against the real hosted services.
+
+Pinned actionlint checks workflow syntax, expressions and reusable inputs.
+A separate contract test plants missing producer dependencies, premature
+assembly, excessive Linux write authority, inherited secrets, dispatch triggers,
+cancellation and hold removal. Existing RPM/cask narrowing mutants stay in place.
+The new consumer/controller fixtures prove their specific boundaries; they do
+not claim a production release, combined signature, continuous live lease,
+tap delivery or installed adoption.

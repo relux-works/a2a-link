@@ -274,3 +274,27 @@ func SealManifest(ctx context.Context, b Binding, dir, out string) error {
 	}
 	return os.Rename(tmp, out)
 }
+
+// VerifyDarwinProducerInput lets the Linux producer consume and authenticate
+// the private six-file Darwin input before building. Native verification is
+// repeated later on the approved macOS assembly runner.
+func VerifyDarwinProducerInput(ctx context.Context, b Binding, dir string) error {
+	if e := b.Validate(); e != nil {
+		return e
+	}
+	if e := exactDirectory(dir, DarwinMembers(b.Version())); e != nil {
+		return e
+	}
+	if e := verifyChecksums(ctx, dir, "checksums.txt", DarwinMembers(b.Version()), b, ".github/workflows/darwin-release.yml", Cosign); e != nil {
+		return e
+	}
+	raw, e := readRegular(dir, "release-evidence.json")
+	if e != nil {
+		return e
+	}
+	var ev darwinrelease.Evidence
+	if json.Unmarshal(raw, &ev) != nil || ev.Admission.Tag != b.Tag || ev.Admission.Commit != b.Commit || ev.Admission.TagObject != b.TagObject || ev.Admission.Version != b.Version() {
+		return errors.New("darwin-producer-source-binding")
+	}
+	return nil
+}

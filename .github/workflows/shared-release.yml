@@ -1,0 +1,235 @@
+# Production sequence is wired but the admission hold stays ON until the
+# selected CI authority has an enforceable custody-main-lease contract.
+name: Shared production release
+on:
+  push:
+    tags: ['v*']
+permissions: {}
+concurrency:
+  group: a2a-shared-production-release
+  cancel-in-progress: false
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly -p=1
+  GOWORK: 'off'
+  GOENV: 'off'
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.admit.outputs.tag }}
+      commit: ${{ steps.admit.outputs.commit }}
+      tag-object: ${{ steps.admit.outputs.tag-object }}
+      version: ${{ steps.admit.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - name: Require the real shared tag event
+        run: go run -p 1 ./cmd/a2a-distribution controller-event
+      - name: Verify actual annotated signed tag, current main and whole-release review
+        id: admit
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          go run -p 1 ./cmd/a2a-release admit "$RELEASE_TAG" > "$RUNNER_TEMP/admission.json"
+          python3 - <<'PY'
+          import json,os,re
+          a=json.load(open(os.environ['RUNNER_TEMP']+'/admission.json'))
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',a['tag'])
+          assert all(re.fullmatch('[0-9a-f]{40}',a[k]) for k in ['commit','tag_object'])
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              for key,name in [('tag','tag'),('commit','commit'),('tag_object','tag-object'),('version','version')]:
+                  out.write(name+'='+a[key]+'\n')
+          PY
+      - name: Refuse partial route before any signing authority
+        run: go run -p 1 ./cmd/a2a-distribution controller-admit
+
+  darwin-producer:
+    needs: admission
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    uses: ./.github/workflows/darwin-release.yml
+    with:
+      tag: ${{ needs.admission.outputs.tag }}
+      commit: ${{ needs.admission.outputs.commit }}
+      tag-object: ${{ needs.admission.outputs.tag-object }}
+    secrets:
+      MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+      MACOS_SIGN_P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+
+  linux-producer:
+    needs: [admission, darwin-producer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    outputs:
+      artifact-id: ${{ steps.bundle.outputs.artifact-id }}
+      artifact-digest: ${{ steps.bundle.outputs.artifact-digest }}
+    env:
+      RELEASE_TAG: ${{ needs.admission.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.admission.outputs.commit }}
+      RELEASE_TAG_OBJECT: ${{ needs.admission.outputs.tag-object }}
+      RELEASE_VERSION: ${{ needs.admission.outputs.version }}
+      DARWIN_ID: ${{ needs.darwin-producer.outputs.artifact-id }}
+      DARWIN_SHA256: ${{ needs.darwin-producer.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.admission.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: 'v2.6.1'
+      - name: Verify pinned producer tools before use
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools"
+          python3 .github/release/linux-tools.py
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Resolve dependencies and compile nonsecret controller before sealing inputs
+        run: |
+          set -euo pipefail
+          export GOMODCACHE="$RUNNER_TEMP/modules" GOCACHE="$RUNNER_TEMP/build-cache"
+          go mod download
+          go build -p 1 -o "$RUNNER_TEMP/a2a-distribution" ./cmd/a2a-distribution
+          chmod -R a-w "$GOMODCACHE"
+          echo "GOMODCACHE=$GOMODCACHE" >> "$GITHUB_ENV"
+          echo "GOCACHE=$GOCACHE" >> "$GITHUB_ENV"
+          echo GOPROXY=off >> "$GITHUB_ENV"
+          echo GOSUMDB=off >> "$GITHUB_ENV"
+      - name: Consume immutable authenticated Darwin input BEFORE Linux production
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/a2a-distribution" fetch -artifact-id "$DARWIN_ID" -artifact-sha256 "$DARWIN_SHA256" -out "$RUNNER_TEMP/darwin.zip"
+          "$RUNNER_TEMP/a2a-distribution" consume-darwin -tag "$RELEASE_TAG" -commit "$RELEASE_COMMIT" -tag-object "$RELEASE_TAG_OBJECT" -artifact-id "$DARWIN_ID" -artifact-run "$GITHUB_RUN_ID" -artifact-sha256 "$DARWIN_SHA256" -artifact-zip "$RUNNER_TEMP/darwin.zip" -out "$RUNNER_TEMP/darwin-input"
+      - name: Build and verify complete Linux outputs without publication
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
+          epoch=$(git show -s --format=%ct HEAD)
+          goreleaser release --config release/linux.goreleaser.yml --clean --parallelism 2 --skip=publish,announce,sign
+          "$RUNNER_TEMP/a2a-distribution" linux -tag "$RELEASE_TAG" -commit "$RELEASE_COMMIT" -tag-object "$RELEASE_TAG_OBJECT" -epoch "$epoch" -source-archive "$RUNNER_TEMP/source.tar" -out "$RUNNER_TEMP/linux-bundle"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        id: bundle
+        with:
+          name: a2a-linux-${{ needs.admission.outputs.tag-object }}
+          path: |
+            ${{ runner.temp }}/linux-bundle/a2a_*.tar.gz
+            ${{ runner.temp }}/linux-bundle/a2a_*.deb
+            ${{ runner.temp }}/linux-bundle/a2a-*.rpm
+            ${{ runner.temp }}/linux-bundle/*.sbom.json
+            ${{ runner.temp }}/linux-bundle/linux-checksums.txt
+            ${{ runner.temp }}/linux-bundle/linux-checksums.txt.sig
+            ${{ runner.temp }}/linux-bundle/linux-checksums.txt.pem
+            ${{ runner.temp }}/linux-bundle/linux-release-evidence.json
+          if-no-files-found: error
+          retention-days: 1
+
+  assemble-publish:
+    needs: [admission, darwin-producer, linux-producer]
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      CGO_ENABLED: '1'
+      RELEASE_TAG: ${{ needs.admission.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.admission.outputs.commit }}
+      RELEASE_TAG_OBJECT: ${{ needs.admission.outputs.tag-object }}
+      DARWIN_ID: ${{ needs.darwin-producer.outputs.artifact-id }}
+      DARWIN_SHA256: ${{ needs.darwin-producer.outputs.artifact-digest }}
+      LINUX_ID: ${{ needs.linux-producer.outputs.artifact-id }}
+      LINUX_SHA256: ${{ needs.linux-producer.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.admission.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: 'v2.6.1'
+      - name: Resolve and seal module inputs; prepare pinned isolated brew source
+        run: |
+          set -euo pipefail
+          export GOMODCACHE="$RUNNER_TEMP/modules" GOCACHE="$RUNNER_TEMP/build-cache"
+          go mod download
+          go build -p 1 -o "$RUNNER_TEMP/a2a-distribution" ./cmd/a2a-distribution
+          chmod -R a-w "$GOMODCACHE"
+          echo "GOMODCACHE=$GOMODCACHE" >> "$GITHUB_ENV"
+          echo "GOCACHE=$GOCACHE" >> "$GITHUB_ENV"
+          echo GOPROXY=off >> "$GITHUB_ENV"
+          echo GOSUMDB=off >> "$GITHUB_ENV"
+          .github/release/brew-source.sh
+      - name: Immutable downloads and one fail-closed assembly-to-readback controller
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          "$T/a2a-distribution" fetch -artifact-id "$DARWIN_ID" -artifact-sha256 "$DARWIN_SHA256" -out "$T/darwin.zip"
+          "$T/a2a-distribution" fetch -artifact-id "$LINUX_ID" -artifact-sha256 "$LINUX_SHA256" -out "$T/linux.zip"
+          python3 - <<'PY'
+          import json,os
+          t=os.environ['RUNNER_TEMP'];run=int(os.environ['GITHUB_RUN_ID'])
+          data={p:{'zip':t+'/'+p+'.zip','artifact':{'id':int(os.environ[p.upper()+'_ID']),'run_id':run,'sha256':os.environ[p.upper()+'_SHA256'],'platform':p}} for p in ['darwin','linux']}
+          with open(t+'/inputs.json','w') as out:json.dump(data,out)
+          PY
+          git archive --format=tar HEAD > "$T/source.tar"
+          epoch=$(git show -s --format=%ct HEAD)
+          "$T/a2a-distribution" controller -tag "$RELEASE_TAG" -commit "$RELEASE_COMMIT" -tag-object "$RELEASE_TAG_OBJECT" -inputs "$T/inputs.json" -source-archive "$T/source.tar" -epoch "$epoch" -brew-prefix "$T/release-brew" -out "$T/final-candidate" > "$T/controller-receipt.json"
+      - name: Preserve exact original candidate and draft identity for read-only recovery
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: a2a-candidate-${{ needs.admission.outputs.tag-object }}
+          path: |
+            ${{ runner.temp }}/final-candidate
+            ${{ runner.temp }}/controller-receipt.json
+          if-no-files-found: warn
+          retention-days: 1

@@ -52,3 +52,8 @@ PY
   if ! "$T/caskbrew.test" -test.run '^TestRealBrewEvaluation$' -test.v > "$T/result-$plant.log" 2>&1; then cat "$T/result-$plant.log"; exit 1; fi
   cat "$T/result-$plant.log"
 done
+
+# The controller's concrete public-CLI adapter is exercised separately from the
+# captured-projection field plants, using the same pinned isolated brew source.
+"$T/caskbrew.test" -test.run '^TestRealBrewControllerEvaluation$' -test.v > "$T/result-controller.log" 2>&1 || { cat "$T/result-controller.log"; exit 1; }
+cat "$T/result-controller.log"

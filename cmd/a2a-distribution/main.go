@@ -1,4 +1,5 @@
-// a2a-distribution is a repository build tool. It never publishes or installs.
+// a2a-distribution is a repository build tool. Its combined publication route
+// remains held until the custody lease contract is integrated. It never installs.
 package main
 
 import (
@@ -17,12 +18,13 @@ import (
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/darwinrelease"
+	"github.com/relux-works/a2a-swarm/internal/releasecontroller"
 	"github.com/relux-works/a2a-swarm/internal/sharedrelease"
 )
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: a2a-distribution tools|linux|collect|crosscheck|crossbuild|assemble|manifest|reconcile")
+		return errors.New("usage: a2a-distribution tools|fetch|controller-event|controller-admit|controller|consume-darwin|linux|collect|crosscheck|crossbuild|assemble|manifest|reconcile")
 	}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := fs.String("root", ".", "reviewed source checkout")
@@ -42,12 +44,22 @@ func run(ctx context.Context, args []string) error {
 	platform := fs.String("platform", "", "darwin or linux producer")
 	binary := fs.String("binary", "", "independent macOS-cross-built Linux executable")
 	arch := fs.String("arch", "", "Linux architecture for independent byte check")
+	brewPrefix := fs.String("brew-prefix", "", "isolated pinned brew source prefix")
 	qualification := fs.Bool("qualification", false, "non-production Linux evidence only; no signing")
 	if e := fs.Parse(args[1:]); e != nil {
 		return e
 	}
 	if fs.NArg() != 0 {
 		return errors.New("usage: unexpected argument")
+	}
+	if args[0] == "controller-event" {
+		return releasecontroller.EventGate()
+	}
+	if args[0] == "controller-admit" {
+		return releasecontroller.AdmitWorkflow()
+	}
+	if args[0] == "fetch" {
+		return darwinrelease.DownloadArtifactZIP(ctx, *artifactID, *artifactDigest, *out)
 	}
 	tools, e := sharedrelease.LoadTools(*root)
 	if e != nil {
@@ -64,6 +76,49 @@ func run(ctx context.Context, args []string) error {
 		return errors.New("usage: -out required")
 	}
 	switch args[0] {
+	case "controller":
+		if gateErr := releasecontroller.AdmitWorkflow(); gateErr != nil {
+			return gateErr
+		}
+		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
+			return e
+		}
+		if *qualification {
+			return errors.New("production-fixture-trust-refused")
+		}
+		raw, e := os.ReadFile(*inputsFile)
+		if e != nil {
+			return e
+		}
+		var inputs sharedrelease.AssemblyInputs
+		if e = sharedrelease.DecodeExact(raw, &inputs); e != nil {
+			return e
+		}
+		receipt, e := releasecontroller.Run(ctx, releasecontroller.Request{Root: *root, Binding: b, SourceArchive: *archive, Epoch: *epoch, Inputs: inputs, Out: *out, BrewPrefix: *brewPrefix})
+		if encodeErr := json.NewEncoder(os.Stdout).Encode(receipt); encodeErr != nil {
+			return encodeErr
+		}
+		return e
+	case "consume-darwin":
+		if *qualification {
+			return errors.New("production-fixture-trust-refused")
+		}
+		a, e := darwinrelease.Admit(ctx, *root, b.Tag, b.TagObject)
+		if e != nil {
+			return e
+		}
+		if a.Commit != b.Commit {
+			return errors.New("darwin-consumer-source")
+		}
+		ref := sharedrelease.ArtifactReference{ID: *artifactID, RunID: *artifactRun, SHA256: *artifactDigest, Platform: "darwin"}
+		if e = sharedrelease.CaptureBundle(ctx, *artifactZIP, *out, b, ref); e != nil {
+			return e
+		}
+		if e = sharedrelease.VerifyDarwinProducerInput(ctx, b, *out); e != nil {
+			os.RemoveAll(*out)
+			return e
+		}
+		return nil
 	case "assemble":
 		if *qualification {
 			return errors.New("production-fixture-trust-refused")
@@ -236,7 +291,7 @@ func sourceBinding(ctx context.Context, root, archive, commit string, epoch int6
 }
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
 	if e := run(ctx, os.Args[1:]); e != nil {
 		fmt.Fprintln(os.Stderr, "a2a-distribution:", e)
