@@ -1,6 +1,7 @@
 package releasecontroller
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -33,5 +34,5 @@ func AdmitWorkflow() error {
 	if !ProductionReady {
 		return errors.New(Hold)
 	}
-	return nil
+	return newProduction(Request{}).Lease(context.Background())
 }
