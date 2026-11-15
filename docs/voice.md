@@ -272,9 +272,14 @@ go test -count=1 ./...
 go test -race -count=1 ./internal/voice/... ./internal/cli/...
 go vet -tags sherpa ./...
 go test -tags sherpa -race ./...
-# Actual local synthesis/encode/decode; explicitly prepared isolated base:
+# Actual local synthesis/encode/decode; use the verified release from above.
+release=/absolute/install/release
+worker_sha=$(awk '$2 == "a2a-voice-worker" { print $1 }' "$release/MANIFEST.sha256")
+manifest_sha=$(shasum -a 256 "$release/MANIFEST.sha256" | awk '{ print $1 }')
 A2A_VOICE_IT=1 A2A_VOICE_IT_BASE=/absolute/isolated/config \
- A2A_VOICE_IT_EXECUTABLE=/absolute/candidate/a2a-voice \
+ A2A_VOICE_IT_EXECUTABLE="$release/a2a-voice-worker" \
+ A2A_VOICE_IT_WORKER_SHA256="$worker_sha" \
+ A2A_VOICE_IT_MANIFEST_SHA256="$manifest_sha" \
  go test -tags sherpa ./internal/voice -run '^TestVoiceReal$' -v
 # Add A2A_VOICE_IT_LONG=1 for the actual long/capped synthesis witness.
 # For #185, the authorized Mac operator runs this existing witness twice on
