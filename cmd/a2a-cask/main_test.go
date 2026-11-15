@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/relux-works/a2a-swarm/internal/cask"
+	"github.com/relux-works/a2a-swarm/internal/sharedrelease"
 )
 
 // fixture writes three archives, a manifest carrying their real digests, a
@@ -44,6 +45,38 @@ func fixture(t *testing.T) (dir string, args []string) {
 	return dir, []string{"-manifest", filepath.Join(dir, "release-assets.json"), "-signature", filepath.Join(dir, "release-assets.json.sig"),
 		"-fixture-key", filepath.Join(dir, "fixture.pub"), "-checksums", filepath.Join(dir, "checksums.txt"),
 		"-assets-dir", dir, "-out", filepath.Join(dir, "a2a.rb")}
+}
+
+// A fixture key never accepts a production aggregate, and arbitrary keyless
+// identity/issuer choices are refused before any output or verifier effect.
+func TestRunProductionTrustBoundary(t *testing.T) {
+	dir, args := fixture(t)
+	path := filepath.Join(dir, "release-assets.json")
+	put := func(body string) {
+		t.Helper()
+		if e := os.WriteFile(path, []byte(body), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	put(`{"schema":"` + sharedrelease.Schema + `"}`)
+	called := false
+	e := run(args, io.Discard, func(string, string) error { called = true; return nil })
+	if e == nil || e.Error() != "production-fixture-trust-refused" || called {
+		t.Fatal(e, called)
+	}
+	noOutput(t, dir)
+	for _, tc := range []struct{ identity, issuer string }{
+		{"https://example.com/workflow", sharedrelease.Issuer},
+		{sharedrelease.Identity(sharedrelease.Workflow, "v0.1.2"), "https://example.com/issuer"},
+	} {
+		a := append([]string{}, args[:4]...)
+		a = append(a, "-certificate", "cert", "-certificate-identity", tc.identity, "-certificate-oidc-issuer", tc.issuer, "-tag", "v0.1.2", "-commit", strings.Repeat("a", 40), "-tag-object", strings.Repeat("b", 40))
+		a = append(a, args[6:]...)
+		if e := run(a, io.Discard, accept); e == nil || e.Error() != "manifest-workflow-identity-refused" {
+			t.Fatal(e)
+		}
+		noOutput(t, dir)
+	}
 }
 
 func accept(string, string) error { return nil }

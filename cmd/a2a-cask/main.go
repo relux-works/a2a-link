@@ -20,6 +20,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,8 +30,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/cask"
+	"github.com/relux-works/a2a-swarm/internal/sharedrelease"
 )
 
 type files []string
@@ -66,6 +70,9 @@ func run(args []string, log io.Writer, verify verifier) error {
 	identity := fs.String("certificate-identity", "", "expected keyless certificate identity (production)")
 	issuer := fs.String("certificate-oidc-issuer", "", "expected keyless OIDC issuer (production)")
 	fixtureKey := fs.String("fixture-key", "", "qualification-only fixture public key (FIXTURE TRUST)")
+	tag := fs.String("tag", "", "independently verified stable tag (production)")
+	commit := fs.String("commit", "", "independently verified source commit (production)")
+	tagObject := fs.String("tag-object", "", "independently verified annotated tag object (production)")
 	assets := fs.String("assets-dir", "", "directory holding the referenced archives")
 	out := fs.String("out", "", "cask file to write")
 	var sums files
@@ -85,10 +92,17 @@ func run(args []string, log io.Writer, verify verifier) error {
 	case !keyless && *fixtureKey == "":
 		return errors.New("usage: an authenticity mode is required")
 	}
+	bound := sharedrelease.Binding{Tag: *tag, Commit: *commit, TagObject: *tagObject}
+	if keyless {
+		if err := bound.Validate(); err != nil {
+			return err
+		}
+		if *identity != sharedrelease.Identity(sharedrelease.Workflow, bound.Tag) || *issuer != sharedrelease.Issuer {
+			return errors.New("manifest-workflow-identity-refused")
+		}
+	}
 	if verify == nil {
-		if keyless {
-			verify = cosignVerifier([]string{"--certificate", *certificate, "--certificate-identity", *identity, "--certificate-oidc-issuer", *issuer})
-		} else {
+		if !keyless {
 			fmt.Fprintln(log, "a2a-cask: authenticity: FIXTURE TRUST (qualification only, not production authority)")
 			verify = cosignVerifier([]string{"--key", *fixtureKey, "--insecure-ignore-tlog=true"})
 		}
@@ -100,22 +114,43 @@ func run(args []string, log io.Writer, verify verifier) error {
 	if err != nil {
 		return fmt.Errorf("manifest-unreadable: %s", *manifest)
 	}
-	private, err := os.MkdirTemp("", "a2a-cask-manifest-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(private)
-	captured := filepath.Join(private, "release-assets.json")
-	if err := os.WriteFile(captured, raw, 0o600); err != nil {
-		return err
-	}
-	if err := verify(captured, *signature); err != nil {
-		return err
-	}
-	// 2. Schema.
-	m, err := cask.ParseManifest(raw)
-	if err != nil {
-		return err
+	var m cask.Manifest
+	if keyless {
+		// Production accepts only the complete /2 aggregate and pinned keyless
+		// source claims. Fixture /1 manifests never reach this route.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		production, err := sharedrelease.VerifyProduction(ctx, raw, *signature, *certificate, *assets, bound, nil)
+		if err != nil {
+			return err
+		}
+		m = production.Cask()
+	} else {
+		// Fixture trust cannot authorize the production schema, even if the
+		// fixture signature is otherwise cryptographically valid.
+		var header struct {
+			Schema string `json:"schema"`
+		}
+		if json.Unmarshal(raw, &header) == nil && header.Schema == sharedrelease.Schema {
+			return errors.New("production-fixture-trust-refused")
+		}
+		private, err := os.MkdirTemp("", "a2a-cask-manifest-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(private)
+		captured := filepath.Join(private, "release-assets.json")
+		if err := os.WriteFile(captured, raw, 0o600); err != nil {
+			return err
+		}
+		if err := verify(captured, *signature); err != nil {
+			return err
+		}
+		// 2. Schema.
+		m, err = cask.ParseManifest(raw)
+		if err != nil {
+			return err
+		}
 	}
 	// 3. Binding.
 	digests := map[string]string{}

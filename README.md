@@ -519,7 +519,23 @@ signing requirement and N-to-N+1 item survival, existing-item rotation/rollback,
 and signing-key custody require separate approval and evidence. Existing item
 ACLs are retained; replacing the reader does not migrate them.
 
-## Darwin release preparation
+## Shared distribution tools (production preparation)
+
+The [PLAN r3 first implementation slice](docs/shared-distribution.md) adds
+Linux-only archives/deb/rpm, six pinned-Syft SBOMs, explicit deterministic archive
+metadata, Linux evidence, and the closed `/2` production platform aggregate.
+`a2a-distribution` prepares/seals private bundles; `a2a-cask` verifies the signed
+aggregate before deriving the cask. Their exact commands, immutable pins and
+output locations are in the [tool table](docs/shared-distribution.md#tools-and-reproducible-entry-points).
+The `distribution-controls` workflow exercises real packaging and isolated
+container installation on hosted runners, with qualification trust only.
+
+This is a partial production slice: combined Darwin/Linux assembly, macOS
+cross-build equality, publication and manual tap custody remain. The legacy
+Darwin-only publisher refuses under the combined policy. No VERSION successor,
+tag, real release, tap write or coordinating-host installation is made here.
+
+## Darwin release preparation (existing native producer)
 
 The [Darwin release source contract](docs/darwin-release.md) provides one native
 arm64 CLI plus real Swift sibling archive path, explicit full designated requirements

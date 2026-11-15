@@ -1,0 +1,150 @@
+// a2a-distribution is a repository build tool. It never publishes or installs.
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/relux-works/a2a-swarm/internal/darwinrelease"
+	"github.com/relux-works/a2a-swarm/internal/sharedrelease"
+)
+
+func run(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: a2a-distribution tools|linux|manifest")
+	}
+	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	root := fs.String("root", ".", "reviewed source checkout")
+	dist := fs.String("dist", "dist", "GoReleaser outputs or complete platform input directory")
+	out := fs.String("out", "", "new private output directory (must not exist)")
+	tag := fs.String("tag", "", "expected stable release tag")
+	commit := fs.String("commit", "", "expected source commit")
+	tagObject := fs.String("tag-object", "", "expected annotated tag object")
+	archive := fs.String("source-archive", "", "git archive --format=tar of source commit")
+	epoch := fs.Int64("epoch", 0, "source commit timestamp")
+	qualification := fs.Bool("qualification", false, "non-production Linux evidence only; no signing")
+	if e := fs.Parse(args[1:]); e != nil {
+		return e
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: unexpected argument")
+	}
+	tools, e := sharedrelease.LoadTools(*root)
+	if e != nil {
+		return e
+	}
+	if args[0] == "tools" {
+		return sharedrelease.VerifyTools(tools)
+	}
+	b := sharedrelease.Binding{Tag: *tag, Commit: *commit, TagObject: *tagObject}
+	if e = b.Validate(); e != nil {
+		return e
+	}
+	if *out == "" {
+		return errors.New("usage: -out required")
+	}
+	switch args[0] {
+	case "linux":
+		if e = sharedrelease.VerifyTools(tools); e != nil {
+			return e
+		}
+		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
+			return e
+		}
+		trust := "qualification"
+		if !*qualification {
+			a, e := darwinrelease.Admit(ctx, *root, b.Tag, b.TagObject)
+			if e != nil {
+				return e
+			}
+			if a.Commit != b.Commit {
+				return errors.New("linux-admitted-commit-mismatch")
+			}
+			trust = "production"
+		}
+		if e = sharedrelease.PrepareLinux(*root, *dist, *out, *archive, b, *epoch, trust, tools); e != nil {
+			return e
+		}
+		if !*qualification {
+			sum := filepath.Join(*out, "linux-checksums.txt")
+			c := exec.CommandContext(ctx, "cosign", "sign-blob", "--yes", "--output-signature", sum+".sig", "--output-certificate", sum+".pem", sum)
+			if e = c.Run(); e != nil {
+				os.RemoveAll(*out)
+				return errors.New("linux-checksum-keyless-sign-refused")
+			}
+			if e = sharedrelease.Cosign(ctx, sum, sum+".sig", sum+".pem", b, sharedrelease.Workflow); e != nil {
+				os.RemoveAll(*out)
+				return e
+			}
+		}
+		return nil
+	case "manifest":
+		if *qualification {
+			return errors.New("production-fixture-trust-refused")
+		}
+		a, e := darwinrelease.Admit(ctx, *root, b.Tag, b.TagObject)
+		if e != nil {
+			return e
+		}
+		if a.Commit != b.Commit {
+			return errors.New("manifest-admitted-commit-mismatch")
+		}
+		return sharedrelease.SealManifest(ctx, b, *dist, *out)
+	default:
+		return errors.New("usage: unknown distribution command")
+	}
+}
+
+// The source archive, checkout, and epoch must describe the same Git object.
+// Compilation is offline and buildvcs=false; the archive is explicit evidence.
+func sourceBinding(ctx context.Context, root, archive, commit string, epoch int64) error {
+	git := func(args ...string) (string, error) {
+		c := exec.CommandContext(ctx, "git", args...)
+		c.Dir = root
+		b, e := c.Output()
+		return strings.TrimSpace(string(b)), e
+	}
+	head, e := git("rev-parse", "HEAD")
+	if e != nil || head != commit {
+		return errors.New("linux-source-checkout")
+	}
+	dirty, e := git("status", "--porcelain", "--untracked-files=all")
+	if e != nil || dirty != "" {
+		return errors.New("linux-source-dirty")
+	}
+	stamp, e := git("show", "-s", "--format=%ct", commit)
+	if e != nil || stamp != strconv.FormatInt(epoch, 10) {
+		return errors.New("linux-source-epoch")
+	}
+	b, e := os.ReadFile(archive)
+	if e != nil {
+		return errors.New("linux-source-archive")
+	}
+	c := exec.CommandContext(ctx, "git", "archive", "--format=tar", commit)
+	c.Dir = root
+	h := sha256.New()
+	c.Stdout = h
+	if e = c.Run(); e != nil || hex.EncodeToString(h.Sum(nil)) != sharedrelease.Hash(b) {
+		return errors.New("linux-source-archive-binding")
+	}
+	return nil
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if e := run(ctx, os.Args[1:]); e != nil {
+		fmt.Fprintln(os.Stderr, "a2a-distribution:", e)
+		os.Exit(1)
+	}
+}

@@ -159,10 +159,14 @@ func TestReleaseChecksAcrossEvents(t *testing.T) {
 		if event == "pull_request" {
 			branch = "feature"
 		}
+		workflow := requiredWorkflows[name]
+		if workflow == "" {
+			workflow = ".github/workflows/go.yml"
+		}
 		return record{
 			map[string]any{"id": id, "name": name, "head_sha": sha, "status": "completed", "conclusion": "success", "app": map[string]int{"id": 15368}, "details_url": fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", repo, id+100, id+200)},
 			map[string]any{"id": id + 200, "run_id": id + 100, "name": name, "head_sha": sha, "status": "completed", "conclusion": "success", "check_run_url": fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", repo, id)},
-			map[string]any{"id": id + 100, "head_sha": sha, "head_branch": branch, "event": event, "status": "completed", "conclusion": "success", "path": ".github/workflows/go.yml", "repository": map[string]string{"full_name": repo}, "head_repository": map[string]string{"full_name": repo}},
+			map[string]any{"id": id + 100, "head_sha": sha, "head_branch": branch, "event": event, "status": "completed", "conclusion": "success", "path": workflow, "repository": map[string]string{"full_name": repo}, "head_repository": map[string]string{"full_name": repo}},
 		}
 	}
 	cases := []struct{ name, want string }{

@@ -342,6 +342,16 @@ func PublishAfter(gates []func() error, publish func() error) error {
 }
 
 func RunRelease(ctx context.Context, root, tag, tagObject string) error {
+	policy, err := LoadPolicy(root)
+	if err != nil {
+		return err
+	}
+	// The legacy controller publishes six Darwin files. Under the combined
+	// policy it must refuse before signing material/native effects, until the
+	// separate producer/assemble/publication integration is reviewed.
+	if policy.ReviewScope == SharedReleaseScope {
+		return errors.New("combined-release-controller-not-integrated")
+	}
 	var out string
 	gates := []func() error{
 		func() error { var e error; out, e = Prepare(ctx, root, tag, tagObject); return e },

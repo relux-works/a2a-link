@@ -1,0 +1,179 @@
+name: Distribution controls
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: distribution-controls-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly -p=1
+  GOWORK: 'off'
+  GOENV: 'off'
+jobs:
+  distribution-controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: 'v2.6.1'
+      - name: Focused positive and negative distribution contracts
+        run: go test -p 1 -parallel 2 -race -count=1 -timeout=8m ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution
+      - name: Immutable public keyless fixture, expected source and wrong-identity controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/keyless-fixture"
+          for name in checksums.txt checksums.txt.sig checksums.txt.pem; do
+            curl -fsSL --retry 2 -o "$RUNNER_TEMP/keyless-fixture/$name" "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/$name"
+          done
+          A2A_DISTRIBUTION_COSIGN_FIXTURE="$RUNNER_TEMP/keyless-fixture" go test -p 1 -parallel 2 -v -count=1 -timeout=3m -run '^TestProductionCosignRealIdentityControls$' ./internal/sharedrelease
+      - name: Build and vet repository distribution tools
+        run: |
+          set -euo pipefail
+          go build -p 1 ./cmd/a2a-cask ./cmd/a2a-distribution
+          go vet -p 1 ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution
+
+  linux-production-packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - name: Verify immutable upstream archives and executable pins before use
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,tarfile,urllib.request
+          pins=json.load(open('release/linux-tools.json'))
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'tools'
+          for name in ['goreleaser','syft']:
+              pin=pins[name]
+              checksum_name='checksums.txt' if name=='goreleaser' else 'syft_'+pin['version'][1:]+'_checksums.txt'
+              checksums=urllib.request.urlopen(pin['url'].rsplit('/',1)[0]+'/'+checksum_name).read()
+              assert hashlib.sha256(checksums).hexdigest()==pin['checksums_sha256'], name+' upstream checksum-list pin'
+              expected=pin['sha256']+'  '+pin['url'].rsplit('/',1)[1]
+              assert checksums.decode().splitlines().count(expected)==1, name+' upstream archive association'
+              data=urllib.request.urlopen(pin['url']).read()
+              assert hashlib.sha256(data).hexdigest()==pin['sha256'], name+' archive pin'
+              archive=root/(name+'.tar.gz');archive.write_bytes(data)
+              with tarfile.open(archive) as tf:
+                  member=tf.getmember(name)
+                  assert member.isfile(), name+' executable type'
+                  binary=tf.extractfile(member).read()
+              assert hashlib.sha256(binary).hexdigest()==pin['executable_sha256'], name+' executable pin'
+              executable=root/name;executable.write_bytes(binary);executable.chmod(0o755)
+          PY
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Resolve modules before offline compilation and seal module inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GOMODCACHE=$RUNNER_TEMP/modcache" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/buildcache" >> "$GITHUB_ENV"
+          GOMODCACHE="$RUNNER_TEMP/modcache" go mod download
+          chmod -R a-w "$RUNNER_TEMP/modcache"
+          echo 'GOPROXY=off' >> "$GITHUB_ENV"
+          echo 'GOSUMDB=off' >> "$GITHUB_ENV"
+      - name: Real Linux preparation, SBOM subject binding and archive reproducibility
+        shell: bash
+        env:
+          RELEASE_VERSION: '0.1.2'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          go build -p 1 -o "$T/a2a-distribution" ./cmd/a2a-distribution
+          "$T/a2a-distribution" tools
+          mkdir -p "$T/tool-plant"
+          cp "$T/tools/goreleaser" "$T/tools/syft" "$T/tool-plant/"
+          printf '\001' >> "$T/tool-plant/goreleaser"
+          if PATH="$T/tool-plant:$PATH" "$T/a2a-distribution" tools > "$T/tool-plant.log" 2>&1; then
+            echo 'Known-bad executable pin survived'; exit 1
+          fi
+          grep -Fx 'a2a-distribution: linux-tool-executable-mismatch: goreleaser' "$T/tool-plant.log"
+          goreleaser --version
+          syft version
+          goreleaser check --config release/linux.goreleaser.yml
+          git archive --format=tar HEAD > "$T/source.tar"
+          revision=$(git rev-parse HEAD)
+          epoch=$(git show -s --format=%ct HEAD)
+          goreleaser release --config release/linux.goreleaser.yml --snapshot --clean --parallelism 2 --skip=publish,announce,sign > "$T/linux-build-01.log" 2>&1
+          "$T/a2a-distribution" linux -qualification -tag v0.1.2 -commit "$revision" -tag-object "$revision" -epoch "$epoch" -source-archive "$T/source.tar" -out "$T/linux-first"
+          # Different filesystem mtimes were the observed LICENSE/NOTICE drift.
+          # Rebuild the real archives with every documentation mtime changed.
+          touch -t 200101010101 LICENSE NOTICE release/INSTALL-linux.md
+          goreleaser release --config release/linux.goreleaser.yml --snapshot --clean --parallelism 2 --skip=publish,announce,sign > "$T/linux-build-02.log" 2>&1
+          "$T/a2a-distribution" linux -qualification -tag v0.1.2 -commit "$revision" -tag-object "$revision" -epoch "$epoch" -source-archive "$T/source.tar" -out "$T/linux-second"
+          for arch in amd64 arm64; do
+            cmp "$T/linux-first/a2a_0.1.2_linux_$arch.tar.gz" "$T/linux-second/a2a_0.1.2_linux_$arch.tar.gz"
+          done
+          # Qualification deliberately has no OIDC/signing authority. Its
+          # evidence cannot be accepted as production manifest input.
+          test ! -e "$T/linux-second/linux-checksums.txt.sig"
+          test ! -e "$T/linux-second/linux-checksums.txt.pem"
+      - name: deb/rpm install and removal in disposable offline containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          IN="$T/linux-second"
+          DEB=debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+          RPM=fedora@sha256:f1a3fab47bcb3c3ddf3135d5ee7ba8b7b25f2e809a47440936212a3a50957f3d
+          docker pull "$DEB"
+          docker pull "$RPM"
+          mkdir -p "$IN/ref-amd64" "$IN/ref-arm64"
+          for arch in amd64 arm64; do tar -xzf "$IN/a2a_0.1.2_linux_$arch.tar.gz" -C "$IN/ref-$arch" a2a; done
+          S="$GITHUB_WORKSPACE/.github/cask-qualification/pkg_check.sh"
+          docker run --rm --network none -v "$IN:/in:ro" -v "$S:/check.sh:ro" "$DEB" sh /check.sh deb /in/a2a_0.1.2_amd64.deb /in/ref-amd64/a2a
+          docker run --rm --network none -v "$IN:/in:ro" -v "$S:/check.sh:ro" "$RPM" sh /check.sh rpm /in/a2a-0.1.2-1.x86_64.rpm /in/ref-amd64/a2a
+          docker run --rm --network none -v "$IN:/in:ro" -v "$S:/check.sh:ro" "$RPM" sh /check.sh rpm-meta /in/a2a-0.1.2-1.aarch64.rpm /in/ref-arm64/a2a aarch64
+          # Known-bad control: correct package against the other architecture's
+          # reference must hit the binary digest gate, not an install failure.
+          if docker run --rm --network none -v "$IN:/in:ro" -v "$S:/check.sh:ro" "$DEB" sh /check.sh deb /in/a2a_0.1.2_amd64.deb /in/ref-arm64/a2a > "$T/package-plant.log" 2>&1; then
+            echo 'Known-bad package control survived'; exit 1
+          fi
+          grep -F 'differs from' "$T/package-plant.log"
+          rm -r "$IN/ref-amd64" "$IN/ref-arm64"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: linux-production-preparation-${{ github.sha }}
+          # Exact selected members only: no complete dist, cache or signing dir.
+          path: |
+            ${{ runner.temp }}/linux-second/a2a_0.1.2_linux_amd64.tar.gz
+            ${{ runner.temp }}/linux-second/a2a_0.1.2_linux_arm64.tar.gz
+            ${{ runner.temp }}/linux-second/a2a_0.1.2_amd64.deb
+            ${{ runner.temp }}/linux-second/a2a_0.1.2_arm64.deb
+            ${{ runner.temp }}/linux-second/a2a-0.1.2-1.x86_64.rpm
+            ${{ runner.temp }}/linux-second/a2a-0.1.2-1.aarch64.rpm
+            ${{ runner.temp }}/linux-second/*.sbom.json
+            ${{ runner.temp }}/linux-second/linux-checksums.txt
+            ${{ runner.temp }}/linux-second/linux-release-evidence.json
+            ${{ runner.temp }}/linux-build-01.log
+            ${{ runner.temp }}/linux-build-02.log
+            ${{ runner.temp }}/package-plant.log
+            ${{ runner.temp }}/tool-plant.log
+          if-no-files-found: error
+          retention-days: 7

@@ -87,8 +87,19 @@ supports the platform's author-approval restriction without inventing another
 identity or an APPROVED state. The latest review from that reviewer on that head
 controls admission. The producer never emits that marker as a self-review verdict.
 
-Required checks are the union of the three reviewed policy names (`test-linux`,
-`release-controls`, `release-native-controls`) and current ref protection/ruleset requirements. The legacy rule is read through
+Under the shared-distribution policy the review must additionally carry the exact
+standalone line `Release-Scope: a2a-shared-distribution-r3`, including for an
+APPROVED review. Its scope covers both platform producers, complete asset/schema
+and signature binding, cross-build equality, publication and cask derivation.
+The [first shared implementation slice](shared-distribution.md) intentionally
+holds the legacy six-file publisher with
+`combined-release-controller-not-integrated` before native effects until that
+integration is reviewed. Native preparation/signing controls remain intact.
+
+Required checks are the union of the five reviewed policy names (`test-linux`,
+`release-controls`, `release-native-controls`, `distribution-controls`,
+`linux-production-packages`) and current ref protection/ruleset requirements.
+Each mandatory name is bound to its reviewed workflow path. The legacy rule is read through
 the documented GraphQL ref field, with active rules read through the metadata REST
 endpoint; administration-only REST protection APIs are not used.
 The public GitHub Actions app ID is used unless policy explicitly binds another

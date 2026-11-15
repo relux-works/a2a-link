@@ -3,10 +3,13 @@
   "history_base": "df69538ab33513cd70c76d67cd4ddde968181ab4",
   "signer_fingerprint": "SHA256:63rp3DJz29F8BZCMoD8HbG+fgPaIat2wBRse0vRp34E",
   "reviewer": "reluxbot",
+  "review_scope": "a2a-shared-distribution-r3",
   "required_checks": [
     "test-linux",
     "release-controls",
-    "release-native-controls"
+    "release-native-controls",
+    "distribution-controls",
+    "linux-production-packages"
   ],
   "go_version": "go1.25.12",
   "xcode_version": "16.4",

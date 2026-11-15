@@ -245,3 +245,12 @@ comparison plus item-access evidence; parser fixtures cannot close it. Archive
 publication does not authorize installing or switching a live consumer. The approved broader Linux/tap/package delivery still needs the concrete shared
 release-standard integration; no duplicate standard or guessed pin is delivered here. See
 [the bounded release contract](docs/darwin-release.md).
+
+## Shared distribution continuation
+
+There is no unresolved owner/product decision in the selected PLAN r3 route.
+The implementation is partial: the producer/assemble/publication split and
+manual tap custody work listed in [shared distribution](docs/shared-distribution.md#review-and-outstanding-integration)
+remain unimplemented. The legacy publisher is held under the combined policy.
+No real release or tap delivery is claimed. v0.1.2 remains a proposal requiring a
+fresh unused-ref check and reviewed VERSION successor when integration is ready.
