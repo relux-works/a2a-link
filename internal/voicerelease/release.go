@@ -88,6 +88,9 @@ func Audit(file string, helper bool) error {
 		return err
 	}
 	defer f.Close()
+	if f.Cpu != macho.CpuArm64 {
+		return errors.New("release image must target arm64")
+	}
 	native := map[string]bool{}
 	var rp []string
 	ids := 0

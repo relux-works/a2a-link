@@ -1,6 +1,7 @@
 package voicerelease
 
 import (
+	"debug/macho"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -15,10 +16,10 @@ func stringCommand(kind uint32, name string, header int) []byte {
 	copy(b[header:], name)
 	return b
 }
-func machoFixture(t *testing.T, name string, commands [][]byte) string {
+func machoFixtureCPU(t *testing.T, name string, commands [][]byte, cpu uint32) string {
 	t.Helper()
 	b := make([]byte, 32)
-	for i, v := range []uint32{0xfeedfacf, 0x100000c, 0, 2, uint32(len(commands))} {
+	for i, v := range []uint32{0xfeedfacf, cpu, 0, 2, uint32(len(commands))} {
 		binary.LittleEndian.PutUint32(b[i*4:], v)
 	}
 	size := 0
@@ -33,6 +34,9 @@ func machoFixture(t *testing.T, name string, commands [][]byte) string {
 	}
 	return p
 }
+func machoFixture(t *testing.T, name string, commands [][]byte) string {
+	return machoFixtureCPU(t, name, commands, uint32(macho.CpuArm64))
+}
 func validCommands(helper bool, name string) [][]byte {
 	uuid := make([]byte, 24)
 	binary.LittleEndian.PutUint32(uuid, 0x1b)
@@ -42,6 +46,18 @@ func validCommands(helper bool, name string) [][]byte {
 		return append(commands, stringCommand(0xc, "@rpath/libonnxruntime.dylib", 24), stringCommand(0xc, "@rpath/libsherpa-onnx-c-api.dylib", 24), stringCommand(0x8000001c, releaseRpath, 12), stringCommand(0xe, "/usr/lib/dyld", 12))
 	}
 	return append(commands, stringCommand(0xd, "@rpath/"+name, 24))
+}
+
+func TestAuditRejectsNonArm64Images(t *testing.T) {
+	for _, name := range []string{"a2a-voice-worker", "libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"} {
+		t.Run(name, func(t *testing.T) {
+			helper := name == "a2a-voice-worker"
+			file := machoFixtureCPU(t, name, validCommands(helper, name), uint32(macho.CpuAmd64))
+			if err := Audit(file, helper); err == nil {
+				t.Fatal("accepted x86_64 release image for arm64 payload")
+			}
+		})
+	}
 }
 
 // Actual Mach-O images prove the audit admits worker and both dylib forms and
