@@ -327,7 +327,7 @@ func (a *App) registerNamedAgentDestination(ctx context.Context, name string, ad
 	if e != nil {
 		j := registrationJournal{Binding: b, Stage: "remote-outcome-ambiguous"}
 		var me *matrix.Error
-		if errors.As(e, &me) && me.Status >= 400 && me.Status < 500 {
+		if errors.As(e, &me) && me.OriginalRequest && me.Status >= 400 && me.Status < 500 {
 			j.Stage = "remote-rejected"
 			j.HTTPStatus = me.Status
 			j.ErrCode = registrationRejectionCode(me.ErrCode)

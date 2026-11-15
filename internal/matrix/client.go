@@ -466,6 +466,9 @@ func (c *Client) Deactivate(ctx context.Context, userID, password string) error 
 		"session":    uia.Session,
 	}}
 	err = c.call(ctx, http.MethodPost, path, nil, req, nil)
+	if errors.Is(err, ErrAuth) {
+		return fmt.Errorf("deactivate: %w", err)
+	}
 	if IsStatus(err, http.StatusUnauthorized) {
 		return fmt.Errorf("deactivate: password rejected by the homeserver: %w", err)
 	}
