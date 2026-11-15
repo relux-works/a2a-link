@@ -18,7 +18,7 @@ const BackendVaultV1 = "vault-v1"
 // vault_selection. It is required for vault-v1 and absent for every legacy
 // backend; profiles never carry it. Only the closed JSON shape is enforced
 // here. Representation, bounds, grammar and synthetic recomputation are owned
-// by internal/vaultv1, which reports the r4 refusal codes.
+// by the private adapter in internal/cli, which reports the r4 refusal codes.
 type VaultSelection struct {
 	Identity    VaultIdentity `json:"identity"`
 	SessionMode string        `json:"session_mode"`

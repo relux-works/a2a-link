@@ -160,11 +160,11 @@ func (c *vaultClient) Release(ctx context.Context, g vaultSelectionGuard, consum
 	var secret []byte
 	defer func() {
 		if recover() != nil {
-			// All invoked work is classified inside operation(); this recovery covers
-			// local setup only. Known success/handoff is never replaced by ambiguity.
+			// Invoked work is classified inside operation(), and callback panics
+			// have their own recovery below. After known success, a local guard
+			// panic must not invent entry into the consumer.
 			if report.Release != nil && report.Release.Outcome == vaultSucceeded {
-				report.DeliveryDiagnosis = vaultDeliveryPanicked
-				report.Handoff = vaultHandoffPanicked
+				report.DeliveryDiagnosis = vaultDeliverySelection
 			} else if report.Failure == nil {
 				report.Failure = vaultLocalFailure(vaultEInternal)
 			}
