@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -252,13 +253,38 @@ func rpmFixture(t *testing.T, arch string, bin []byte, script bool, extra ...map
 		sort.Ints(keys)
 		var idx, data bytes.Buffer
 		for _, i := range keys {
-			for _, n := range []uint32{uint32(i), 6, uint32(data.Len()), 1} {
+			kind := uint32(6)
+			value := append([]byte(tags[uint32(i)]), 0)
+			align := 1
+			switch i {
+			case 1030:
+				mode, e := strconv.ParseUint(tags[uint32(i)], 0, 16)
+				if e != nil {
+					t.Fatal(e)
+				}
+				kind = 3
+				align = 2
+				value = binary.BigEndian.AppendUint16(nil, uint16(mode))
+			case 1039, 1040, 1117, 1118:
+				kind = 8
+			case 1116:
+				index, e := strconv.ParseUint(tags[uint32(i)], 0, 32)
+				if e != nil {
+					t.Fatal(e)
+				}
+				kind = 4
+				align = 4
+				value = binary.BigEndian.AppendUint32(nil, uint32(index))
+			}
+			for data.Len()%align != 0 {
+				data.WriteByte(0)
+			}
+			for _, n := range []uint32{uint32(i), kind, uint32(data.Len()), 1} {
 				if e := binary.Write(&idx, binary.BigEndian, n); e != nil {
 					t.Fatal(e)
 				}
 			}
-			data.WriteString(tags[uint32(i)])
-			data.WriteByte(0)
+			data.Write(value)
 		}
 		b := []byte{0x8e, 0xad, 0xe8, 1, 0, 0, 0, 0}
 		b = binary.BigEndian.AppendUint32(b, uint32(len(keys)))
@@ -273,7 +299,7 @@ func rpmFixture(t *testing.T, arch string, bin []byte, script bool, extra ...map
 	for len(lead)%8 != 0 {
 		lead = append(lead, 0)
 	}
-	tags := map[uint32]string{1000: "a2a", 1001: "0.1.2", 1002: "1", 1022: arch, 1124: "cpio", 1125: "gzip"}
+	tags := map[uint32]string{1000: "a2a", 1001: "0.1.2", 1002: "1", 1022: arch, 1030: "0100755", 1039: "root", 1040: "root", 1116: "0", 1117: "a2a", 1118: "/usr/bin/", 1124: "cpio", 1125: "gzip"}
 	for _, more := range extra {
 		for k, v := range more {
 			tags[k] = v

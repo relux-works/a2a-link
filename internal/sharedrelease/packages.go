@@ -43,12 +43,15 @@ func tarFiles(b []byte) (map[string][]byte, error) {
 		n := strings.TrimPrefix(h.Name, "./")
 		n = strings.TrimPrefix(n, "/")
 		if h.Typeflag == tar.TypeDir && (n == "" || n == "usr/" || n == "usr/bin/" || n == "usr" || n == "usr/bin") {
+			if !approvedTarOwner(h) || h.Mode != 0755 {
+				return nil, errors.New("package-executable-mode-or-owner")
+			}
 			continue
 		}
 		if h.Typeflag != tar.TypeReg || files[n] != nil || h.Size < 0 || h.Size > 128<<20 {
 			return nil, errors.New("package-entry-type")
 		}
-		if n == "usr/bin/a2a" && (h.Mode != 0755 || h.Uid != 0 || h.Gid != 0) {
+		if n == "usr/bin/a2a" && (h.Mode != 0755 || !approvedTarOwner(h)) {
 			return nil, errors.New("package-executable-mode-or-owner")
 		}
 		x, e := io.ReadAll(r)
@@ -57,6 +60,10 @@ func tarFiles(b []byte) (map[string][]byte, error) {
 		}
 		files[n] = x
 	}
+}
+
+func approvedTarOwner(h *tar.Header) bool {
+	return h.Uid == 0 && h.Gid == 0 && (h.Uname == "" || h.Uname == "root") && (h.Gname == "" || h.Gname == "root")
 }
 
 func verifyDeb(b, binaryBytes []byte, version, arch string) error {
@@ -128,9 +135,15 @@ func verifyDeb(b, binaryBytes []byte, version, arch string) error {
 	return nil
 }
 
-// rpmHeader bounds all offsets before reading strings; duplicate tags are
-// rejected. Only string tags requested by this verifier are interpreted.
-func rpmHeader(b []byte) (map[uint32]string, int, error) {
+type rpmValue struct {
+	kind, count uint32
+	data        []byte
+	scalar      string
+}
+
+// rpmHeader retains typed array metadata as well as scalars; duplicate tags
+// and out-of-store reads are refused before installation metadata is consumed.
+func rpmHeader(b []byte) (map[uint32]rpmValue, int, error) {
 	if len(b) < 16 || !bytes.Equal(b[:4], []byte{0x8e, 0xad, 0xe8, 1}) {
 		return nil, 0, errors.New("rpm-header")
 	}
@@ -141,7 +154,7 @@ func rpmHeader(b []byte) (map[uint32]string, int, error) {
 		return nil, 0, errors.New("rpm-header")
 	}
 	store := b[16+n*16 : end]
-	tags := map[uint32]string{}
+	tags := map[uint32]rpmValue{}
 	for i := uint64(0); i < n; i++ {
 		x := b[16+i*16 : 32+i*16]
 		tag := binary.BigEndian.Uint32(x[:4])
@@ -151,7 +164,7 @@ func rpmHeader(b []byte) (map[uint32]string, int, error) {
 		if _, ok := tags[tag]; ok || offset > size {
 			return nil, 0, errors.New("rpm-header")
 		}
-		tags[tag] = ""
+		value := rpmValue{kind: typ, count: uint32(count), data: store[offset:]}
 		if typ == 6 {
 			if count != 1 || offset >= size {
 				return nil, 0, errors.New("rpm-header")
@@ -161,16 +174,60 @@ func rpmHeader(b []byte) (map[uint32]string, int, error) {
 			if j < 0 {
 				return nil, 0, errors.New("rpm-header")
 			}
-			tags[tag] = string(tail[:j])
+			value.scalar = string(tail[:j])
 		}
 		if typ == 4 && count == 1 {
 			if offset+4 > size {
 				return nil, 0, errors.New("rpm-header")
 			}
-			tags[tag] = strconv.FormatUint(uint64(binary.BigEndian.Uint32(store[offset:offset+4])), 10)
+			value.scalar = strconv.FormatUint(uint64(binary.BigEndian.Uint32(store[offset:offset+4])), 10)
 		}
+		tags[tag] = value
 	}
 	return tags, int(end), nil
+}
+
+func rpmSingleString(v rpmValue) (string, bool) {
+	if v.kind != 8 || v.count != 1 {
+		return "", false
+	}
+	i := bytes.IndexByte(v.data, 0)
+	if i < 0 {
+		return "", false
+	}
+	return string(v.data[:i]), true
+}
+
+// RPM installs FILEMODES/FILEUSERNAME/FILEGROUPNAME, not CPIO permissions.
+// Bind the single authoritative file row to the approved executable path.
+func rpmInstallFile(tags map[uint32]rpmValue) (uint64, error) {
+	mode := tags[1030]
+	if mode.kind != 3 || mode.count != 1 || len(mode.data) < 2 || binary.BigEndian.Uint16(mode.data[:2]) != 0100755 {
+		return 0, errors.New("package-executable-mode-or-owner")
+	}
+	for _, tag := range []uint32{1039, 1040} {
+		if name, ok := rpmSingleString(tags[tag]); !ok || name != "root" {
+			return 0, errors.New("package-executable-mode-or-owner")
+		}
+	}
+	for _, tag := range []uint32{1031, 1032} {
+		if v, ok := tags[tag]; ok && (v.kind != 4 || v.count != 1 || len(v.data) < 4 || binary.BigEndian.Uint32(v.data[:4]) != 0) {
+			return 0, errors.New("package-executable-mode-or-owner")
+		}
+	}
+	base, bok := rpmSingleString(tags[1117])
+	dir, dok := rpmSingleString(tags[1118])
+	index := tags[1116]
+	if !bok || !dok || base != "a2a" || dir != "/usr/bin/" || index.kind != 4 || index.count != 1 || len(index.data) < 4 || binary.BigEndian.Uint32(index.data[:4]) != 0 {
+		return 0, errors.New("package-header-file-binding")
+	}
+	// Alternative legacy/relocation tables cannot disagree with the accepted row.
+	for _, tag := range []uint32{1027, 1119, 1120, 1121} {
+		if _, ok := tags[tag]; ok {
+			return 0, errors.New("package-header-file-binding")
+		}
+	}
+	return uint64(binary.BigEndian.Uint16(mode.data[:2])), nil
 }
 
 func verifyRPM(b, binaryBytes []byte, version, arch string) error {
@@ -189,10 +246,10 @@ func verifyRPM(b, binaryBytes []byte, version, arch string) error {
 	if e != nil {
 		return e
 	}
-	if tags[1000] != "a2a" || tags[1001] != version || tags[1002] != "1" || tags[1022] != arch {
+	if tags[1000].scalar != "a2a" || tags[1001].scalar != version || tags[1002].scalar != "1" || tags[1022].scalar != arch {
 		return errors.New("package-architecture-or-version")
 	}
-	if epoch, exists := tags[1003]; exists && epoch != "0" {
+	if epoch, exists := tags[1003]; exists && epoch.scalar != "0" {
 		return errors.New("package-architecture-or-version")
 	}
 	// All script bodies, interpreters and transaction/file triggers are forbidden,
@@ -211,8 +268,12 @@ func verifyRPM(b, binaryBytes []byte, version, arch string) error {
 			return errors.New("rpm-script-or-trigger")
 		}
 	}
-	if tags[1124] != "cpio" || tags[1125] != "gzip" {
+	if tags[1124].scalar != "cpio" || tags[1125].scalar != "gzip" {
 		return errors.New("rpm-payload-format")
+	}
+	installMode, e := rpmInstallFile(tags)
+	if e != nil {
+		return e
 	}
 	x, e := gunzip(b[start+end:])
 	if e != nil {
@@ -258,11 +319,14 @@ func verifyRPM(b, binaryBytes []byte, version, arch string) error {
 			break
 		}
 		if mode&0170000 == 0040000 && (name == "usr" || name == "usr/bin") { /* allowed directory */
+			if mode != 0040755 {
+				return errors.New("package-executable-mode-or-owner")
+			}
 		} else {
 			if mode&0170000 != 0100000 || files[name] != nil {
 				return errors.New("package-entry-type")
 			}
-			if mode != 0100755 {
+			if mode != installMode {
 				return errors.New("package-executable-mode-or-owner")
 			}
 			if links != 1 {

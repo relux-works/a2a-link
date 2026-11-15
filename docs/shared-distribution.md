@@ -63,6 +63,17 @@ uses Go readers for ar/tar and RPM/gzip/newc, not the builder's artifact metadat
 Maintainer scripts, links, configuration, services and extra payload files are
 refused. Installation delivers only `/usr/bin/a2a` and has no startup effects.
 
+RPM installation metadata is authoritative: the single FILEMODES row must be
+regular-file 0100755, FILEUSERNAME/FILEGROUPNAME must both be root, and the
+filename/directory/index arrays must identify exactly `/usr/bin/a2a`. Missing,
+malformed, alternate or disagreeing file tables refuse. The CPIO mode must agree;
+neither header nor payload may add setuid, setgid or sticky bits. Deb data.tar
+executable and directory modes/ownership are also checked exactly. Hosted tests
+regenerate the reviewer's header-only setuid and non-executable plants from each
+real RPM, retaining CPIO bytes and recomputing the existing RPM integrity fields.
+They exercise public `PrepareLinux` beside valid real-package positives and a
+real-deb setuid negative, and require the named refusal with no output bundle.
+
 SBOM coverage is explicit: tar archive SBOMs inventory the CLI's Go modules;
 Syft's [deb archive cataloger](https://github.com/anchore/syft/blob/a033ae525f6c7ef937c6f49513e3403f07a1d6c0/syft/pkg/cataloger/debian/parse_deb_archive.go)
 and RPM cataloger describe the package identity/version/architecture and subject
@@ -158,6 +169,7 @@ GoReleaser's ignored `dist/` is staging only. No installed alias is involved.
 | Syft 1.38.0 | GoReleaser's `syft scan file:ARTIFACT --output syft-json=DOCUMENT` | Six SBOM sidecars |
 | Distribution tool | `a2a-distribution tools` | Toolchain/executable-pin refusal or success |
 | Linux qualification | `a2a-distribution linux -qualification -tag v0.1.2 -commit COMMIT -tag-object COMMIT -epoch EPOCH -source-archive SOURCE.tar -out NEW_DIR` | Atomic private bundle, explicit qualification trust; COMMIT in tag-object is a placeholder, never real tag authority |
+| Real-package regression tests | `A2A_PACKAGE_CONTROL_BUNDLE=BUNDLE A2A_PACKAGE_CONTROL_SOURCE=SOURCE.tar go test -p 1 -parallel 2 -v -count=1 -run 'TestReviewer|TestRPMHeaderOnly|TestDebSetuidTarMode' ./internal/sharedrelease` | Hosted positive/negative parser controls; plants are never installed or executed |
 | Production preparation | Same `linux` command without `-qualification`, with the real admitted annotated tag object | Admitted private Linux bundle plus keyless checksum signature/certificate |
 | Aggregate sealing | `a2a-distribution manifest -tag TAG -commit COMMIT -tag-object OBJECT -dist PLATFORM_DIR -out NEW_DIR` | Admitted, signed, verified platform-only aggregate; no publish |
 | Production renderer | `a2a-cask -manifest release-assets.json -signature release-assets.json.sig -certificate release-assets.json.pem -certificate-identity EXPECTED -certificate-oidc-issuer https://token.actions.githubusercontent.com -tag TAG -commit COMMIT -tag-object OBJECT -checksums checksums.txt -checksums linux-checksums.txt -assets-dir PLATFORM_DIR -out a2a.rb` | Atomic derived cask |
