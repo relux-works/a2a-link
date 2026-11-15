@@ -448,7 +448,7 @@ func (r *workerPathRunner) Run(ctx context.Context, name string, args []string, 
 	r.inputs = append(r.inputs, string(b))
 	out := args[len(args)-1]
 	r.paths = append(r.paths, out)
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWorkerPathsProcess$", "--", args[1], out, r.pin)
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWorkerPathsProcess$", "--", args[0], out, r.pin)
 	cmd.Env = append(os.Environ(), "A2A_WORKER_PATH_FIXTURE=1")
 	if len(r.inputs) == r.failAt {
 		cmd.Env = append(cmd.Env, "A2A_WORKER_PATH_EXIT=1")
