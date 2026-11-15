@@ -345,6 +345,13 @@ policy supplies authentication, not the flag alone.
 
 ## Validation tools and limits
 
+The envelope unit fixtures use a synthetic logical clock and a generous real
+30-second operation budget so hosted race contention does not invalidate positive
+clock-progress and transaction-retry controls. Reopened fixtures inherit that
+budget. `TestMatrixPositiveControlSlowGrant` witnesses work beyond one second;
+`TestMatrixRecheckAfterGrant/deadline` still explicitly sets one second and proves
+retryable refusal with unchanged history. Production timeouts are unchanged.
+
 Every added test has a claim comment. Positive/negative controls use real
 existing envelope verification and BIP-340 signatures. The plainly named
 `fakeGrantcheckVerdicts` isolates the adapter boundary; it is never constructed

@@ -58,6 +58,10 @@ type matrixFixture struct {
 	att        map[string]string
 }
 
+// Positive envelope controls use a synthetic logical clock. Their real operation
+// budget allows hosted race contention; deadline negatives set a short budget explicitly.
+const matrixFixtureTimeout = 30 * time.Second
+
 const matrixAlice = "@alice:fixture.invalid"
 const matrixBob = "@bob:fixture.invalid"
 const matrixRoom = "!pair:fixture.invalid"
@@ -137,7 +141,7 @@ func newMatrixFixtureAt(t *testing.T, now time.Time) *matrixFixture {
 		t.Fatal(e)
 	}
 	f.fake = &fakeGrantcheckVerdicts{result: grantcheck.Verdict{Decision: grantcheck.Live, Code: grantcheck.CodeLive}}
-	f.c = &matrixChecker{core: f.fake, cosign: cg1cosign.BIP340{}, dir: dir, state: state, binding: binding, identity: "alice", userID: matrixAlice, timeout: time.Second, now: func() time.Time { return f.now }}
+	f.c = &matrixChecker{core: f.fake, cosign: cg1cosign.BIP340{}, dir: dir, state: state, binding: binding, identity: "alice", userID: matrixAlice, timeout: matrixFixtureTimeout, now: func() time.Time { return f.now }}
 	t.Cleanup(func() { f.c.Close() })
 	return f
 }

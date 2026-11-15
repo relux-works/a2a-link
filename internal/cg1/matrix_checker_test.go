@@ -201,7 +201,7 @@ func TestMatrixPresentationAndReplay(t *testing.T) {
 	if f.fake.presentation == nil || len(f.fake.presentation.Bytes) != grantcheck.MaxPresentationBytes || string(f.fake.presentation.Bytes) != strings.Repeat("p", grantcheck.MaxPresentationBytes) {
 		t.Fatal("presentation bytes changed")
 	}
-	reopened := &matrixChecker{core: f.fake, cosign: cg1cosign.BIP340{}, dir: f.c.dir, state: f.c.state, binding: f.c.binding, identity: f.c.identity, userID: f.c.userID, timeout: time.Second, now: f.c.now}
+	reopened := &matrixChecker{core: f.fake, cosign: cg1cosign.BIP340{}, dir: f.c.dir, state: f.c.state, binding: f.c.binding, identity: f.c.identity, userID: f.c.userID, timeout: f.c.timeout, now: f.c.now}
 	in.EventID = "$replayed"
 	d, e = reopened.Inbound(context.Background(), in)
 	want(t, d, e, admission.Refused, "denied", false)
@@ -378,5 +378,24 @@ func TestMatrixTransactionBinding(t *testing.T) {
 	want(t, d, e, admission.Live, "allowed", false)
 	if f.fake.outCalls != 2 {
 		t.Fatal("identical transaction was not rechecked")
+	}
+}
+
+// Claim: a positive logical-clock fixture permits a grant check longer than the former one-second real deadline; explicit deadline refusals remain separately tested.
+func TestMatrixPositiveControlSlowGrant(t *testing.T) {
+	f := newMatrixFixture(t)
+	m := f.content(t, matrixBob, matrixAlice, f.body(matrixBob, matrixAlice, "hello", map[string]any{"cg1": nil}))
+	f.fake.onCall = func(ctx context.Context) {
+		timer := time.NewTimer(1100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+		}
+	}
+	d, err := f.c.Inbound(context.Background(), f.incoming(t, m))
+	want(t, d, err, admission.Live, "allowed", false)
+	if f.fake.inCalls != 1 {
+		t.Fatal("positive control did not check the grant")
 	}
 }
