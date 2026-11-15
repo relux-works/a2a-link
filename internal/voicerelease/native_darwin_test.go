@@ -84,7 +84,7 @@ func assertNativeWorkerRefused(t *testing.T, ctx context.Context, worker, modelD
 	if deadlineErr != nil || !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 		t.Fatalf("native worker refusal: err=%v deadline=%v", err, deadlineErr)
 	}
-	if _, err := os.Lstat(out); !os.IsNotExist(err) {
+	if _, err := os.Lstat(output); !os.IsNotExist(err) {
 		t.Fatalf("refused native worker wrote output: %v", err)
 	}
 }
