@@ -82,3 +82,44 @@ func TestScreenLinesTrimsOnlyTrailingBlankRows(t *testing.T) {
 		t.Fatalf("empty capture = %q", got)
 	}
 }
+
+// Codex keeps its raw rows: an owned no-hint prompt followed by a trailing
+// blank, space-only or SGR-only separator is still the exact owned notice
+// (regression from the first revision, which trimmed that separator away).
+// A prompt with no separator and a foreign no-hint prompt stay refused.
+func TestCodexOwnedNoHintKeepsTrailingSeparator(t *testing.T) {
+	owned := Notice(1)
+	prompt := "› " + owned
+	for _, tc := range []struct {
+		name, screen, owned string
+		wantReason          InputReason
+		wantText            string
+	}{
+		{"owned, blank separator", prompt + "\n\n", owned, InputReasonNone, owned},
+		{"owned, space separator", prompt + "\n   \n", owned, InputReasonNone, owned},
+		{"owned, SGR separator", prompt + "\n\x1b[0m\n", owned, InputReasonNone, owned},
+		{"owned, no separator", prompt + "\n", owned, InputReasonLayoutUnrecognized, ""},
+		{"foreign no-hint prompt", "› KEEP\n\n", owned, InputReasonLayoutUnrecognized, ""},
+		{"neutral, no owned notice", prompt + "\n\n", "", InputReasonLayoutUnrecognized, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, reason := inputWithNoticeReason(tc.screen, "codex", tc.owned)
+			if reason != tc.wantReason || b.Text != tc.wantText {
+				t.Fatalf("got %q/%s, want %q/%s", b.Text, reason, tc.wantText, tc.wantReason)
+			}
+		})
+	}
+}
+
+// Only Claude trims padding; every other runtime reads the raw rows.
+func TestRuntimeLinesTrimsOnlyClaude(t *testing.T) {
+	screen := "a\n\n \n"
+	if got := runtimeLines(screen, "claude"); len(got) != 1 {
+		t.Fatalf("claude rows = %q", got)
+	}
+	for _, runtime := range []string{"codex", "other"} {
+		if got := runtimeLines(screen, runtime); len(got) != 3 {
+			t.Fatalf("%s rows = %q", runtime, got)
+		}
+	}
+}
