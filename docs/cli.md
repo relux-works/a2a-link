@@ -411,7 +411,9 @@ Set outcomes are `VERIFIED`, `REFUSED` or `UNKNOWN`. `readback` is `present`,
 `absent`, `match`, `mismatch`, `unavailable` or `not-attempted` as applicable.
 `event_id` is omitted without an ACK, and `content` is omitted for absent or
 unverified results. Input, identity/configuration and resolution refusals before
-the property operation print no result. Text output quotes identifiers and
+the property operation, including a context/connection guard refusal before its
+first request, print no result. After any admitted request, an uncertain outcome
+remains conservative. Text output quotes identifiers and
 includes the same outcome/ACK/readback distinction. Verification is the server's
 observed current exact-key content; it does not prove server honesty, historical
 event/content correspondence, later state, current membership or client UI.

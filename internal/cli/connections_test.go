@@ -405,8 +405,8 @@ func TestNamedConnectionManagement(t *testing.T) {
 // Proves authorized first creation uses only selected bootstrap and exclusive
 // selected items. Negative outcomes retain precise private recovery evidence,
 // publish no credential metadata and never repeat a remote attempt on re-invocation.
-// Both 401 token refusals must retain remote-rejected, never an ambiguous
-// journal, preserve exactly one selected recovery password from before HTTP
+// Both 401 token refusals now classify as remote-rejected, not ambiguous.
+// They preserve exactly one selected recovery password from before HTTP
 // through refusal and re-invocation, and neither create nor store an access token.
 // The existing success, 403 rejection and transport ambiguity are neighboring controls.
 func TestNamedFirstRegistration(t *testing.T) {
@@ -538,13 +538,18 @@ func TestNamedFirstRegistration(t *testing.T) {
 					}
 					b, _ := f.r.Profiles["alpha"].Binding("alice", false)
 					tokenRef := config.SecretReference{Service: "test.alpha.token", Account: b.UserID}
-					if _, ok := f.store.items[tokenRef]; ok {
+					f.store.mu.Lock()
+					_, stored := f.store.items[tokenRef]
+					created := false
+					for _, ref := range f.store.creates {
+						created = created || ref == tokenRef
+					}
+					f.store.mu.Unlock()
+					if stored {
 						t.Fatal("401 registration stored an access token")
 					}
-					for _, ref := range f.store.creates {
-						if ref == tokenRef {
-							t.Fatal("401 registration attempted token provisioning")
-						}
+					if created {
+						t.Fatal("401 registration attempted token provisioning")
 					}
 				}
 			}

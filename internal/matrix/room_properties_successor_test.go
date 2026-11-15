@@ -188,3 +188,37 @@ func TestRoomPropertiesTokenLegacyCalls(t *testing.T) {
 		}
 	}
 }
+
+// Proves a readback token refusal remains UNKNOWN with its ACK/event ID and typed error, rather than becoming a zero-effect refusal.
+func TestRoomPropertiesReadbackTokenRefusal(t *testing.T) {
+	for _, kind := range []string{"avatar", "parent"} {
+		for _, code := range []string{"M_UNKNOWN_TOKEN", "M_MISSING_TOKEN"} {
+			t.Run(kind+"/"+code, func(t *testing.T) {
+				c := New("https://fixture.invalid", "fixture-token")
+				puts, gets := 0, 0
+				c.HTTP.Transport = propertyTransport(func(r *http.Request) (*http.Response, error) {
+					if r.Method == "PUT" {
+						puts++
+						return propertyReply(r, 200, `{"event_id":"$ack"}`), nil
+					}
+					if r.Method != "GET" {
+						t.Fatal("unexpected method")
+					}
+					gets++
+					return propertyReply(r, 401, fmt.Sprintf(`{"errcode":%q,"error":"private"}`, code)), nil
+				})
+				var got StateWriteResult
+				var err error
+				if kind == "avatar" {
+					got, err = c.SetRoomAvatar(t.Context(), "!room", "mxc://media.invalid/a")
+				} else {
+					got, err = c.SetRoomParent(t.Context(), "!room", "!parent", []string{"fixture.invalid"}, false)
+				}
+				var me *Error
+				if got.Outcome != "UNKNOWN" || !got.Acknowledged || got.EventID != "$ack" || got.Readback != "unavailable" || puts != 1 || gets != 1 || !errors.Is(err, ErrAuth) || !errors.As(err, &me) || me.ErrCode != code || !me.OriginalRequest || strings.Contains(err.Error(), "private") {
+					t.Fatalf("readback refusal %+v %v puts=%d gets=%d", got, err, puts, gets)
+				}
+			})
+		}
+	}
+}

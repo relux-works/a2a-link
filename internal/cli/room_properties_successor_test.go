@@ -126,3 +126,129 @@ func TestRoomPropertyAdmissionAndSeenBy(t *testing.T) {
 		}
 	}
 }
+
+// Proves invalid opaque positional/parent IDs refuse before credentials or HTTP without narrowing valid opaque IDs.
+func TestRoomPropertyOpaquePreflight(t *testing.T) {
+	for _, id := range []string{"!", "!" + strings.Repeat("x", 255), "!\xff"} {
+		for _, kind := range []string{"avatar", "parent"} {
+			for _, op := range []string{"get", "set"} {
+				for _, target := range []string{"room", "parent"} {
+					if kind == "avatar" && target == "parent" {
+						continue
+					}
+					t.Run(kind+"/"+op+"/"+target+"/"+strings.ReplaceAll(id, "\xff", "invalid-utf8"), func(t *testing.T) {
+						f := newNamedFixture(t, true)
+						args := []string{"room", kind, op, id, "--json"}
+						if kind == "parent" {
+							child, parent := id, "!space"
+							if target == "parent" {
+								child, parent = "!target", id
+							}
+							args = []string{"room", kind, op, child, "--parent", parent, "--json"}
+						}
+						if op == "set" {
+							if kind == "avatar" {
+								args = append(args, "--expect-room-id", "!target", "--mxc", "mxc://media.invalid/a")
+							} else {
+								args = append(args, "--expect-child-id", "!target", "--expect-parent-id", "!space", "--via", "fixture.invalid", "--canonical", "false")
+							}
+						}
+						before := memberFiles(t, f.root)
+						if code := f.app().Run(t.Context(), args); code != ExitUsage || f.effects() != 0 || f.out.Len() != 0 || !strings.Contains(f.err.String(), "invalid opaque room ID") || !reflect.DeepEqual(before, memberFiles(t, f.root)) {
+							t.Fatalf("opaque preflight code=%d effects=%d out=%s err=%s", code, f.effects(), f.out.String(), f.err.String())
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// Proves cancellation or connection drift before the first property request emits no operation result or state request.
+func TestRoomPropertyFirstRequestGuard(t *testing.T) {
+	for _, kind := range []string{"avatar", "parent"} {
+		for _, op := range []string{"get", "set"} {
+			for _, mode := range []string{"cancelled", "selected-change"} {
+				t.Run(kind+"/"+op+"/"+mode, func(t *testing.T) {
+					f := newNamedFixture(t, true)
+					a := f.app()
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					room := "!target"
+					calls := 0
+					if mode == "selected-change" {
+						room = "#target:fixture.invalid"
+					} else {
+						cancel()
+					}
+					a.HTTP = &http.Client{Transport: memberReadTransport(func(r *http.Request) (*http.Response, error) {
+						calls++
+						if mode != "selected-change" || calls != 1 || r.Method != "GET" || !strings.Contains(r.URL.Path, "/directory/room/") {
+							t.Fatal("first guard allowed a property request")
+						}
+						c := f.r.Profiles["alpha"]
+						c.URL += "/changed"
+						f.r.Profiles["alpha"] = c
+						f.save()
+						return propertyCLIReply(r, 200, `{"room_id":"!target"}`), nil
+					})}
+					args := []string{"room", kind, op, room, "--json"}
+					if kind == "parent" {
+						args = append(args, "--parent", "!space")
+					}
+					if op == "set" {
+						if kind == "avatar" {
+							args = append(args, "--expect-room-id", "!target", "--mxc", "mxc://media.invalid/a")
+						} else {
+							args = append(args, "--expect-child-id", "!target", "--expect-parent-id", "!space", "--via", "fixture.invalid", "--canonical", "false")
+						}
+					}
+					wantCalls := 0
+					if mode == "selected-change" {
+						wantCalls = 1
+					}
+					if code := a.Run(ctx, args); code != ExitError || calls != wantCalls || f.out.Len() != 0 || !strings.Contains(f.err.String(), "no property request attempted") {
+						t.Fatalf("first guard code=%d calls=%d out=%s err=%s", code, calls, f.out.String(), f.err.String())
+					}
+				})
+			}
+		}
+	}
+}
+
+// Proves cancellation during exact readback retains a valid ACK/event ID and never retries either typed write.
+func TestRoomPropertyContextAfterACK(t *testing.T) {
+	for _, kind := range []string{"avatar", "parent"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newNamedFixture(t, true)
+			a := f.app()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			puts, gets := 0, 0
+			a.HTTP = &http.Client{Transport: memberReadTransport(func(r *http.Request) (*http.Response, error) {
+				if r.Method == "PUT" {
+					puts++
+					return propertyCLIReply(r, 200, `{"event_id":"$retained"}`), nil
+				}
+				if r.Method != "GET" {
+					t.Fatal("unexpected method")
+				}
+				gets++
+				cancel()
+				return propertyCLIReply(r, 200, `{}`), nil
+			})}
+			args := []string{"room", "avatar", "set", "!target", "--expect-room-id", "!target", "--mxc", "mxc://media.invalid/a", "--json"}
+			if kind == "parent" {
+				args = []string{"room", "parent", "set", "!target", "--parent", "!space", "--expect-child-id", "!target", "--expect-parent-id", "!space", "--via", "fixture.invalid", "--canonical", "false", "--json"}
+			}
+			code := a.Run(ctx, args)
+			var got roomPropertyResult
+			if err := json.Unmarshal(f.out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if code != ExitError || puts != 1 || gets != 1 || got.Outcome != "UNKNOWN" || !got.Acknowledged || got.EventID != "$retained" || got.Readback != "unavailable" {
+				t.Fatalf("after ACK code=%d puts=%d gets=%d out=%s err=%s", code, puts, gets, f.out.String(), f.err.String())
+			}
+		})
+	}
+}

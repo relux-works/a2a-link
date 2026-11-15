@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 )
@@ -85,14 +86,14 @@ func cmdRoomProperty(ctx context.Context, a *App, kind string, args []string) er
 	if len(pos) != 1 {
 		return usagef("%s", usage)
 	}
-	if _, err := normalizeRoom(pos[0], "unused"); err != nil {
+	if err := validatePropertyRoomArg(pos[0]); err != nil {
 		return err
 	}
 	if kind == "parent" {
 		if !parent.seen || parent.value == "" {
 			return usagef("%s", usage)
 		}
-		if _, err := normalizeRoom(parent.value, "unused"); err != nil {
+		if err := validatePropertyRoomArg(parent.value); err != nil {
 			return err
 		}
 	}
@@ -131,6 +132,22 @@ func cmdRoomProperty(ctx context.Context, a *App, kind string, args []string) er
 	}
 	if op == "set" && (id != expectedRoom.value || (kind == "parent" && parentID != expectedParent.value)) {
 		return fmt.Errorf("room %s: resolved target differs from expected ID; no write attempted", kind)
+	}
+	// Distinguish a refusal at the first request guard from uncertainty after
+	// any admitted request. The original guard still runs on the readback.
+	beforeRequest := s.client.BeforeRequest
+	requestAdmitted := false
+	s.client.BeforeRequest = func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if beforeRequest != nil {
+			if err := beforeRequest(); err != nil {
+				return err
+			}
+		}
+		requestAdmitted = true
+		return nil
 	}
 	out := roomPropertyResult{Type: "room-" + kind, Version: 1, Operation: op, Caller: s.creds.UserID, RoomID: id, StateType: "m.room.avatar", StateKey: ""}
 	if kind == "parent" {
@@ -171,6 +188,9 @@ func cmdRoomProperty(ctx context.Context, a *App, kind string, args []string) er
 			}
 		}
 	}
+	if operationErr != nil && !requestAdmitted {
+		return fmt.Errorf("room %s %s: no property request attempted: %w", kind, op, operationErr)
+	}
 	if e := s.checkConnection(); e != nil {
 		operationErr = e
 	}
@@ -193,6 +213,18 @@ func cmdRoomProperty(ctx context.Context, a *App, kind string, args []string) er
 	}
 	if operationErr != nil {
 		return fmt.Errorf("room %s %s: %s (no automatic retry): %w", kind, op, out.Outcome, operationErr)
+	}
+	return nil
+}
+
+// Validate opaque IDs with the same grammar as the typed Matrix methods before
+// loading credentials; alias forms retain the shared room parser.
+func validatePropertyRoomArg(arg string) error {
+	if _, err := normalizeRoom(arg, "unused"); err != nil {
+		return err
+	}
+	if strings.HasPrefix(arg, "!") && !matrix.RoomPropertyID(arg) {
+		return usagef("invalid opaque room ID")
 	}
 	return nil
 }
