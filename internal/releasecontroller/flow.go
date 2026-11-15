@@ -97,6 +97,9 @@ func run(ctx context.Context, b sharedrelease.Binding, ops operations) (Receipt,
 		}
 		receipt.Stages = append(receipt.Stages, s.name)
 	}
+	if e := ctx.Err(); e != nil {
+		return receipt, e
+	}
 	id, e := ops.Publish(ctx)
 	receipt.ReleaseID = id
 	if e != nil {
@@ -107,14 +110,23 @@ func run(ctx context.Context, b sharedrelease.Binding, ops operations) (Receipt,
 	}
 	receipt.ReleaseID = id
 	receipt.Stages = append(receipt.Stages, "single-publication")
+	if e = ctx.Err(); e != nil {
+		return receipt, e
+	}
 	if e = ops.Readback(ctx, id); e != nil {
 		return receipt, fmt.Errorf("public-readback: %w", e)
 	}
 	receipt.Stages = append(receipt.Stages, "public-readback")
+	if e = ctx.Err(); e != nil {
+		return receipt, e
+	}
 	if e = ops.Admit(ctx); e != nil {
 		return receipt, fmt.Errorf("readmission-after-readback: %w", e)
 	}
 	receipt.Stages = append(receipt.Stages, "readmission-after-readback")
+	if e = ctx.Err(); e != nil {
+		return receipt, e
+	}
 	if e = ops.Lease(ctx); e != nil {
 		return receipt, fmt.Errorf("lease-through-readback: %w", e)
 	}

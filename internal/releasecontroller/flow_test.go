@@ -16,10 +16,15 @@ type fixtureOps struct {
 	calls          []string
 	failure        string
 	leases, admits int
+	cancelAt       string
+	cancel         context.CancelFunc
 }
 
 func (f *fixtureOps) step(name string) error {
 	f.calls = append(f.calls, name)
+	if f.cancel != nil && f.cancelAt == name {
+		f.cancel()
+	}
 	if f.failure == name {
 		return errors.New("planted-" + name)
 	}
@@ -99,6 +104,39 @@ func TestSharedTagEventAndRetainedHold(t *testing.T) {
 	t.Setenv("GITHUB_REF", "refs/tags/v0.1.2")
 	if e := AdmitWorkflow(); e == nil || e.Error() != Hold {
 		t.Fatal("partial route escaped hold", e)
+	}
+	b := sharedrelease.Binding{Tag: "v0.1.2", Commit: strings.Repeat("a", 40), TagObject: strings.Repeat("b", 40)}
+	out := t.TempDir() + "/must-not-exist"
+	receipt, e := Run(context.Background(), Request{Binding: b, Out: out})
+	if e == nil || e.Error() != Hold || receipt.ReleaseID != 0 || receipt.Candidate != "" || len(receipt.Stages) != 0 {
+		t.Fatal("live boundary escaped hold", receipt, e)
+	}
+	if _, e = os.Stat(out); !os.IsNotExist(e) {
+		t.Fatal("partial production output", e)
+	}
+}
+
+// Cancellation at a completed boundary stops the next operation and preserves
+// any known draft identity; it never retries publication to recover context.
+func TestControllerCancellationBoundaries(t *testing.T) {
+	for _, stop := range []string{"lease-2", "publish", "readback", "admit-3"} {
+		t.Run(stop, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f := &fixtureOps{cancelAt: stop, cancel: cancel}
+			b := sharedrelease.Binding{Tag: "v0.1.2", Commit: strings.Repeat("a", 40), TagObject: strings.Repeat("b", 40)}
+			r, e := run(ctx, b, f)
+			if !errors.Is(e, context.Canceled) || f.calls[len(f.calls)-1] != stop {
+				t.Fatal("operation after cancellation", f.calls, e)
+			}
+			wantID := int64(7)
+			if stop == "lease-2" {
+				wantID = 0
+			}
+			if r.ReleaseID != wantID {
+				t.Fatal("recovery identity", r.ReleaseID, wantID)
+			}
+		})
 	}
 }
 
