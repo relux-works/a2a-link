@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,7 +22,7 @@ import (
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: a2a-distribution tools|linux|collect|crosscheck|manifest|reconcile")
+		return errors.New("usage: a2a-distribution tools|linux|collect|crosscheck|crossbuild|assemble|manifest|reconcile")
 	}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := fs.String("root", ".", "reviewed source checkout")
@@ -32,6 +33,7 @@ func run(ctx context.Context, args []string) error {
 	tagObject := fs.String("tag-object", "", "expected annotated tag object")
 	archive := fs.String("source-archive", "", "git archive --format=tar of source commit")
 	epoch := fs.Int64("epoch", 0, "source commit timestamp")
+	inputsFile := fs.String("inputs", "", "private closed artifact input JSON for macOS assembly")
 	releaseID := fs.Int64("release-id", 0, "recorded draft ID for read-only recovery")
 	artifactZIP := fs.String("artifact-zip", "", "captured private artifact ZIP")
 	artifactID := fs.Int64("artifact-id", 0, "immutable artifact ID")
@@ -62,6 +64,33 @@ func run(ctx context.Context, args []string) error {
 		return errors.New("usage: -out required")
 	}
 	switch args[0] {
+	case "assemble":
+		if *qualification {
+			return errors.New("production-fixture-trust-refused")
+		}
+		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
+			return e
+		}
+		a, e := darwinrelease.Admit(ctx, *root, b.Tag, b.TagObject)
+		if e != nil {
+			return e
+		}
+		if a.Commit != b.Commit {
+			return errors.New("assembly-admitted-commit-mismatch")
+		}
+		raw, e := os.ReadFile(*inputsFile)
+		if e != nil {
+			return e
+		}
+		var inputs sharedrelease.AssemblyInputs
+		if e = sharedrelease.DecodeExact(raw, &inputs); e != nil {
+			return e
+		}
+		evidence, e := sharedrelease.AssembleInputs(ctx, *root, *out, *archive, b, *epoch, inputs)
+		if e != nil {
+			return e
+		}
+		return json.NewEncoder(os.Stdout).Encode(evidence)
 	case "reconcile":
 		if *qualification {
 			return errors.New("production-fixture-trust-refused")
@@ -70,10 +99,41 @@ func run(ctx context.Context, args []string) error {
 		if e != nil {
 			return e
 		}
+		if state == "public" {
+			if e = sharedrelease.PublicReadback(ctx, b, *dist); e != nil {
+				return e
+			}
+			observed, e := sharedrelease.ReconcileCandidate(ctx, b, *releaseID, *dist)
+			if e != nil {
+				return e
+			}
+			if observed != "public" {
+				return errors.New("public-readback-state-changed")
+			}
+			state = "public; all authenticated public asset bytes match"
+		}
 		fmt.Fprintln(os.Stdout, "read-only reconciliation:", state)
+		return nil
+	case "crossbuild":
+		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
+			return e
+		}
+		if e = sharedrelease.VerifyCrossSource(*dist, *archive, b); e != nil {
+			return e
+		}
+		if e = sharedrelease.BuildIndependentLinux(ctx, *root, *out, *arch); e != nil {
+			return e
+		}
+		if e = sharedrelease.CompareLinuxBuild(*root, *dist, *out, *arch, b, *epoch); e != nil {
+			os.Remove(*out)
+			return e
+		}
 		return nil
 	case "crosscheck":
 		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
+			return e
+		}
+		if e = sharedrelease.VerifyCrossSource(*dist, *archive, b); e != nil {
 			return e
 		}
 		return sharedrelease.CompareLinuxBuild(*root, *dist, *binary, *arch, b, *epoch)

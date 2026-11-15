@@ -39,7 +39,7 @@ jobs:
           for name in checksums.txt checksums.txt.sig checksums.txt.pem; do
             curl -fsSL --retry 2 -o "$RUNNER_TEMP/keyless-fixture/$name" "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/$name"
           done
-          A2A_DISTRIBUTION_COSIGN_FIXTURE="$RUNNER_TEMP/keyless-fixture" go test -p 1 -parallel 2 -v -count=1 -timeout=3m -run '^TestProductionCosignRealIdentityControls$' ./internal/sharedrelease
+          A2A_PUBLIC_DOWNLOAD_FIXTURE=1 A2A_DISTRIBUTION_COSIGN_FIXTURE="$RUNNER_TEMP/keyless-fixture" go test -p 1 -parallel 2 -v -count=1 -timeout=3m -run '^(TestProductionCosignRealIdentityControls|TestRealPublicDownloadDigest)$' ./internal/sharedrelease
       - name: Build and vet repository distribution tools
         run: |
           set -euo pipefail
@@ -272,15 +272,16 @@ jobs:
           T="$RUNNER_TEMP"
           test -n '${{ needs.linux-production-packages.outputs.artifact-id }}'
           test -n '${{ needs.linux-production-packages.outputs.artifact-digest }}'
+          export GOMODCACHE="$T/independent-modules" GOCACHE="$T/independent-cache"
           go mod download
           go build -p 1 -o "$T/a2a-distribution" ./cmd/a2a-distribution
           git archive --format=tar HEAD > "$T/source.tar"
           revision=$(git rev-parse HEAD)
           epoch=$(git show -s --format=%ct HEAD)
+          chmod -R a-w "$GOMODCACHE"
           export GOPROXY=off GOSUMDB=off
           for arch in amd64 arm64; do
-            GOOS=linux GOARCH="$arch" GOAMD64=v1 CGO_ENABLED=0 go build -p 1 -mod=readonly -trimpath -buildvcs=false -buildmode=exe -compiler=gc -pgo=off -ldflags='-linkmode=internal -libgcc=none' -o "$T/cross-$arch" ./cmd/a2a
-            "$T/a2a-distribution" crosscheck -tag v0.1.2 -commit "$revision" -tag-object "$revision" -epoch "$epoch" -source-archive "$T/source.tar" -dist "$T/linux-input/linux-second" -binary "$T/cross-$arch" -arch "$arch"
+            "$T/a2a-distribution" crossbuild -tag v0.1.2 -commit "$revision" -tag-object "$revision" -epoch "$epoch" -source-archive "$T/source.tar" -dist "$T/linux-input/linux-second" -out "$T/cross-$arch" -arch "$arch"
           done
           A2A_CROSSBUILD_ROOT="$GITHUB_WORKSPACE" A2A_CROSSBUILD_BUNDLE="$T/linux-input/linux-second" go test -p 1 -parallel 2 -v -count=1 -run '^TestIndependentLinuxByteControl$' ./internal/sharedrelease
 
