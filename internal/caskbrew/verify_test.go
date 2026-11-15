@@ -165,3 +165,15 @@ func TestWriteBrewEvaluationFixture(t *testing.T) {
 		}
 	}
 }
+
+// Captured Linux brew output validates both Linux and dependency-refused macOS projections, including Homebrew's unprefixed OS variation keys.
+func TestBrewLinuxEvaluatedProjection(t *testing.T) {
+	_, ruby, m := brewFixture(t)
+	raw, e := os.ReadFile("testdata/brew-7.0.13-linux.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = Verify(raw, ruby, m, "/isolated/brew", "linux/amd64"); e != nil {
+		t.Fatal(e)
+	}
+}

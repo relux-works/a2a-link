@@ -1,0 +1,489 @@
+{
+  "formulae": [],
+  "casks": [
+    {
+      "token": "a2a",
+      "full_token": "relux-works/assembly-controls/a2a",
+      "old_tokens": [],
+      "tap": "relux-works/assembly-controls",
+      "name": [
+        "a2a"
+      ],
+      "desc": "Agent-to-agent messaging CLI",
+      "homepage": "https://github.com/relux-works/a2a-swarm",
+      "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_linux_amd64.tar.gz",
+      "url_specs": {},
+      "version": "0.1.1",
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": true,
+      "installed": null,
+      "installed_time": null,
+      "bundle_version": null,
+      "bundle_short_version": null,
+      "pinned": false,
+      "pinned_version": null,
+      "outdated": false,
+      "sha256": "b7b74daf84a29e36d4afa54614c7a56e001d7faec51d01dbe6ba4b92871f09cb",
+      "artifacts": [
+        {
+          "binary": [
+            "a2a"
+          ],
+          "target": "/isolated/brew/bin/a2a"
+        },
+        {
+          "zap": []
+        }
+      ],
+      "caveats": null,
+      "caveats_rosetta": null,
+      "depends_on": {},
+      "conflicts_with": null,
+      "container": null,
+      "rename": [],
+      "auto_updates": null,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "tap_git_head": null,
+      "languages": [],
+      "ruby_source_path": "Casks/a2a.rb",
+      "ruby_source_checksum": {
+        "sha256": "33e9cc56edfcf4440b14472e722006e5da858ce07b7d3fae9d0caa2084a5f15f"
+      },
+      "variations": {
+        "golden_gate": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_golden_gate": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "tahoe": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_tahoe": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "sequoia": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_sequoia": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "sonoma": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_sonoma": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "ventura": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_ventura": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "monterey": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_monterey": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "big_sur": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_big_sur": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_darwin_arm64.tar.gz",
+          "sha256": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+          "artifacts": [
+            {
+              "binary": [
+                "a2a-keychain-status"
+              ],
+              "target": "/isolated/brew/bin/a2a-keychain-status"
+            },
+            {
+              "binary": [
+                "a2a"
+              ],
+              "target": "/isolated/brew/bin/a2a"
+            },
+            {
+              "zap": []
+            }
+          ],
+          "depends_on": {
+            "arch": [
+              {
+                "type": "arm",
+                "bits": 64
+              }
+            ]
+          }
+        },
+        "arm64_linux": {
+          "url": "https://github.com/relux-works/a2a-swarm/releases/download/v0.1.1/a2a_0.1.1_linux_arm64.tar.gz",
+          "sha256": "5760cf6de7abd62da903ef4162039af2d9ff050124c8ffbbb4f1b89962d67409"
+        }
+      },
+      "supported_platforms": [
+        "arm64_golden_gate",
+        "arm64_tahoe",
+        "arm64_sequoia",
+        "arm64_sonoma",
+        "arm64_ventura",
+        "arm64_monterey",
+        "arm64_big_sur",
+        "x86_64_linux",
+        "arm64_linux"
+      ]
+    }
+  ]
+}

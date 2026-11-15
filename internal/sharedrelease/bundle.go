@@ -46,11 +46,15 @@ func captureBundle(ctx context.Context, path, out string, b Binding, ref Artifac
 	default:
 		return errors.New("artifact-platform-refused")
 	}
-	observation, err := observe(ctx, ref.ID, ref.RunID, ref.Platform+"-producer")
+	job := ref.Platform + "-producer"
+	if ref.Platform == "darwin" {
+		job = "darwin-producer / prepare"
+	}
+	observation, err := observe(ctx, ref.ID, ref.RunID, job)
 	if err != nil {
 		return err
 	}
-	if observation.ID != ref.ID || observation.RunID != ref.RunID || observation.JobID <= 0 || observation.JobName != ref.Platform+"-producer" || observation.Name != "a2a-"+ref.Platform+"-"+b.TagObject || observation.Digest != "sha256:"+ref.SHA256 || observation.Commit != b.Commit || observation.Branch != b.Tag || observation.Workflow != Workflow {
+	if observation.ID != ref.ID || observation.RunID != ref.RunID || observation.JobID <= 0 || observation.JobName != job || observation.Name != "a2a-"+ref.Platform+"-"+b.TagObject || observation.Digest != "sha256:"+ref.SHA256 || observation.Commit != b.Commit || observation.Branch != b.Tag || observation.Workflow != Workflow {
 		return errors.New("artifact-producer-binding")
 	}
 	raw, err := readRegular(filepath.Dir(path), filepath.Base(path))

@@ -1,7 +1,8 @@
-# Shared distribution preparation (PLAN r3, first slice)
+# Shared distribution preparation (PLAN r3, slices 1 and 2)
 
-This is the first production implementation slice: Linux preparation, explicit
-archive metadata, and a closed production platform manifest. It is **partial**.
+The two production implementation slices prepare Linux packages, deterministic
+archives, private Darwin input assembly, the signed platform manifest, cask
+custody controls and publisher recovery. Integration is **partial**.
 There is no combined release workflow, public upload, real release, tag creation,
 tap write or installation on a coordinating host in this change.
 
@@ -14,9 +15,8 @@ identity for Linux checksums and the aggregate is
 deliberately not supplied until the combined controller is integrated and reviewed.
 
 The proposed combined successor is v0.1.2. The unused ref was checked during
-implementation, but that check expires: custody must check it again. `VERSION`
-stays at 0.1.1 in this partial slice. Its reviewed successor update belongs with
-the combined controller. Published v0.1.1 and historical v0.1.0 remain immutable.
+implementation, but that check expires: custody must check it again. `release/VERSION`
+now proposes 0.1.2; that source edit creates no tag. Published v0.1.1 and historical v0.1.0 remain immutable.
 
 ## Linux preparation
 
@@ -198,7 +198,7 @@ immutable artifact ID, run ID, ZIP SHA256 and platform. It checks API repository
 source, tag, workflow, successful producer job and expiry associations, the
 upload digest and closed flat ZIP members, then the payload tag-object binding.
 The output is atomic and private. The expected producer names are
-`darwin-producer` and `linux-producer`; artifact names are
+`darwin-producer / prepare` and `linux-producer`; artifact names are
 `a2a-PLATFORM-TAG_OBJECT` in the reserved shared release workflow. Collection
 alone is not signature authentication; aggregate creation verifies both platform
 checksum signatures and production evidence again.
@@ -218,10 +218,11 @@ artifacts and variation fields refuse; macOS Intel is excluded. Actual brew
 plants change URL, checksum, version, binary source/target and an extra artifact,
 with a valid nearby cask. No Ruby is evaluated by the Go guard.
 
-Remaining production integration: a shared workflow with credential separation,
-bound native re-verification of the incoming Darwin bundle, producer ordering,
-macOS byte checks as a mandatory assembly input, main lease through publication
-readback, the closed combined publisher and read-only unknown-outcome recovery.
+Remaining production integration: the shared tag workflow, Linux producer
+consumption/order, the whole assembly-to-publisher controller and explicit main
+lease through final publication readback. Native re-verification, mandatory
+independent compiler checks, the closed publisher and read-only recovery now
+exist as preparation boundaries, but are not one activated production route.
 The hold stays until these form one reviewed route. No tag, release or tap
 publication is enabled by these preparation commands.
 
@@ -252,3 +253,83 @@ independent tap PR review/checks, nonforced FF and readback. Independent review
 repeats authenticated download and renderer equality. No TAP_GITHUB_TOKEN,
 exported signing key, new secret or owner provisioning is required. Tap delivery
 and native installation/adoption remain separate outcomes.
+
+
+## Private assembly, publisher reuse and recovery
+
+The Darwin workflow is now reusable private preparation only, with no tag
+trigger or contents-write permission. The future shared controller calls it as
+`darwin-producer`; its native job is `prepare`. Only the five existing Apple
+fields enter its native step. The original native implementation, preflight,
+cleanup, full requirements and tickets remain the producer. Its reusable-workflow
+certificate identity stays the legacy Darwin identity. The future shared parent
+has one tag concurrency group with `cancel-in-progress: false`; it is not supplied
+by this partial slice, and no production trigger replaces the hold yet.
+
+`a2a-distribution assemble -inputs INPUTS.json -root SOURCE -out NEW_PLATFORM_DIR
+-tag TAG -commit COMMIT -tag-object OBJECT -epoch EPOCH -source-archive SOURCE.tar`
+requires two closed `BundleInput` objects (`darwin`, `linux`), each containing
+`zip` and `artifact` (`id`, `run_id`, `sha256`, `platform`). The producer run IDs
+must match. It captures both bundles, independently verifies original Darwin
+signatures and full compiled requirements/ticket CDHashes without signing fields,
+validates Linux evidence, builds both Linux targets offline on macOS and compares
+exact bytes. Only after both checksum signatures authenticate does it atomically
+return the exact 22 platform files. It emits private association and binary-digest
+evidence separately on stdout. It neither repacks Darwin nor signs an aggregate
+or publishes. Resolve modules before entering this offline boundary.
+
+`a2a-distribution crossbuild` is the same independently compiled macOS path used
+by the hosted control, with the `crosscheck` binding flags and `-out NEW_BINARY`.
+Source archive digest, clean source revision, epoch and portable build settings
+are all bound. Qualification evidence can be compared but cannot authorize an
+aggregate or production assembly.
+
+The original publisher delegates to a shared captured-candidate boundary. A
+future combined caller supplies the exact 26 members (22 platform, aggregate
+triple, derived cask) and the trusted production gate. Re-admission precedes the
+first draft mutation and the public transition. Complete server-side membership
+and each uploaded digest/size/state are read back before publication. There is
+one PATCH only. An ambiguous result triggers read-only observation and returns
+an explicit unknown-outcome error with observed draft/public state; it never
+retries, deletes, overwrites or retags. Actual API mutation tests run against an
+isolated HTTP fixture, not a real release.
+
+`a2a-distribution reconcile -release-id ID -dist FINAL_26_FILES -tag TAG
+-commit COMMIT -tag-object OBJECT` authenticates the original candidate and
+observes the recorded release ID read-only. A private draft is reported as such.
+For a public release it downloads every exact public member, compares actual
+bytes with the authenticated candidate, re-authenticates, and repeats release
+metadata readback. Redirects are restricted to HTTPS GitHub release hosts and no
+credential is sent. Missing or changed bytes refuse. This command never resumes
+publication. Custody runs it before preparing the tap PR.
+
+## Slice 2 evidence limits and acceptance map
+
+The brief has no formal attack-surface table. This map follows its acceptance
+bullets; none is silently treated as out of contract.
+
+| Contract | Named controls | Limit |
+| --- | --- | --- |
+| Artifact identity, run/job/source/tag object and closed ZIP | `TestArtifactAPIAssociation`, `TestPrivateArtifactCaptureBindings`, `TestArtifactZIPClosedEntries` | API fixture association controls; no production artifact is minted here |
+| Original native Darwin bytes, installer modes and complete requirements/tickets | `TestPreparedDarwinBundleNative`, `TestDarwinInputTarEntries`, retained native requirement/ticket tests | Immutable public v0.1.1 fixture; no new Apple signing or Keychain execution |
+| Independent Linux build and full source/archive binding | hosted macOS `crossbuild`, `TestIndependentLinuxByteControl`, `TestCrossBuildSourceBinding` | Both targets compared; no native arm64 Linux installation claim |
+| Premature publication, changed digest/membership, changed admission and unknown outcome | `TestPublisherClosedTransition`, `TestReadOnlyReconciliation`, `TestFinalCandidateDerivation` | Isolated HTTP fixture; combined production caller remains held |
+| Effective brew URL/hash/version/source/resolved target and closed stanzas | `TestBrewInstallerFields`, `TestBrewLinuxEvaluatedProjection`, real `TestRealBrewEvaluation` on Linux/macOS | Exact pinned Homebrew; evaluation does not install |
+| Manifest/renderer/cask/tap mismatch | retained production cask authenticity tests, `TestFinalCandidateDerivation`, `TestCustodyTapDiff` | Manual custody command is prepared, no tap mutation |
+| Public download integrity | `TestPublicAssetDownloadBinding`, `TestRealPublicDownloadDigest` | Real immutable Darwin download; a real published Linux download cannot run before the first separately authorized combined release |
+
+The cask resolved-target narrowing mutant removes only target equality. The
+named `TestBrewInstallerFields/binary-target` must fail for the intended reason;
+an unrelated error does not count. The valid original, field plants and complete
+Go build/vet controls remain required. Existing real RPM/deb reviewer plants and
+the FILEMODES narrowing mutant remain unchanged.
+
+Hosted pins: Go 1.25.12, cosign 2.6.1 and the existing packaging/SBOM digest lock;
+Homebrew 7.0.13 at `bc63375ac3a4d6debb1ceb441ae6e22854f0909a`. That source locks
+portable Ruby 4.0.9: ARM64 Darwin archive SHA256
+`43ff285a82f48c84a06d0676a3800815a19d290d32e44182ddd7a6e95478e18e`,
+x86_64 Linux archive SHA256
+`20d7b22eba004e0518932ce7f8a271c16b1a9da91b81f696c735d14d817a2c07`.
+New workflows reuse the existing full-commit action pins. Fixture asset digests
+are recorded in `release/darwin-fixture.json`. Native Xcode 16.4/Swift 6.1.2
+pins and their qualified path remain unchanged.

@@ -14,8 +14,8 @@ unchanged. There is no optional unsigned tagged-release path or manual bypass.
 | Entry point | Purpose | Output |
 | --- | --- | --- |
 | `.scripts/release-config.sh` | Require all five nonempty fields without displaying values | Closed presence verdict; no native action |
-| `go run ./cmd/a2a-release admit v0.1.1` | Read signed Git objects and legitimate current GitHub policy/check/review records | Admission JSON on stdout |
-| Compiled `a2a-release release v0.1.1` | Owner-admitted tagged pipeline only; requires `RELEASE_ADMITTED_TAG_OBJECT` from admission | One archive, evidence, checksums and cosign signature/certificate in `$RUNNER_TEMP/a2a-release-output`; then qualified release assets |
+| `go run -p 1 ./cmd/a2a-release admit v0.1.2` | Read signed Git objects and legitimate current GitHub policy/check/review records | Admission JSON on stdout |
+| Compiled `a2a-release prepare v0.1.2` | Reusable private producer only; requires `RELEASE_ADMITTED_TAG_OBJECT` and repeated admission | Six authenticated private files in `$RUNNER_TEMP/a2a-release-output`; no publication |
 | `go run ./cmd/a2a-release verify PAYLOAD_DIR NEW_EVIDENCE_DIR` | Verify both final signatures/external predicates and exact full compiled DR | Complete extracted requirement text/binary and identities JSON; no CLI/item execution |
 | `go run ./cmd/a2a-release compare OLD_PAYLOAD NEW_PAYLOAD NEW_EVIDENCE_DIR` | Independently verify two pairs of actual images, then compare complete requirements and distinct hashes | Raw requirements for each image and comparison JSON; not item-access qualification |
 | `go test -race -count=1 -timeout=3m ./internal/darwinrelease` | Narrow nonsecret controls; native cases compile only on Darwin arm64/cgo | Actual test verdicts, not a release |
@@ -269,3 +269,12 @@ Primary references: [Apple requirement language](https://developer.apple.com/lib
 The pinned launcher precedent is [13fe574c](https://github.com/relux-works/curator-agent-launcher/tree/13fe574c612bc6396fa4a596257f3cb85ba25932);
 its optional unsigned mode is not inherited, and its signing settings are not a
 fixed-identifier/full-DR or Swift-companion gate.
+
+
+The slice-2 workflow is reusable private preparation with read-only repository
+permission and native-step signing fields. It has no tag trigger. The future
+shared parent must own tag serialization, Linux ordering, complete assembly,
+main lease and publication readback. Until that route is reviewed,
+`a2a-release release` keeps the combined-controller refusal. Native assembly
+independently re-verifies the unchanged captured six-file bundle; it does not
+rebuild, strip, repack or resign its binaries.

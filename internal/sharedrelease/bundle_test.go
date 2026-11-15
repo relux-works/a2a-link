@@ -68,7 +68,7 @@ func TestPrivateArtifactCaptureBindings(t *testing.T) {
 			ref := ArtifactReference{1, 2, Hash(raw), "darwin"}
 			out := filepath.Join(dir, "out")
 			observer := func(context.Context, int64, int64, string) (darwinrelease.ArtifactObservation, error) {
-				a := darwinrelease.ArtifactObservation{ID: 1, RunID: 2, JobID: 3, Name: "a2a-darwin-" + b.TagObject, Digest: "sha256:" + ref.SHA256, Commit: b.Commit, Branch: b.Tag, Workflow: Workflow, JobName: "darwin-producer"}
+				a := darwinrelease.ArtifactObservation{ID: 1, RunID: 2, JobID: 3, Name: "a2a-darwin-" + b.TagObject, Digest: "sha256:" + ref.SHA256, Commit: b.Commit, Branch: b.Tag, Workflow: Workflow, JobName: "darwin-producer / prepare"}
 				switch tc.name {
 				case "wrong-id":
 					a.ID++
