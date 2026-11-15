@@ -73,6 +73,9 @@ func waitRetryApp(t *testing.T, since string, sync waitRoundTrip) (*App, config.
 			return waitResponse(r, 200, `{"v":1,"subs":[]}`)
 		case strings.Contains(r.URL.Path, "/state/m.room.canonical_alias"):
 			return waitResponse(r, 200, `{"alias":"#proj:test.local"}`)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/receipt/m.read/"):
+			// inbox sends a Seen by receipt after a full print.
+			return waitResponse(r, 200, `{}`)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			return waitResponse(r, 400, `{"errcode":"M_INVALID_PARAM"}`)

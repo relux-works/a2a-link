@@ -20,7 +20,7 @@ jobs:
         with:
           go-version: '1.25.12'
           cache: false
-      - run: go test -race -count=1 -timeout=3m ./internal/darwinrelease
+      - run: go test -p 1 -parallel 2 -race -count=1 -timeout=3m ./internal/darwinrelease
   release-native-controls:
     runs-on: macos-15
     timeout-minutes: 10
@@ -37,4 +37,33 @@ jobs:
           cache: false
       # Compile requirements and reject self-created ad-hoc fixtures only.
       # No real Developer ID/import/notary/user-Keychain operation.
-      - run: go test -race -count=1 -timeout=3m ./internal/darwinrelease
+      - run: go test -p 1 -parallel 2 -race -count=1 -timeout=3m ./internal/darwinrelease
+  signing-keychain-control:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - name: Toolchain
+        run: |
+          sw_vers; uname -m; xcodebuild -version; go version; /usr/bin/openssl version
+          shasum -a 256 .scripts/signing-keychain-fixture.sh internal/darwinrelease/native_darwin.go internal/darwinrelease/pipeline.go internal/darwinrelease/signing_keychain_control_darwin_test.go
+      # A throwaway self-signed identity only; no release secret is available here.
+      - run: .scripts/signing-keychain-fixture.sh "$RUNNER_TEMP/signing-keychain-fixture"
+        timeout-minutes: 3
+      - run: go test -p 1 -parallel 2 -count=1 -v -timeout=6m -run '^(TestSigningKeychainAccessControl|TestSigningControlErrorClass|TestSigningControlMatrixVerdict|TestSigningControlUnrunStep|TestSearchListRestoreContract|TestRunStdoutRefusesOverflow|TestSigningControlVerdictVocabulary|TestSigningKeychainOpenRefusesBadP12First|TestReleasePathSigning)$' ./internal/darwinrelease
+        timeout-minutes: 7
+        env:
+          A2A_SIGNING_KEYCHAIN_CONTROL_DIR: ${{ runner.temp }}/signing-keychain-fixture
+      # Bounded so that the job always completes and keeps its log.
+      - if: always()
+        timeout-minutes: 3
+        run: .scripts/signing-keychain-fixture.sh --cleanup "$RUNNER_TEMP/signing-keychain-fixture"

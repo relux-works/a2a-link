@@ -867,9 +867,18 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Seen by counts only `--event` prints, and only once every byte of them
+	// was written and flushed.
+	var printed []string
+	out := &trackedWriter{w: a.Stdout}
+	if *event != "" {
+		a.Stdout = out
+		defer func() { a.Stdout = out.w }()
+	}
 	for _, ev := range events {
 		if !*asJSON {
 			a.printEvent(ev, s.server)
+			printed = append(printed, ev.EventID)
 			continue
 		}
 		typ := "message"
@@ -879,6 +888,12 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 		if err := a.printJSON(eventRecord(typ, label, roomID, ev, s.server, false)); err != nil {
 			return err
 		}
+		printed = append(printed, ev.EventID)
+	}
+	// A full print completes an entry inbox truncated (its marker points here),
+	// which may let the room's read receipt advance.
+	if *event != "" && out.flush() == nil && noteFullPrint(ctx, s.paths, s.name, roomID, printed) {
+		s.sendReadReceipts(ctx)
 	}
 	return nil
 }

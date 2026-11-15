@@ -19,6 +19,20 @@ var objectID = regexp.MustCompile(`^[0-9a-f]{40}$`)
 var ErrPolicy = errors.New("release policy refused")
 
 const SignerFingerprint = "SHA256:63rp3DJz29F8BZCMoD8HbG+fgPaIat2wBRse0vRp34E"
+const SharedReleaseScope = "a2a-shared-distribution-r3"
+
+// Mandatory production checks are bound to their reviewed workflow paths,
+// rather than accepting a same-named job from any syntactically valid workflow.
+var requiredWorkflows = map[string]string{
+	"test-linux":                             ".github/workflows/go.yml",
+	"release-controls":                       ".github/workflows/release-controls.yml",
+	"release-native-controls":                ".github/workflows/release-controls.yml",
+	"distribution-controls":                  ".github/workflows/distribution-controls.yml",
+	"linux-production-packages":              ".github/workflows/distribution-controls.yml",
+	"macos-crossbuild":                       ".github/workflows/distribution-controls.yml",
+	"brew-installer-controls (ubuntu-24.04)": ".github/workflows/distribution-controls.yml",
+	"brew-installer-controls (macos-15)":     ".github/workflows/distribution-controls.yml",
+}
 
 // Source authority is separate from the single release-tag signer. These are
 // existing approved public source keys; an edit cannot silently broaden trust.
@@ -37,6 +51,7 @@ type Policy struct {
 	SignerFingerprint        string   `json:"signer_fingerprint"`
 	SourceSignerFingerprints []string `json:"source_signer_fingerprints"`
 	Reviewer                 string   `json:"reviewer"`
+	ReviewScope              string   `json:"review_scope"`
 	RequiredChecks           []string `json:"required_checks"`
 	GoVersion                string   `json:"go_version"`
 	XcodeVersion             string   `json:"xcode_version"`
@@ -57,12 +72,20 @@ func LoadPolicy(root string) (Policy, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return p, ErrPolicy
 	}
+	if p.ReviewScope != SharedReleaseScope {
+		return p, ErrPolicy
+	}
 	seen := map[string]bool{}
 	for _, n := range p.RequiredChecks {
 		if n == "" || seen[n] {
 			return p, ErrPolicy
 		}
 		seen[n] = true
+	}
+	for n := range requiredWorkflows {
+		if !seen[n] {
+			return p, ErrPolicy
+		}
 	}
 	return p, nil
 }

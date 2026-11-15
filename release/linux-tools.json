@@ -1,0 +1,21 @@
+{
+  "schema": "a2a-linux-tools/1",
+  "go": "go1.25.12",
+  "cosign": "v2.6.1",
+  "goreleaser": {
+    "version": "v2.20.2",
+    "commit": "1bf59683fabedd7b446d089ec31b1e343b472ce6",
+    "url": "https://github.com/goreleaser/goreleaser/releases/download/v2.20.2/goreleaser_Linux_x86_64.tar.gz",
+    "sha256": "f3d24969a7389a46613875711d15a96d8f6ef1553d84c6ace09d69ac1e7d44c0",
+    "executable_sha256": "afeb44fbb52d3f0fc932f29770b34cada377acc9c4c0c353067ccdd2affd4fcd",
+    "checksums_sha256": "7b092a182d80e6fb1d4419c17b893f7994a6eabd648e61280d44dec63854f2e5"
+  },
+  "syft": {
+    "version": "v1.38.0",
+    "commit": "a033ae525f6c7ef937c6f49513e3403f07a1d6c0",
+    "url": "https://github.com/anchore/syft/releases/download/v1.38.0/syft_1.38.0_linux_amd64.tar.gz",
+    "sha256": "bc664debb00db1b9b4b9dae4ba1a29d99621e33b641b94b78b9048374b812a3d",
+    "executable_sha256": "6d380157a79f5e9114c98df5a2ea22cb06e04d8b37343a6f638f12f4775ac180",
+    "checksums_sha256": "e44431d1962b0a131d24968417e327f6b8ecaee1c0d95de91d5c515155a714f0"
+  }
+}

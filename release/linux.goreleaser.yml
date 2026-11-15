@@ -1,0 +1,80 @@
+# Production Linux PREPARATION only. Publication is owned by the combined
+# controller, never GoReleaser. CI uses --snapshot --skip=publish,announce,sign.
+version: 2
+project_name: a2a
+builds:
+  - id: a2a
+    main: ./cmd/a2a
+    binary: a2a
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    goamd64: [v1]
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -buildvcs=false
+      - -buildmode=exe
+      - -compiler=gc
+      - -pgo=off
+      - -p=1
+    ldflags: [-linkmode=internal -libgcc=none]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+archives:
+  - id: linux
+    ids: [a2a]
+    formats: [tar.gz]
+    name_template: "a2a_{{ .Version }}_linux_{{ .Arch }}"
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: {owner: root, group: root, mode: 0644, mtime: "{{ .CommitDate }}"}
+      - src: NOTICE
+        info: {owner: root, group: root, mode: 0644, mtime: "{{ .CommitDate }}"}
+      - src: release/INSTALL-linux.md
+        dst: INSTALL.md
+        info: {owner: root, group: root, mode: 0644, mtime: "{{ .CommitDate }}"}
+nfpms:
+  - id: packages
+    ids: [a2a]
+    package_name: a2a
+    vendor: Relux Works, LLC
+    homepage: https://github.com/relux-works/a2a-swarm
+    maintainer: Relux Nexus <262682706+reluxbot@users.noreply.github.com>
+    description: Agent-to-agent messaging CLI
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    file_name_template: "{{ .ConventionalFileName }}"
+    mtime: "{{ .CommitDate }}"
+    deb: {compression: gzip}
+    rpm: {compression: gzip, buildhost: reproducible}
+sboms:
+  - id: archives
+    artifacts: archive
+    documents: ["{{ .ArtifactName }}.sbom.json"]
+    args: ["scan", "file:$artifact", "--output", "syft-json=$document"]
+    env:
+      - SYFT_CHECK_FOR_APP_UPDATE=false
+      - SYFT_SOURCE_FILE_DIGESTS=sha256
+      - SYFT_GOLANG_SEARCH_REMOTE_LICENSES=false
+      - SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES=false
+  - id: packages
+    artifacts: package
+    documents: ["{{ .ArtifactName }}.sbom.json"]
+    args: ["scan", "file:$artifact", "--output", "syft-json=$document"]
+    env:
+      - SYFT_CHECK_FOR_APP_UPDATE=false
+      - SYFT_SOURCE_FILE_DIGESTS=sha256
+      - SYFT_GOLANG_SEARCH_REMOTE_LICENSES=false
+      - SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES=false
+checksum:
+  name_template: linux-checksums.txt
+snapshot:
+  version_template: "{{ .Env.RELEASE_VERSION }}"
+release: {disable: true}
+changelog: {disable: true}

@@ -47,6 +47,13 @@ it creates no default rooms. Add existing children and invite members explicitly
 Existing aliases are reused only after current Space policy and the selected
 server's private directory visibility are verified. This does not enable encryption.
 
+Use `a2a room avatar get|set` for one room's avatar MXC and
+`a2a room parent get|set` for one child-side Space parent link. Set requires
+explicit expected room IDs; parent set also requires explicit `--via` servers
+and `--canonical true|false`. Version 1 results distinguish a write ACK from
+verified content and an uncertain outcome. These commands never upload media
+or add reciprocal child links. See the [typed property commands](docs/cli.md#typed-room-properties).
+
 Hook, native and terminal notifications share a fixed 30-second per-identity
 window in one selected connection/config namespace. Existing consumers deliver
 pending mail after the fixed due time; hook-only Stop keeps its existing fallback
@@ -113,6 +120,7 @@ scope admission remain separate from source delivery.
 | G1 catch-up checks (Go) | Check retained Nostr CG1, admission, carrier and daemon compatibility | [Focused commands and limits](docs/g1-gate-1.md#validation-tools) | JSON test logs and build diagnostics in task-owned `.temp/`; no Matrix admission qualification |
 | Nostr session checks (Go, loopback relay, isolated Core) | Verify real NIP-17 admission, recipient/retry guards and crash recovery | [Commands and limits](docs/nostr-session.md#validation-and-limits) | Test stdout and task-owned scratch; generated private custody excluded from delivery |
 | CG1 admission checks (Go) | Verify Nostr-only registration, real CG1/K1, refusal controls and frozen none bytes | [Exact commands and isolated Core prerequisites](docs/cg1-foundation.md#validation-tools-and-limits) | Test stdout; generated Core fixtures at explicit CG1_RUN_ROOT, private custody excluded from delivery |
+| Typed room properties (Go) | Read or set one avatar MXC or child-side parent state with expected IDs, bounded ACK and exact readback | `a2a room avatar get`, `a2a room avatar set`, `a2a room parent get`, `a2a room parent set`; [arguments and result schema](docs/cli.md#typed-room-properties) | Version 1 JSON/text stdout; no media upload, reciprocal link, membership or local configuration change |
 | Scope wake mute (Go, OS TTY checks, local directory flocks) | Owner-confirmed finite-scope wake admission fence and exact cleanup | `a2a host mute capability`; `host mute enroll --scope FILE --run RUN --budget DUR`; `host mute --scope FILE --run RUN --budget DUR`; `host mute status --scope FILE --budget DUR`; `host unmute --scope FILE --run RUN --budget DUR --token OPERATION_ID`; [contract and focused fixture commands](docs/host-mute.md) | Versioned JSON stdout; selected roots contain private `wake-mute.enrolled.json` and `wake-mute.operations.json`; test evidence under `.temp/`; no live qualification or quiescence claim |
 | Darwin release gates (Go, native Security APIs, Swift, codesign/notarytool, cosign) | Source-only signed-tag/current-main/full-DR/companion/archive/publication gates and nonsecret controls | `go test -race -count=1 -timeout=3m ./internal/darwinrelease`; [exact admission/build/verify entry points and held rollout](docs/darwin-release.md) | Runner-private payload/evidence and final checksums; publication only after separately authorized tagged execution |
 | `a2a room power` | Read current room creator and explicit/default authority without changing state | `a2a room power ROOM --json` (or escaped text without `--json`) | Minimal versioned JSON/text on stdout; refusals on stderr, no partial rows |
@@ -539,11 +547,29 @@ signing requirement and N-to-N+1 item survival, existing-item rotation/rollback,
 and signing-key custody require separate approval and evidence. Existing item
 ACLs are retained; replacing the reader does not migrate them.
 
-## Darwin release preparation
+## Shared distribution tools (production preparation)
+
+The [PLAN r3 first implementation slice](docs/shared-distribution.md) adds
+Linux-only archives/deb/rpm, six pinned-Syft SBOMs, explicit deterministic archive
+metadata, Linux evidence, and the closed `/2` production platform aggregate.
+`a2a-distribution` prepares/seals private bundles; `a2a-cask` verifies the signed
+aggregate before deriving the cask. Their exact commands, immutable pins and
+output locations are in the [tool table](docs/shared-distribution.md#tools-and-reproducible-entry-points).
+The `distribution-controls` workflow exercises real packaging and isolated
+container installation on hosted runners, with qualification trust only.
+
+This is a partial production slice: combined Darwin/Linux assembly, macOS
+cross-build equality, publication and manual tap custody remain. The legacy
+Darwin-only publisher refuses under the combined policy. No VERSION successor,
+tag, real release, tap write or coordinating-host installation is made here.
+
+## Darwin release preparation (existing native producer)
 
 The [Darwin release source contract](docs/darwin-release.md) provides one native
 arm64 CLI plus real Swift sibling archive path, explicit full designated requirements
-and nonsecret gate controls. The provisional first version is0.1.0; no tag, Apple
+and nonsecret gate controls. The successor candidate version is 0.1.2 (the
+v0.1.0 tag stays immutable and unreleased: its hosted release stopped at
+`binary-sign`); no new tag, Apple
 credentials, actual signing/notarization, native success, publication or installation
 is established by this source change. The portable build descriptor is unchanged.
 Direct owner scope approval is recorded; actual provisioning, native/N-to-N+1
@@ -563,3 +589,29 @@ The opt-in [Host enrollment boundary](docs/host-enrollment.md) provides strict
 source scope and existing-lease matching with cooperative state-writer guards.
 It exposes no live Host delivery route; durable attempt reconciliation and
 integrated backend validation remain required before activation.
+
+
+The private producer and custody controls for the combined route are documented
+in [shared distribution](docs/shared-distribution.md). `a2a-release prepare`
+returns private Darwin assets; `a2a-distribution collect` binds immutable producer
+artifacts, and `crosscheck` compares independent Linux builds. The combined
+publication hold remains active. The cask custody verifier is read-only and
+never writes to the tap. Hosted distribution controls exercise actual Homebrew
+installer fields in isolated prefixes; their logs are uploaded as job artifacts.
+
+## Shared release orchestration (slice 3, held)
+
+The shared tag workflow is .github/workflows/shared-release.yml. Its ordered
+controller and consumer fixtures are documented in
+[shared distribution](docs/shared-distribution.md#slice-3-ordered-route-and-retained-hold).
+The publication hold remains active until an enforceable custody-main-lease
+authority is integrated.
+
+| Repository tool | Entry point | Result |
+| --- | --- | --- |
+| Event/activation gates | go run -p 1 ./cmd/a2a-distribution controller-event / controller-admit | Read-only event check; partial production refuses before signing authority |
+| Artifact transport | a2a-distribution fetch -artifact-id ID -artifact-sha256 SHA256 -out NEW.zip | Private ZIP after metadata and complete-byte verification |
+| Linux Darwin consumer | a2a-distribution consume-darwin with admitted binding and artifact arguments | Authenticated private input, before Linux production |
+| Ordered controller | a2a-distribution controller with source/binding/inputs/brew/output arguments | Held; fixture-qualified ordered adapter |
+| Workflow validation | Hosted python3 .github/release/controller-tools.py, then pinned actionlint | Verified tool under RUNNER_TEMP/controller-tools; no host installation |
+| Controller fixtures | go test -p 1 -parallel 2 ./internal/releasecontroller | Stage/consumer negatives; hosted dry-run JSON, fixture trust only |

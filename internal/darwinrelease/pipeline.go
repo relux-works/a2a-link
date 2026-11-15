@@ -33,6 +33,12 @@ func cleanEnvironment() []string {
 	return out
 }
 
+// signArgs is the exact codesign argv used to sign one release binary. The
+// native signing-keychain control uses the same function.
+func signArgs(selector, keychain, name, expr, path string) []string {
+	return []string{"--force", "--sign", selector, "--keychain", keychain, "--identifier", "works.relux." + name, "--options", "runtime", "--timestamp", "--requirements", "=designated => " + expr, path}
+}
+
 // execute never includes argv, stderr or subprocess error text in a returned
 // failure. Apple fields are stripped before every subprocess, including builds.
 func execute(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
@@ -171,18 +177,21 @@ func Prepare(ctx context.Context, root, tag, tagObject string) (out string, err 
 	}
 	ids := []Identity{}
 	cdhashes := map[string]string{}
-	for _, name := range Binaries {
+	for i, name := range Binaries {
 		expr, _ := Requirement(name)
 		onDisk, e := os.ReadFile(filepath.Join(root, "release/requirements", name+".txt"))
 		if e != nil || strings.TrimSpace(string(onDisk)) != expr {
 			return "", errors.New("requirement-policy-drift")
 		}
 		path := filepath.Join(work, name)
-		if _, e = execute(ctx, root, "/usr/bin/codesign", "--force", "--sign", signer.selector, "--keychain", signer.path, "--identifier", "works.relux."+name, "--options", "runtime", "--timestamp", "--requirements", "=designated => "+expr, path); e != nil {
-			return "", errors.New("binary-sign")
+		// The private keychain is on the user search list for exactly this
+		// codesign call (signOne); the original list is restored before it returns.
+		if st := signOne(ctx, releaseSearchList(), signer.selector, signer.path, name, expr, path, root, releaseSignDeadline, nil); !st.ok() {
+			return "", signFailure(Binaries, i, st)
 		}
-		if _, e = execute(ctx, root, "/usr/bin/codesign", "--verify", "--strict", "--verbose=4", "--test-requirement", "="+expr, path); e != nil {
-			return "", errors.New("binary-signature-check")
+		if st := executeClassified(ctx, releaseSignDeadline, root, "/usr/bin/codesign", "--verify", "--strict", "--verbose=4", "--test-requirement", "="+expr, path); !st.commandOK() {
+			st.List = "-"
+			return "", errors.New(st.message("binary-signature-check", name))
 		}
 		// Display writes to stderr. Capture only after signature+native full-DR gate;
 		// commands contain no Apple secrets, and display cannot access key material.
@@ -333,6 +342,16 @@ func PublishAfter(gates []func() error, publish func() error) error {
 }
 
 func RunRelease(ctx context.Context, root, tag, tagObject string) error {
+	policy, err := LoadPolicy(root)
+	if err != nil {
+		return err
+	}
+	// The legacy controller publishes six Darwin files. Under the combined
+	// policy it must refuse before signing material/native effects, until the
+	// separate producer/assemble/publication integration is reviewed.
+	if policy.ReviewScope == SharedReleaseScope {
+		return errors.New("combined-release-controller-not-integrated")
+	}
 	var out string
 	gates := []func() error{
 		func() error { var e error; out, e = Prepare(ctx, root, tag, tagObject); return e },

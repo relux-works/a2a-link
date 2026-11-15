@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,11 +51,14 @@ func bindingImage(_ context.Context, pid int) (string, error) {
 // Signal 0 still succeeds for a zombie, although its environ/image can no
 // longer be read. A fresh pidfd pins the current process instance (no cached
 // PID/birth or errno-based ownership inference); POLLIN confirms it exited.
-// Unsupported/denied probes and live or otherwise uncertain processes refuse.
+// ESRCH from pidfd_open means no process with that PID exists any more: a
+// candidate reaped after signal 0 saw it is gone, the same fact processGone
+// reports, never a live process. Unsupported/denied/invalid probes and live or
+// otherwise uncertain processes refuse.
 func bindingCandidateExited(pid int) bool {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
-		return false
+		return pid > 0 && errors.Is(err, unix.ESRCH)
 	}
 	defer unix.Close(fd)
 	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}

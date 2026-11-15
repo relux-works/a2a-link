@@ -78,6 +78,52 @@ type fakeHS struct {
 	// syncsBy counts /sync requests per user, on arrival, so a test can wait
 	// for one agent's next sync while other agents (a projector) sync too.
 	syncsBy map[string]int
+	// receipts records every accepted read receipt, in order.
+	receipts []fakeReceipt
+	// receiptHang, when set, holds receipt requests until it is closed or the
+	// request is cancelled (a hanging endpoint).
+	receiptHang chan struct{}
+	// receiptHangRooms, when set, limits receiptHang to these room ids.
+	receiptHangRooms map[string]bool
+}
+
+// fakeReceipt is one accepted POST /rooms/{room}/receipt/{type}/{event}.
+type fakeReceipt struct {
+	user, room, typ, event, body string
+}
+
+// readReceipts returns the accepted read receipts so far.
+func (hs *fakeHS) readReceipts() []fakeReceipt {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	return append([]fakeReceipt(nil), hs.receipts...)
+}
+
+func (hs *fakeHS) receipt(w http.ResponseWriter, r *http.Request, u string) {
+	hs.mu.Lock()
+	hang := hs.receiptHang
+	if hs.receiptHangRooms != nil && !hs.receiptHangRooms[r.PathValue("room")] {
+		hang = nil
+	}
+	hs.mu.Unlock()
+	if hang != nil {
+		// A held request never succeeds, even when released after the client
+		// gave up: it must not be mistaken for a later attempt.
+		select {
+		case <-hang:
+		case <-r.Context().Done():
+		}
+		writeErr(w, 503, "M_UNKNOWN", "receipt endpoint was hanging")
+		return
+	}
+	body, _ := io.ReadAll(r.Body)
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	if hs.roomFor(w, r, u, true) == nil {
+		return
+	}
+	hs.receipts = append(hs.receipts, fakeReceipt{user: u, room: r.PathValue("room"), typ: r.PathValue("type"), event: r.PathValue("event"), body: string(body)})
+	writeJSON(w, 200, map[string]any{})
 }
 
 // SyncCount is the number of /sync requests user has made so far.
@@ -199,6 +245,7 @@ func newFakeHS(t *testing.T) *fakeHS {
 	route("GET "+v3+"/rooms/{room}/state/{type}", true, hs.getState) // state key "", as on a real server
 	route("GET "+v3+"/rooms/{room}/state", true, hs.getStateEvents)
 	route("PUT "+v3+"/rooms/{room}/state/{type}/{key...}", true, hs.putState)
+	route("POST "+v3+"/rooms/{room}/receipt/{type}/{event}", true, hs.receipt)
 	route("GET "+v3+"/rooms/{room}/messages", true, hs.messages)
 	route("GET "+v3+"/rooms/{room}/event/{event}", true, hs.event)
 	route("GET "+v1+"/rooms/{room}/threads", true, hs.threads)

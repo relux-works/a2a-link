@@ -1,0 +1,61 @@
+# Qualification only. This is NOT a release configuration: it is run with
+# every publication step skipped, from a checkout of the immutable v0.1.1 tag.
+# GoReleaser builds ONLY the Linux archives, the deb/rpm packages and
+# linux-checksums.txt. It renders no cask: GoReleaser v2.20.2 places
+# homebrew_casks.custom_block before `version`, which no configuration changes,
+# and the resulting cask fails Homebrew 7.0.13 style and audit. The cask is
+# rendered by a2a's own renderer (cmd/a2a-cask) from the release checksums.
+version: 2
+
+project_name: a2a
+
+builds:
+  - id: a2a
+    main: ./cmd/a2a
+    binary: a2a
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+      - -buildvcs=false
+      - -buildmode=exe
+      - -compiler=gc
+      - -pgo=off
+    # Replaces GoReleaser's default -s -w -X ldflags: no stripping and no
+    # version injection, matching the portable descriptor.
+    ldflags:
+      - -linkmode=internal -libgcc=none
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: linux
+    ids: [a2a]
+    formats: [tar.gz]
+    name_template: "a2a_{{ .Version }}_linux_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+
+checksum:
+  name_template: linux-checksums.txt
+
+nfpms:
+  - id: packages
+    ids: [a2a]
+    package_name: a2a
+    vendor: Relux Works, LLC
+    homepage: https://github.com/relux-works/a2a-swarm
+    maintainer: Relux Works, LLC
+    description: Agent-to-agent messaging CLI
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    file_name_template: "{{ .ConventionalFileName }}"
+
+release:
+  disable: true
+
+changelog:
+  disable: true

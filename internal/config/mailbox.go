@@ -67,10 +67,14 @@ type MailEntry struct {
 }
 
 type mailLine struct {
-	Op      string      `json:"op"` // add, rcpt, shown
+	Op      string      `json:"op"` // add, rcpt, shown, redact, seenby
 	Entry   *MailEntry  `json:"entry,omitempty"`
 	IDs     []string    `json:"ids,omitempty"`
 	Targets []Redaction `json:"targets,omitempty"`
+	// SeenBy on a rcpt line (or op seenby, as compaction writes it) is the
+	// Seen by fence: this mailbox has received entries under a read-receipt
+	// ledger. Older readers ignore both forms.
+	SeenBy bool `json:"seenby,omitempty"`
 }
 
 // Redaction is scoped to a room, independently of delivery receipts. Keep it
@@ -91,6 +95,8 @@ type Mailbox struct {
 	dead                  int
 	redacted              map[Redaction]bool
 	needsRedactionRewrite bool // stale payload scrubbed while opening an older mailbox
+	seenBy                bool // the Seen by fence is durable in the file
+	fenceNext             bool // the next receipt line carries the fence
 }
 
 // OpenMailbox loads state/<name>.mailbox.jsonl. A missing file is an empty
@@ -149,6 +155,9 @@ func (m *Mailbox) apply(l mailLine) {
 		m.live[e.ID] = &e
 		m.order = append(m.order, e.ID)
 	case "rcpt":
+		if l.SeenBy {
+			m.seenBy = true
+		}
 		m.dead++
 		for _, id := range l.IDs {
 			if _, ok := m.live[id]; ok {
@@ -160,6 +169,8 @@ func (m *Mailbox) apply(l mailLine) {
 				m.received = append(m.received, id)
 			}
 		}
+	case "seenby":
+		m.seenBy = true
 	case "shown":
 		m.dead++
 		for _, id := range l.IDs {
@@ -245,6 +256,76 @@ func (m *Mailbox) Has(id string) bool {
 	return ok || m.recv[id]
 }
 
+// Live reports whether id is an unreceipted entry, whatever the pending filter.
+func (m *Mailbox) Live(id string) bool {
+	_, ok := m.live[id]
+	return ok
+}
+
+// InOrder returns the unreceipted entries among ids, in append order,
+// whatever the pending filter.
+func (m *Mailbox) InOrder(ids []string) []MailEntry {
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []MailEntry
+	for _, id := range m.order {
+		if e, ok := m.live[id]; ok && want[id] {
+			out = append(out, *e)
+			delete(want, id)
+		}
+	}
+	return out
+}
+
+// earlierLive returns the unreceipted entries of room appended before id,
+// including those the pending filter hides. Invites are not room events.
+func (m *Mailbox) earlierLive(room, id string) []string {
+	var out []string
+	for _, x := range m.order {
+		if x == id {
+			return out
+		}
+		if e, ok := m.live[x]; ok && e.Room == room && e.Kind != MailInvite {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// SeenByFence reports whether this mailbox has received entries under a
+// Seen by ledger (the fence is durable in the file).
+func (m *Mailbox) SeenByFence() bool { return m.seenBy }
+
+// FenceNextReceipt makes the next receipt line carry the Seen by fence, so
+// the fence and that receipt are one atomic append.
+func (m *Mailbox) FenceNextReceipt() { m.fenceNext = true }
+
+// AddSeenByFence appends the fence on its own (the explicit reset path).
+func (m *Mailbox) AddSeenByFence() error {
+	if m.seenBy {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := writeLine(&buf, mailLine{Op: "seenby"}); err != nil {
+		return err
+	}
+	if err := m.write(buf.Bytes()); err != nil {
+		return err
+	}
+	m.seenBy = true
+	return nil
+}
+
+// LastReceived is the newest id in the receipt index ("" when it is empty).
+func (m *Mailbox) LastReceived() string {
+	if len(m.received) == 0 {
+		return ""
+	}
+	return m.received[len(m.received)-1]
+}
+
 // Received reports whether id was received (it is in the receipt index).
 func (m *Mailbox) Received(id string) bool { return m.recv[id] }
 
@@ -319,14 +400,15 @@ func (m *Mailbox) receive(ids []string, index bool) (int, error) {
 	if len(keep) == 0 {
 		return 0, nil
 	}
+	line := mailLine{Op: "rcpt", IDs: keep, SeenBy: m.fenceNext && !m.seenBy}
 	var buf bytes.Buffer
-	if err := writeLine(&buf, mailLine{Op: "rcpt", IDs: keep}); err != nil {
+	if err := writeLine(&buf, line); err != nil {
 		return 0, err
 	}
 	if err := m.write(buf.Bytes()); err != nil {
 		return 0, err
 	}
-	m.apply(mailLine{Op: "rcpt", IDs: keep})
+	m.apply(line)
 	if m.dead >= compactMin && m.dead > len(m.live) {
 		if err := m.compact(); err != nil {
 			return n, fmt.Errorf("compact mailbox: %w", err)
@@ -381,6 +463,11 @@ func (m *Mailbox) compact() error {
 	})
 	if len(targets) > 0 {
 		if err := writeLine(&buf, mailLine{Op: "redact", Targets: targets}); err != nil {
+			return err
+		}
+	}
+	if m.seenBy {
+		if err := writeLine(&buf, mailLine{Op: "seenby"}); err != nil {
 			return err
 		}
 	}

@@ -273,8 +273,9 @@ pins/evidence, independent owner-DM route and fresh grantcheck calls. No shared
 envelope schema or algorithm changes. A reviewed BIP-340 author profile remains
 the future Track B, after the format owner's agreement.
 
-Grantcheck PR #100 is pinned at its explicitly authorized candidate head; its
-main re-pin remains after landing. Its transport provenance binding rejects
+The landed grantcheck #111/#116 snapshot is pinned at
+`4f7f9ae72ed82a3af647ee881ff5d801dd7dbd8b`; the current module versions are
+recorded in the Track A specification. Its transport provenance binding rejects
 old unpinned state; no migration or installed consumer adoption is performed.
 Source tests and a real constructor do not attest live grants. The optional
 PR #101 bench integration, two-consumer acceptance, J7 enforcing custody,
@@ -291,3 +292,12 @@ once accepted. Production A/F remain undecided until a real-node runtime probe:
 a tight F can reject consensus-valid tips. This does not block the explicit
 regtest bench policy or protected proof provisioning. See
 [the configuration contract](docs/g1-gate-1.md#per-identity-protected-configuration).
+
+## Shared distribution continuation
+
+There is no unresolved owner/product decision in the selected PLAN r3 route.
+The implementation is partial: the producer/assemble/publication split and
+manual tap custody work listed in [shared distribution](docs/shared-distribution.md#review-and-outstanding-integration)
+remain unimplemented. The legacy publisher is held under the combined policy.
+No real release or tap delivery is claimed. v0.1.2 remains a proposal requiring a
+fresh unused-ref check and reviewed VERSION successor when integration is ready.

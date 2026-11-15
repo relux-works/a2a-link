@@ -21,7 +21,7 @@ func run() error {
 	defer cancel()
 	args := os.Args[1:]
 	if len(args) == 0 {
-		return fmt.Errorf("usage: a2a-release admit|release|verify|compare")
+		return fmt.Errorf("usage: a2a-release admit|prepare|release|verify|compare")
 	}
 	switch args[0] {
 	case "admit":
@@ -33,6 +33,15 @@ func run() error {
 			return e
 		}
 		return json.NewEncoder(os.Stdout).Encode(a)
+	case "prepare":
+		if len(args) != 2 || os.Getenv("RELEASE_ADMITTED_TAG_OBJECT") == "" {
+			return fmt.Errorf("prepare requires admitted tag object")
+		}
+		out, e := darwinrelease.PrepareBundle(ctx, root, args[1], os.Getenv("RELEASE_ADMITTED_TAG_OBJECT"))
+		if e != nil {
+			return e
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"output_dir": out})
 	case "release":
 		if len(args) != 2 || os.Getenv("RELEASE_ADMITTED_TAG_OBJECT") == "" {
 			return fmt.Errorf("release requires admitted tag object")

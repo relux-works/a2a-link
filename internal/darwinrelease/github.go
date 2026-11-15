@@ -312,21 +312,26 @@ func (g *githubAPI) validate(ctx context.Context, p Policy, a *Admission) error 
 				latest = r
 			}
 		}
-		marker := "Release-Review: ACCEPT " + a.Commit
-		accepted := latest.State == "APPROVED"
-		if latest.State == "COMMENTED" {
-			for _, line := range strings.Split(latest.Body, "\n") {
-				if line == marker {
-					accepted = true
-				}
-			}
-		}
+		accepted := reviewAccepted(latest.State, latest.Body, a.Commit, p.ReviewScope)
 		if latest.ID > 0 && accepted {
 			a.ReviewID = latest.ID
 			return nil
 		}
 	}
 	return errors.New("exact-main-review-missing")
+}
+
+func reviewAccepted(state, body, commit, scope string) bool {
+	marker, scoped := false, scope == ""
+	for _, line := range strings.Split(body, "\n") {
+		if line == "Release-Review: ACCEPT "+commit {
+			marker = true
+		}
+		if line == "Release-Scope: "+scope {
+			scoped = true
+		}
+	}
+	return scoped && (state == "APPROVED" || state == "COMMENTED" && marker)
 }
 
 func addRequired(required map[string]int64, name string, app int64) error {
@@ -392,6 +397,9 @@ func (g *githubAPI) actionsJob(ctx context.Context, repo, sha, name string, chec
 	workflow, _, _ := strings.Cut(run.Path, "@")
 	if run.ID != runID || run.HeadSHA != sha || run.Repo.FullName != repo || run.HeadRepo.FullName != repo || !regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9_-]+\.ya?ml$`).MatchString(workflow) {
 		return false, errors.New("required-check-not-legitimate")
+	}
+	if expected := requiredWorkflows[name]; expected != "" && workflow != expected {
+		return false, errors.New("required-check-workflow-mismatch")
 	}
 	if run.Event == "pull_request" {
 		// PR failure, pending and skip outcomes cannot shadow a main record, but

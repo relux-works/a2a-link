@@ -3,8 +3,9 @@
 This is a source implementation for Darwin arm64 `a2a` and the real Swift
 `a2a-keychain-status`, compiled from one exact reviewed main commit. It does not
 record an existing Developer ID image, native success, credential provisioning,
-tag, published release or installed adoption. `release/VERSION` proposes **0.1.0**
-for the first release; changing that file never creates a tag. The generic portable
+tag, published release or installed adoption. `release/VERSION` proposes **0.1.2**,
+the successor candidate. The first tag, v0.1.0, stays immutable and unreleased:
+its hosted release stopped at `binary-sign`. Changing that file never creates a tag. The generic portable
 build descriptor, installed runtime, item backend, daemon and ACL contracts remain
 unchanged. There is no optional unsigned tagged-release path or manual bypass.
 
@@ -13,12 +14,13 @@ unchanged. There is no optional unsigned tagged-release path or manual bypass.
 | Entry point | Purpose | Output |
 | --- | --- | --- |
 | `.scripts/release-config.sh` | Require all five nonempty fields without displaying values | Closed presence verdict; no native action |
-| `go run ./cmd/a2a-release admit v0.1.0` | Read signed Git objects and legitimate current GitHub policy/check/review records | Admission JSON on stdout |
-| Compiled `a2a-release release v0.1.0` | Owner-admitted tagged pipeline only; requires `RELEASE_ADMITTED_TAG_OBJECT` from admission | One archive, evidence, checksums and cosign signature/certificate in `$RUNNER_TEMP/a2a-release-output`; then qualified release assets |
+| `go run -p 1 ./cmd/a2a-release admit v0.1.2` | Read signed Git objects and legitimate current GitHub policy/check/review records | Admission JSON on stdout |
+| Compiled `a2a-release prepare v0.1.2` | Reusable private producer only; requires `RELEASE_ADMITTED_TAG_OBJECT` and repeated admission | Six authenticated private files in `$RUNNER_TEMP/a2a-release-output`; no publication |
 | `go run ./cmd/a2a-release verify PAYLOAD_DIR NEW_EVIDENCE_DIR` | Verify both final signatures/external predicates and exact full compiled DR | Complete extracted requirement text/binary and identities JSON; no CLI/item execution |
 | `go run ./cmd/a2a-release compare OLD_PAYLOAD NEW_PAYLOAD NEW_EVIDENCE_DIR` | Independently verify two pairs of actual images, then compare complete requirements and distinct hashes | Raw requirements for each image and comparison JSON; not item-access qualification |
 | `go test -race -count=1 -timeout=3m ./internal/darwinrelease` | Narrow nonsecret controls; native cases compile only on Darwin arm64/cgo | Actual test verdicts, not a release |
 | `.scripts/release-cleanup.sh` | Always-step cleanup of only this runner job's ephemeral signing directory/keychain | Nonzero if keychain deletion fails |
+| `.scripts/signing-keychain-fixture.sh DIR` then `A2A_SIGNING_KEYCHAIN_CONTROL_DIR=DIR go test -run '^TestSigningKeychainAccessControl$' ./internal/darwinrelease` | CI job `signing-keychain-control`: a throwaway self-signed identity with no trust change, imported through the release import path and signed with the release codesign argv and a fixture requirement, then strictly verified. Arms vary only the fixture keychain's presence in the user search list (restored after each arm) and a widened key partition list; an informational timestamped pair runs too. `--cleanup DIR` removes the files | `SIGNING-CONTROL` lines with an identity class, exit status and a bounded error class (never raw output) and one VERDICT for H6 (search list) and H1 (partition); INCONCLUSIVE fails; says nothing about the Developer ID chain or the timestamp service |
 
 Go 1.25.12, native `CGO_ENABLED=1`, Security.framework/CoreFoundation, Xcode16.4,
 Swift6.1.2 and cosign2.6.1 are explicit release pins. GitHub-hosted `macos-15`
@@ -85,8 +87,19 @@ supports the platform's author-approval restriction without inventing another
 identity or an APPROVED state. The latest review from that reviewer on that head
 controls admission. The producer never emits that marker as a self-review verdict.
 
-Required checks are the union of the three reviewed policy names (`test-linux`,
-`release-controls`, `release-native-controls`) and current ref protection/ruleset requirements. The legacy rule is read through
+Under the shared-distribution policy the review must additionally carry the exact
+standalone line `Release-Scope: a2a-shared-distribution-r3`, including for an
+APPROVED review. Its scope covers both platform producers, complete asset/schema
+and signature binding, cross-build equality, publication and cask derivation.
+The [first shared implementation slice](shared-distribution.md) intentionally
+holds the legacy six-file publisher with
+`combined-release-controller-not-integrated` before native effects until that
+integration is reviewed. Native preparation/signing controls remain intact.
+
+Required checks are the union of the five reviewed policy names (`test-linux`,
+`release-controls`, `release-native-controls`, `distribution-controls`,
+`linux-production-packages`) and current ref protection/ruleset requirements.
+Each mandatory name is bound to its reviewed workflow path. The legacy rule is read through
 the documented GraphQL ref field, with active rules read through the metadata REST
 endpoint; administration-only REST protection APIs are not used.
 The public GitHub Actions app ID is used unless policy explicitly binds another
@@ -134,6 +147,44 @@ and Security.framework external-requirement evaluation must succeed. The native 
 also rejects ad-hoc flags, missing runtime/timestamp and any difference between the
 COMPLETE extracted compiled requirement and independently compiled approved predicate.
 Full requirement text/binary and raw nonsecret codesign output are retained.
+
+codesign does not find an identity in a private keychain that is absent from the
+user search list, even with `--keychain`. This was shown on hosted macos-15 by the
+`signing-keychain-control` job; it is the leading candidate for the first release's
+`binary-sign` stop, and is not proven for the real certificate. So each
+`codesign --sign` call runs inside `signOne`, which works as follows:
+- It reads the complete ordered user search list through
+  `SecKeychainCopyDomainSearchList`, and refuses before any change if the list is
+  unreadable or already names the private keychain.
+- It sets the private keychain first through `SecKeychainSetDomainSearchList` and
+  reads the list back.
+- It signs, then restores the original list and verifies it on every exit,
+  including a panic.
+- The precedence of failures, highest first, is: `search-list-restore`, then
+  `search-list-concurrent` (only after a verified install), then a setup refusal,
+  then the codesign status.
+
+`Prepare` succeeds only after every restore, so no list fault reaches
+notarization or publication. The signing path uses no `security` command and puts
+no password in any argv. If the process is killed or the runner lost
+mid-signing, the in-process restore cannot run. That residual is accepted on the
+ephemeral runner, and no recovery is claimed.
+
+Signing and verification failures have a closed shape:
+`binary-sign: name=<binary> state=<ran|timeout|cancelled|signaled|start-failed|wait-delay|unrun> exit=<n|-> class=<class> list=<ok|search-list-...>`.
+The class is mapped from codesign stderr, which is held in memory up to 64 KiB.
+Output over that limit is `output-overflow` and counts as a refusal. Raw stderr,
+argv, the selector and the keychain path never appear in the error. A failure on
+one binary reports the later binaries as `state=unrun`.
+
+A deadline or cancellation kills the codesign process itself, through the
+managed kill in `os/exec`. A 2 s `WaitDelay` bounds the wait for output, so a
+descendant holding an inherited pipe cannot keep the call open; if output does
+not finish in time, the state is `wait-delay`. No other process is signalled.
+A descendant started by the command may outlive the call; it is not reaped.
+Security API errors
+are reduced to the fixed `search-list-*` codes; their numeric status is not
+reported.
 
 MACOS_SIGN_P12 is the base64 PKCS#12 container; its password is a nonempty
 string. ASC_KEY_P8 is the literal private PEM, never a local operator path.
@@ -218,3 +269,12 @@ Primary references: [Apple requirement language](https://developer.apple.com/lib
 The pinned launcher precedent is [13fe574c](https://github.com/relux-works/curator-agent-launcher/tree/13fe574c612bc6396fa4a596257f3cb85ba25932);
 its optional unsigned mode is not inherited, and its signing settings are not a
 fixed-identifier/full-DR or Swift-companion gate.
+
+
+The slice-2 workflow is reusable private preparation with read-only repository
+permission and native-step signing fields. It has no tag trigger. The future
+shared parent must own tag serialization, Linux ordering, complete assembly,
+main lease and publication readback. Until that route is reviewed,
+`a2a-release release` keeps the combined-controller refusal. Native assembly
+independently re-verifies the unchanged captured six-file bundle; it does not
+rebuild, strip, repack or resign its binaries.

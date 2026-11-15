@@ -3,6 +3,7 @@
 .task-board/
 task-board.config.json
 bin/
+/dist/
 
 # Curator generated project output; keep runtime settings and hooks visible.
 /.agents/
