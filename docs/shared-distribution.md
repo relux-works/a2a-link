@@ -184,3 +184,71 @@ checksum lists. Sources: [GoReleaser v2.20.2](https://github.com/goreleaser/gore
 The workflow reuses already pinned checkout/setup-go/cosign/artifact actions.
 It has read-only contents access and no OIDC permission; its artifacts are
 explicitly qualification inputs, never production signatures or publication.
+
+
+## Slice 2 private boundaries (publication still held)
+
+`a2a-release prepare TAG` uses the original native producer and returns its
+private six-file bundle after keyless checksum signing, repeated admission and
+signature readback. It does not call the publisher. The real `release` command
+continues refusing with `combined-release-controller-not-integrated`.
+
+`a2a-distribution collect` requires the independently admitted tag/source/object,
+immutable artifact ID, run ID, ZIP SHA256 and platform. It checks API repository,
+source, tag, workflow, successful producer job and expiry associations, the
+upload digest and closed flat ZIP members, then the payload tag-object binding.
+The output is atomic and private. The expected producer names are
+`darwin-producer` and `linux-producer`; artifact names are
+`a2a-PLATFORM-TAG_OBJECT` in the reserved shared release workflow. Collection
+alone is not signature authentication; aggregate creation verifies both platform
+checksum signatures and production evidence again.
+
+`a2a-distribution crosscheck -root SOURCE -dist LINUX_BUNDLE -binary CROSS_BINARY
+-arch ARCH -tag TAG -commit COMMIT -tag-object OBJECT -epoch EPOCH
+-source-archive SOURCE.tar` checks the clean checkout/archive/epoch, complete
+archive metadata and documentation, ELF architecture, producer evidence digest,
+and exact independent executable bytes. Hosted macOS independently builds both
+Linux architectures using Go 1.25.12, the approved flags and offline modules.
+Its fixture comparison cannot promote qualification evidence to production.
+
+The cask guard checks canonical renderer bytes and Homebrew 7.0.13's public
+`info --cask --json=v2 --variations` output. URL, SHA256, version, source binary
+and resolved target must agree for every supported projection. Unknown fields,
+artifacts and variation fields refuse; macOS Intel is excluded. Actual brew
+plants change URL, checksum, version, binary source/target and an extra artifact,
+with a valid nearby cask. No Ruby is evaluated by the Go guard.
+
+Remaining production integration: a shared workflow with credential separation,
+bound native re-verification of the incoming Darwin bundle, producer ordering,
+macOS byte checks as a mandatory assembly input, main lease through publication
+readback, the closed combined publisher and read-only unknown-outcome recovery.
+The hold stays until these form one reviewed route. No tag, release or tap
+publication is enabled by these preparation commands.
+
+## Prepared manual tap custody (no tap write)
+
+After a future admitted public release, custody downloads the signed aggregate
+and all platform assets, verifies their keyless workflow/source/ref identity and
+actual bytes, and rebuilds the renderer from that exact clean release revision.
+Render with the normal production `a2a-cask` entry point. Before evaluating Ruby,
+require byte equality with that canonical output. Evaluate using the pinned
+Homebrew source commit `bc63375ac3a4d6debb1ceb441ae6e22854f0909a` (7.0.13) in an
+isolated prefix, then capture public `brew info` JSON. Never evaluate an untrusted
+proposal before the canonical byte comparison.
+
+Run the same production flags plus `-proposed a2a.rb -brew-info INFO.json
+-brew-prefix PREFIX -brew-platform darwin/arm64 -tap-diff DIFF_PATHS
+-renderer-revision COMMIT`, without `-out`. `DIFF_PATHS` is the exact
+`git diff --name-only` output from the proposed tap change. The verifier repeats
+manifest authenticity, all asset bindings, canonical cask derivation, effective
+installer fields and the exact `Casks/a2a.rb` path restriction; it requires a
+clean renderer checkout at the recorded release revision. It emits a receipt
+with manifest SHA256, renderer revision, cask SHA256 and tag object. It writes no
+cask or tap file. This is a prepared verification step, not public-download
+reconciliation or delivery evidence.
+
+Custody then uses the existing configured bot key for a signed feature branch,
+independent tap PR review/checks, nonforced FF and readback. Independent review
+repeats authenticated download and renderer equality. No TAP_GITHUB_TOKEN,
+exported signing key, new secret or owner provisioning is required. Tap delivery
+and native installation/adoption remain separate outcomes.

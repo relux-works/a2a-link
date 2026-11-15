@@ -539,7 +539,7 @@ tag, real release, tap write or coordinating-host installation is made here.
 
 The [Darwin release source contract](docs/darwin-release.md) provides one native
 arm64 CLI plus real Swift sibling archive path, explicit full designated requirements
-and nonsecret gate controls. The successor candidate version is 0.1.1 (the
+and nonsecret gate controls. The successor candidate version is 0.1.2 (the
 v0.1.0 tag stays immutable and unreleased: its hosted release stopped at
 `binary-sign`); no new tag, Apple
 credentials, actual signing/notarization, native success, publication or installation
@@ -561,3 +561,12 @@ The opt-in [Host enrollment boundary](docs/host-enrollment.md) provides strict
 source scope and existing-lease matching with cooperative state-writer guards.
 It exposes no live Host delivery route; durable attempt reconciliation and
 integrated backend validation remain required before activation.
+
+
+The private producer and custody controls for the combined route are documented
+in [shared distribution](docs/shared-distribution.md). `a2a-release prepare`
+returns private Darwin assets; `a2a-distribution collect` binds immutable producer
+artifacts, and `crosscheck` compares independent Linux builds. The combined
+publication hold remains active. The cask custody verifier is read-only and
+never writes to the tap. Hosted distribution controls exercise actual Homebrew
+installer fields in isolated prefixes; their logs are uploaded as job artifacts.

@@ -3,7 +3,7 @@
 This is a source implementation for Darwin arm64 `a2a` and the real Swift
 `a2a-keychain-status`, compiled from one exact reviewed main commit. It does not
 record an existing Developer ID image, native success, credential provisioning,
-tag, published release or installed adoption. `release/VERSION` proposes **0.1.1**,
+tag, published release or installed adoption. `release/VERSION` proposes **0.1.2**,
 the successor candidate. The first tag, v0.1.0, stays immutable and unreleased:
 its hosted release stopped at `binary-sign`. Changing that file never creates a tag. The generic portable
 build descriptor, installed runtime, item backend, daemon and ACL contracts remain

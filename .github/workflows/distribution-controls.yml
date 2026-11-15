@@ -30,7 +30,7 @@ jobs:
         with:
           cosign-release: 'v2.6.1'
       - name: Focused positive and negative distribution contracts
-        run: go test -p 1 -parallel 2 -race -count=1 -timeout=8m ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution
+        run: go test -p 1 -parallel 2 -race -count=1 -timeout=8m ./internal/sharedrelease ./internal/cask ./internal/caskbrew ./internal/darwinrelease ./cmd/a2a-cask ./cmd/a2a-distribution
       - name: Immutable public keyless fixture, expected source and wrong-identity controls
         shell: bash
         run: |
@@ -47,6 +47,9 @@ jobs:
           go vet -p 1 ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution
 
   linux-production-packages:
+    outputs:
+      artifact-id: ${{ steps.preparation.outputs.artifact-id }}
+      artifact-digest: ${{ steps.preparation.outputs.artifact-digest }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -200,6 +203,7 @@ jobs:
             if test -f "dist/$name.sbom.json"; then cp "dist/$name.sbom.json" "$RUNNER_TEMP/sbom-diagnostics/"; fi
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        id: preparation
         if: always()
         with:
           name: linux-production-preparation-${{ github.sha }}
@@ -222,3 +226,68 @@ jobs:
             ${{ runner.temp }}/sbom-diagnostics
           if-no-files-found: error
           retention-days: 7
+
+  macos-crossbuild:
+    needs: linux-production-packages
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.linux-production-packages.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/linux-input
+      - name: Independent offline macOS Linux builds and exact-byte refusal controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          test -n '${{ needs.linux-production-packages.outputs.artifact-id }}'
+          test -n '${{ needs.linux-production-packages.outputs.artifact-digest }}'
+          go mod download
+          go build -p 1 -o "$T/a2a-distribution" ./cmd/a2a-distribution
+          git archive --format=tar HEAD > "$T/source.tar"
+          revision=$(git rev-parse HEAD)
+          epoch=$(git show -s --format=%ct HEAD)
+          export GOPROXY=off GOSUMDB=off
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" GOAMD64=v1 CGO_ENABLED=0 go build -p 1 -mod=readonly -trimpath -buildvcs=false -buildmode=exe -compiler=gc -pgo=off -ldflags='-linkmode=internal -libgcc=none' -o "$T/cross-$arch" ./cmd/a2a
+            "$T/a2a-distribution" crosscheck -tag v0.1.2 -commit "$revision" -tag-object "$revision" -epoch "$epoch" -source-archive "$T/source.tar" -dist "$T/linux-input/linux-second" -binary "$T/cross-$arch" -arch "$arch"
+          done
+          A2A_CROSSBUILD_ROOT="$GITHUB_WORKSPACE" A2A_CROSSBUILD_BUNDLE="$T/linux-input/linux-second" go test -p 1 -parallel 2 -v -count=1 -run '^TestIndependentLinuxByteControl$' ./internal/sharedrelease
+
+  brew-installer-controls:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - name: Real pinned Homebrew effective installer fields and known-bad casks
+        run: .github/distribution-controls/brew-fields.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: brew-installer-controls-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/brew-controls/info-*.json
+            ${{ runner.temp }}/brew-controls/result-*.log
+          if-no-files-found: error

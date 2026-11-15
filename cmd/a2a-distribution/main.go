@@ -21,7 +21,7 @@ import (
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: a2a-distribution tools|linux|manifest")
+		return errors.New("usage: a2a-distribution tools|linux|collect|crosscheck|manifest")
 	}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := fs.String("root", ".", "reviewed source checkout")
@@ -32,6 +32,13 @@ func run(ctx context.Context, args []string) error {
 	tagObject := fs.String("tag-object", "", "expected annotated tag object")
 	archive := fs.String("source-archive", "", "git archive --format=tar of source commit")
 	epoch := fs.Int64("epoch", 0, "source commit timestamp")
+	artifactZIP := fs.String("artifact-zip", "", "captured private artifact ZIP")
+	artifactID := fs.Int64("artifact-id", 0, "immutable artifact ID")
+	artifactRun := fs.Int64("artifact-run", 0, "producer workflow run ID")
+	artifactDigest := fs.String("artifact-sha256", "", "producer upload ZIP SHA256")
+	platform := fs.String("platform", "", "darwin or linux producer")
+	binary := fs.String("binary", "", "independent macOS-cross-built Linux executable")
+	arch := fs.String("arch", "", "Linux architecture for independent byte check")
 	qualification := fs.Bool("qualification", false, "non-production Linux evidence only; no signing")
 	if e := fs.Parse(args[1:]); e != nil {
 		return e
@@ -50,10 +57,27 @@ func run(ctx context.Context, args []string) error {
 	if e = b.Validate(); e != nil {
 		return e
 	}
-	if *out == "" {
+	if *out == "" && args[0] != "crosscheck" {
 		return errors.New("usage: -out required")
 	}
 	switch args[0] {
+	case "crosscheck":
+		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
+			return e
+		}
+		return sharedrelease.CompareLinuxBuild(*root, *dist, *binary, *arch, b, *epoch)
+	case "collect":
+		if *qualification {
+			return errors.New("production-fixture-trust-refused")
+		}
+		a, e := darwinrelease.Admit(ctx, *root, b.Tag, b.TagObject)
+		if e != nil {
+			return e
+		}
+		if a.Commit != b.Commit {
+			return errors.New("artifact-admitted-commit-mismatch")
+		}
+		return sharedrelease.CaptureBundle(ctx, *artifactZIP, *out, b, sharedrelease.ArtifactReference{ID: *artifactID, RunID: *artifactRun, SHA256: *artifactDigest, Platform: *platform})
 	case "linux":
 		if e = sharedrelease.VerifyTools(tools); e != nil {
 			return e

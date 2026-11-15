@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/cask"
+	"github.com/relux-works/a2a-swarm/internal/caskbrew"
 	"github.com/relux-works/a2a-swarm/internal/sharedrelease"
 )
 
@@ -75,12 +76,18 @@ func run(args []string, log io.Writer, verify verifier) error {
 	tagObject := fs.String("tag-object", "", "independently verified annotated tag object (production)")
 	assets := fs.String("assets-dir", "", "directory holding the referenced archives")
 	out := fs.String("out", "", "cask file to write")
+	proposed := fs.String("proposed", "", "custody: proposed cask bytes (verification only)")
+	brewInfo := fs.String("brew-info", "", "custody: pinned Homebrew evaluated JSON")
+	brewPrefix := fs.String("brew-prefix", "", "custody: isolated evaluation prefix")
+	brewPlatform := fs.String("brew-platform", "", "custody: evaluated OS/architecture")
+	tapDiff := fs.String("tap-diff", "", "custody: git diff --name-only output")
+	rendererRevision := fs.String("renderer-revision", "", "custody: clean renderer checkout revision")
 	var sums files
 	fs.Var(&sums, "checksums", "qualified platform checksum file (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *manifest == "" || *signature == "" || *assets == "" || *out == "" || len(sums) == 0 || fs.NArg() != 0 {
+	if *manifest == "" || *signature == "" || *assets == "" || (*out == "" && *proposed == "") || len(sums) == 0 || fs.NArg() != 0 {
 		return errors.New("usage: -manifest, -signature, -checksums, -assets-dir and -out are required")
 	}
 	keyless := *certificate != "" || *identity != "" || *issuer != ""
@@ -167,6 +174,42 @@ func run(args []string, log io.Writer, verify verifier) error {
 	}
 	if err := cask.Bind(m, digests, *assets); err != nil {
 		return err
+	}
+	// Custody is read-only and repeats production authentication and binding.
+	if *proposed != "" {
+		if !keyless || *brewInfo == "" || *brewPrefix == "" || *brewPlatform == "" || *tapDiff == "" || *rendererRevision != bound.Commit || *out != "" {
+			return errors.New("custody-input-contract")
+		}
+		head, e := exec.Command("git", "rev-parse", "HEAD").Output()
+		if e != nil || strings.TrimSpace(string(head)) != *rendererRevision {
+			return errors.New("custody-renderer-revision")
+		}
+		dirty, e := exec.Command("git", "status", "--porcelain", "--untracked-files=all").Output()
+		if e != nil || len(dirty) != 0 {
+			return errors.New("custody-renderer-dirty")
+		}
+		ruby, e := os.ReadFile(*proposed)
+		if e != nil {
+			return e
+		}
+		info, e := os.ReadFile(*brewInfo)
+		if e != nil {
+			return e
+		}
+		if e = caskbrew.Verify(info, ruby, m, *brewPrefix, *brewPlatform); e != nil {
+			return e
+		}
+		diff, e := os.ReadFile(*tapDiff)
+		if e != nil {
+			return e
+		}
+		if e = caskbrew.VerifyTapDiff(strings.Split(strings.TrimSuffix(string(diff), "\n"), "\n")); e != nil {
+			return e
+		}
+		return json.NewEncoder(log).Encode(map[string]string{"result": "custody-prepared-not-published", "manifest_sha256": sharedrelease.Hash(raw), "renderer_revision": *rendererRevision, "cask_sha256": sharedrelease.Hash(ruby), "tag": bound.Tag, "tag_object": bound.TagObject})
+	}
+	if *brewInfo != "" || *brewPrefix != "" || *brewPlatform != "" || *tapDiff != "" || *rendererRevision != "" {
+		return errors.New("custody-input-contract")
 	}
 	// 4. Render and write atomically.
 	body, err := cask.Render(m)
