@@ -325,6 +325,34 @@ func TestBindingProcessExitObservationIsFresh(t *testing.T) {
 	}
 }
 
+// A candidate reaped between the guard's two exit probes is gone, not
+// unknown: once signal 0 has seen the PID, pidfd_open may find no such process
+// (ESRCH), and that is exit proof. Limits: the witness reaps its own child; if
+// the kernel reuses the PID before the probe, that trial is retried, never
+// counted. The live-process and invalid-PID negatives stay in
+// TestBindingProcessExitObservationIsFresh.
+func TestBindingProcessReapedCandidateIsGone(t *testing.T) {
+	for trial := 0; trial < 5; trial++ {
+		_, child := bindingLinuxChild(t, false)
+		pid := child.Process.Pid
+		if err := child.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = child.Wait() // reaped: the PID no longer names any process
+		if bindingCandidateExited(pid) {
+			if !processGone(pid) {
+				continue // reused by an unrelated process after the probe
+			}
+			return
+		}
+		if processGone(pid) {
+			t.Fatalf("reaped candidate %d (no such process) gave no exit proof", pid)
+		}
+		// The PID was reused before the probe: a live process, rightly refused.
+	}
+	t.Skip("PID reused on every trial; reaped-candidate witness not observed")
+}
+
 func bindingLinuxChild(t *testing.T, unreadable bool) (string, *exec.Cmd) {
 	t.Helper()
 	dir := t.TempDir()
