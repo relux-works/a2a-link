@@ -51,11 +51,42 @@ func copyRelease(t *testing.T, source string) voice.Config {
 	return c
 }
 
-func runNativeWorker(ctx context.Context, worker, base, output string, env []string) error {
-	cmd := exec.CommandContext(ctx, worker, voice.ModelDir(base), output)
-	cmd.Env = append([]string(nil), env...)
+func runNativeWorker(ctx context.Context, worker, modelDir, output string, env []string) error {
+	cmd := exec.CommandContext(ctx, worker, modelDir, output)
+	cmd.Env = make([]string, len(env))
+	copy(cmd.Env, env)
 	cmd.Stdin = strings.NewReader("Проверка")
 	return cmd.Run()
+}
+
+func assertNativeWorkerSuccess(t *testing.T, ctx context.Context, worker, modelDir, output string, env []string) {
+	t.Helper()
+	childCtx, stop := context.WithTimeout(ctx, 30*time.Second)
+	err := runNativeWorker(childCtx, worker, modelDir, output, env)
+	deadlineErr := childCtx.Err()
+	stop()
+	if err != nil || deadlineErr != nil {
+		t.Fatalf("intact native worker failed: err=%v deadline=%v", err, deadlineErr)
+	}
+	st, err := os.Stat(out)
+	if err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+		t.Fatalf("intact native worker produced no audio: stat=%v err=%v", st, err)
+	}
+}
+
+func assertNativeWorkerRefused(t *testing.T, ctx context.Context, worker, modelDir, output string, env []string) {
+	t.Helper()
+	childCtx, stop := context.WithTimeout(ctx, 30*time.Second)
+	err := runNativeWorker(childCtx, worker, modelDir, output, env)
+	deadlineErr := childCtx.Err()
+	stop()
+	var exitErr *exec.ExitError
+	if deadlineErr != nil || !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("native worker refusal: err=%v deadline=%v", err, deadlineErr)
+	}
+	if _, err := os.Lstat(out); !os.IsNotExist(err) {
+		t.Fatalf("refused native worker wrote output: %v", err)
+	}
 }
 
 // A real signed release synthesizes and encodes after relocation with an empty
@@ -75,6 +106,15 @@ func TestNativeReleaseRelocationAndTampering(t *testing.T) {
 		t.Fatal(err)
 	}
 	workerEnv := os.Environ()
+	t.Run("config-root-regression", func(t *testing.T) {
+		c := copyRelease(t, source)
+		out := filepath.Join(t.TempDir(), "native.wav")
+		assertNativeWorkerSuccess(t, ctx, c.Worker, voice.ModelDir(base), out, workerEnv)
+		if err := os.Remove(out); err != nil {
+			t.Fatal(err)
+		}
+		assertNativeWorkerRefused(t, ctx, c.Worker, base, out, workerEnv)
+	})
 	t.Run("relocated", func(t *testing.T) {
 		c := copyRelease(t, source)
 		if _, err := voice.VerifyWorker(ctx, c); err != nil {
@@ -119,67 +159,54 @@ func TestNativeReleaseRelocationAndTampering(t *testing.T) {
 		}
 		t.Logf("relocated release; GOMODCACHE empty; duration_ms=%d bytes=%d ffprobe=%s", a.DurationMS, len(a.OGG), bytes.TrimSpace(b))
 	})
-	t.Run("direct-worker-positive-control", func(t *testing.T) {
-		c := copyRelease(t, source)
-		childCtx, stop := context.WithTimeout(ctx, 30*time.Second)
-		defer stop()
-		out := filepath.Join(t.TempDir(), "native.wav")
-		err := runNativeWorker(childCtx, c.Worker, base, out, workerEnv)
-		if err != nil || childCtx.Err() != nil {
-			t.Fatalf("intact native worker failed: err=%v deadline=%v", err, childCtx.Err())
-		}
-		st, err := os.Stat(out)
-		if err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
-			t.Fatalf("intact native worker produced no audio: stat=%v err=%v", st, err)
-		}
-	})
 	for _, name := range voice.ReleaseFiles()[1:] {
-		for _, variant := range []string{"missing", "one-byte-changed"} {
-			t.Run(filepath.Base(name)+"/"+variant, func(t *testing.T) {
-				c := copyRelease(t, source)
-				lib := filepath.Join(filepath.Dir(c.Worker), name)
-				if variant == "missing" {
-					if err := os.Remove(lib); err != nil {
+		t.Run(filepath.Base(name), func(t *testing.T) {
+			for _, variant := range []string{"missing", "one-byte-changed"} {
+				t.Run(variant, func(t *testing.T) {
+					c := copyRelease(t, source)
+					out := filepath.Join(t.TempDir(), "native.wav")
+					t.Run("intact-direct-worker", func(t *testing.T) {
+						assertNativeWorkerSuccess(t, ctx, c.Worker, voice.ModelDir(base), out, workerEnv)
+					})
+					if err := os.Remove(out); err != nil {
 						t.Fatal(err)
 					}
-				} else {
-					f, err := macho.Open(lib)
-					if err != nil {
-						t.Fatal(err)
-					}
-					section := f.Section("__text")
-					if section == nil {
+					lib := filepath.Join(filepath.Dir(c.Worker), name)
+					if variant == "missing" {
+						if err := os.Remove(lib); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						f, err := macho.Open(lib)
+						if err != nil {
+							t.Fatal(err)
+						}
+						section := f.Section("__text")
+						if section == nil {
+							f.Close()
+							t.Fatal("native code section missing")
+						}
+						offset := int(section.Offset)
 						f.Close()
-						t.Fatal("native code section missing")
+						b, err := os.ReadFile(lib)
+						if err != nil {
+							t.Fatal(err)
+						}
+						b[offset] ^= 1
+						if err := os.WriteFile(lib, b, 0600); err != nil {
+							t.Fatal(err)
+						}
 					}
-					offset := int(section.Offset)
-					f.Close()
-					b, err := os.ReadFile(lib)
-					if err != nil {
-						t.Fatal(err)
+					if _, err := voice.VerifyWorker(ctx, c); err == nil || err.Error() != "voice helper unavailable or integrity check failed" {
+						t.Fatalf("parent integrity refusal: %v", err)
 					}
-					b[offset] ^= 1
-					if err := os.WriteFile(lib, b, 0600); err != nil {
-						t.Fatal(err)
+					if _, err := (voice.LocalRenderer{}).Render(ctx, base, c, "Проверка"); err == nil || err.Error() != "voice synthesis failed: executable resolution or spawn refused" {
+						t.Fatalf("parent render refusal: %v", err)
 					}
-				}
-				if _, err := voice.VerifyWorker(ctx, c); err == nil || err.Error() != "voice helper unavailable or integrity check failed" {
-					t.Fatalf("parent integrity refusal: %v", err)
-				}
-				if _, err := (voice.LocalRenderer{}).Render(ctx, base, c, "Проверка"); err == nil || err.Error() != "voice synthesis failed: executable resolution or spawn refused" {
-					t.Fatalf("parent render refusal: %v", err)
-				}
-				childCtx, stop := context.WithTimeout(ctx, 30*time.Second)
-				out := filepath.Join(t.TempDir(), "native.wav")
-				err := runNativeWorker(childCtx, c.Worker, base, out, workerEnv)
-				deadlineErr := childCtx.Err()
-				stop()
-				// Native diagnostics are discarded, including on loader failure.
-				var exitErr *exec.ExitError
-				if deadlineErr != nil || !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-					t.Fatalf("native damaged release refusal: err=%v deadline=%v", err, deadlineErr)
-				}
-			})
-		}
+					// Native diagnostics are discarded, including on loader failure.
+					assertNativeWorkerRefused(t, ctx, c.Worker, voice.ModelDir(base), out, workerEnv)
+				})
+			}
+		})
 	}
 }

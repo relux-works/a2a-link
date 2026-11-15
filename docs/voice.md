@@ -280,8 +280,11 @@ A2A_VOICE_IT=1 A2A_VOICE_IT_BASE=/absolute/isolated/config \
  A2A_VOICE_IT_EXECUTABLE="$release/a2a-voice-worker" \
  A2A_VOICE_IT_WORKER_SHA256="$worker_sha" \
  A2A_VOICE_IT_MANIFEST_SHA256="$manifest_sha" \
- go test -tags sherpa ./internal/voice -run '^TestVoiceReal$' -v
+ go test -tags sherpa ./internal/voice -run '^(TestDocumentedVoiceWitnessConfigValidates|TestVoiceReal)$' -v
 # Add A2A_VOICE_IT_LONG=1 for the actual long/capped synthesis witness.
+# Separate release relocation and native missing/one-byte-tamper witness:
+A2A_VOICE_RELEASE_DIR="$release" A2A_VOICE_IT_BASE=/absolute/isolated/config \
+ go test ./internal/voicerelease -run '^TestNativeReleaseRelocationAndTampering$' -count=1 -v
 # For #185, the authorized Mac operator runs this existing witness twice on
 # the exact candidate: separately prepared short and long absolute bases with
 # original DataDir lengths <257 and >=257 bytes, and A2A_VOICE_IT_LONG=1 in both.

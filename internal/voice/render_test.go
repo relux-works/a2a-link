@@ -181,6 +181,44 @@ func TestCapPCMAndWaveform(t *testing.T) {
 	}
 }
 
+func TestDocumentedVoiceWitnessConfigValidates(t *testing.T) {
+	c := Config{
+		Enabled: true, MaxSeconds: 180,
+		Worker:         filepath.Join("/verified/release", WorkerName),
+		WorkerSHA256:   strings.Repeat("a", 64),
+		ManifestSHA256: strings.Repeat("b", 64),
+	}
+	actualWorker, hasWorker := os.LookupEnv("A2A_VOICE_IT_EXECUTABLE")
+	actualWorkerSHA, hasWorkerSHA := os.LookupEnv("A2A_VOICE_IT_WORKER_SHA256")
+	actualManifestSHA, hasManifestSHA := os.LookupEnv("A2A_VOICE_IT_MANIFEST_SHA256")
+	if hasWorker || hasWorkerSHA || hasManifestSHA {
+		if actualWorker == "" || actualWorkerSHA == "" || actualManifestSHA == "" {
+			t.Fatal("documented native witness path and pins must be supplied together")
+		}
+		c.Worker = actualWorker
+		c.WorkerSHA256 = actualWorkerSHA
+		c.ManifestSHA256 = actualManifestSHA
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("documented native witness config rejected: %v", err)
+	}
+	invalid := []struct {
+		name   string
+		config Config
+	}{
+		{"wrong-worker-name", func() Config { c := c; c.Worker = filepath.Join(filepath.Dir(c.Worker), "a2a-voice"); return c }()},
+		{"malformed-worker-pin", func() Config { c := c; c.WorkerSHA256 = "A" + strings.Repeat("a", 63); return c }()},
+		{"malformed-manifest-pin", func() Config { c := c; c.ManifestSHA256 = "b"; return c }()},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.config.Validate(); err == nil {
+				t.Fatal("invalid documented worker config accepted")
+			}
+		})
+	}
+}
+
 // Gated actual macOS synthesis and Opus encode/decode witness. Uses only the
 // caller's explicit isolated model/config directory and separately built binary;
 // it writes no audio or text logs and never touches Matrix or the shared binary.
