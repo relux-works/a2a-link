@@ -375,7 +375,8 @@ subscriptions, descriptions, or other state keys.
 
 Get performs one exact-key GET rather than reading all room state. Only a
 validated original `404 M_NOT_FOUND` means `ABSENT`; an existing empty event is
-`EMPTY`. Avatar projects `url`; parent projects `via` and `canonical`, preserving
+`EMPTY`. ABSENT describes only that exact state key; it does not prove the room exists.
+Avatar projects `url`; parent projects `via` and `canonical`, preserving
 an omitted canonical field rather than inventing a boolean. Extension fields
 are syntax-checked and discarded. This projection is not a backup of unknown
 fields and must not be used to claim exact restoration of arbitrary prior state.

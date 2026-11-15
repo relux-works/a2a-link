@@ -192,7 +192,7 @@ func cmdRoomProperty(ctx context.Context, a *App, kind string, args []string) er
 		a.printf("%s v1 %s room=%s key=%s outcome=%s acknowledged=%t event_id=%s readback=%s content=%s\n", out.Type, op, strconv.QuoteToASCII(id), strconv.QuoteToASCII(out.StateKey), out.Outcome, out.Acknowledged, strconv.QuoteToASCII(out.EventID), out.Readback, content)
 	}
 	if operationErr != nil {
-		return fmt.Errorf("room %s %s: %s (no automatic retry)", kind, op, out.Outcome)
+		return fmt.Errorf("room %s %s: %s (no automatic retry): %w", kind, op, out.Outcome, operationErr)
 	}
 	return nil
 }

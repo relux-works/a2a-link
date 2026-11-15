@@ -157,6 +157,9 @@ func TestRoomPropertyUsage(t *testing.T) {
 		append(append([]string{}, parent[:len(parent)-2]...), "--canonical", "1"),
 		append(append([]string{}, parent[:len(parent)-2]...), "--canonical", ""),
 		parent[:len(parent)-2],
+		append(append([]string{}, parent[:10]...), "--canonical", "false"), // missing via
+		append(append([]string{}, parent[:10]...), "--via", "https://foreign.invalid", "--canonical", "false"),
+		{"room", "parent", "set", "!target", "--parent", "!target", "--expect-child-id", "!target", "--expect-parent-id", "!target", "--via", "foreign.invalid", "--canonical", "false"},
 		{"room", "avatar", "get", "!target", "--state-key", "other"},
 		{"room", "parent", "get", "!target"},
 	}

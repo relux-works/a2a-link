@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"unicode/utf8"
@@ -199,7 +200,7 @@ func (c *Client) writeProperty(ctx context.Context, room, typ, key string, conte
 		if originalCode(err, 403, "M_FORBIDDEN") || originalCode(err, 401, "M_UNKNOWN_TOKEN", "M_MISSING_TOKEN") {
 			out.Outcome = "REFUSED"
 		}
-		return out, errors.New("matrix: property write " + out.Outcome)
+		return out, fmt.Errorf("matrix: property write %s: %w", out.Outcome, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
@@ -226,7 +227,7 @@ func (c *Client) writeProperty(ctx context.Context, room, typ, key string, conte
 	}
 	if err != nil {
 		out.Readback = "unavailable"
-		return out, errors.New("matrix: acknowledged property readback unavailable")
+		return out, fmt.Errorf("matrix: acknowledged property readback unavailable: %w", err)
 	}
 	if !present {
 		out.Readback = "absent"
