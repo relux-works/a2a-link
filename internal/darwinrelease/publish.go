@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"

@@ -7,11 +7,17 @@ mkdir -p "$T/fixture"
 go test -p 1 -parallel 2 -c -o "$T/caskbrew.test" ./internal/caskbrew
 (cd internal/caskbrew && A2A_BREW_FIXTURE_DIR="$T/fixture" "$T/caskbrew.test" -test.run '^TestWriteBrewEvaluationFixture$' -test.v)
 export HOME="$T/home" HOMEBREW_CACHE="$T/cache" HOMEBREW_LOGS="$T/logs" HOMEBREW_TEMP="$T/tmp"
-export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1
+export HOMEBREW_NO_INSTALL_FROM_API=1 HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1
 mkdir -p "$HOME" "$HOMEBREW_CACHE" "$HOMEBREW_LOGS" "$HOMEBREW_TEMP"
 git clone --quiet --depth 1 --branch 7.0.13 https://github.com/Homebrew/brew "$T/brew"
 test "$(git -C "$T/brew" rev-parse HEAD)" = bc63375ac3a4d6debb1ceb441ae6e22854f0909a
 BREW="$T/brew/bin/brew"
+test "$(cat "$T/brew/Library/Homebrew/vendor/portable-ruby-version")" = 4.0.9
+if [ "$(uname -s)" = Darwin ]; then
+  grep -Fx 'ruby_SHA=43ff285a82f48c84a06d0676a3800815a19d290d32e44182ddd7a6e95478e18e' "$T/brew/Library/Homebrew/vendor/portable-ruby-arm64-darwin"
+else
+  grep -Fx 'ruby_SHA=20d7b22eba004e0518932ce7f8a271c16b1a9da91b81f696c735d14d817a2c07' "$T/brew/Library/Homebrew/vendor/portable-ruby-x86_64-linux"
+fi
 "$BREW" --version
 "$BREW" tap-new --no-git relux-works/assembly-controls
 tap=$("$BREW" --repository relux-works/assembly-controls)
@@ -43,6 +49,6 @@ PY
     binary-target|binary-source) export A2A_BREW_EXPECT_REFUSAL=brew-effective-binary-target;;
     unknown-artifact) export A2A_BREW_EXPECT_REFUSAL=brew-effective-artifacts;;
   esac
-  "$T/caskbrew.test" -test.run '^TestRealBrewEvaluation$' -test.v > "$T/result-$plant.log" 2>&1
+  if ! "$T/caskbrew.test" -test.run '^TestRealBrewEvaluation$' -test.v > "$T/result-$plant.log" 2>&1; then cat "$T/result-$plant.log"; exit 1; fi
   cat "$T/result-$plant.log"
 done
