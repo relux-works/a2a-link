@@ -52,7 +52,7 @@ func TestSharedWorkflowSecurityContract(t *testing.T) {
 	valid := string(raw)
 	for _, tc := range []struct{ name, old, new, want string }{
 		{"valid", "", "", ""},
-		{"dispatch", "on:\n", "on:\n  workflow_dispatch:\n", "workflow-tag-only"},
+		{"dispatch", "\non:\n", "\non:\n  workflow_dispatch:\n", "workflow-tag-only"},
 		{"cancel", "cancel-in-progress: false", "cancel-in-progress: true", "workflow-concurrency"},
 		{"native-not-ready", "needs: [admission, darwin-producer]", "needs: admission", "workflow-producer-order"},
 		{"assembly-before-linux", "needs: [admission, darwin-producer, linux-producer]", "needs: [admission, darwin-producer]", "workflow-assembly-order"},
