@@ -122,10 +122,10 @@ func TestVoiceStatusReadOnly(t *testing.T) {
 					if err := json.Unmarshal([]byte(r.stdout), &status); err != nil {
 						t.Fatal(err)
 					}
-					if status.Config != tc.want || status.Model != "present_unverified" || status.Encoder != "found_unverified" || status.Synthesis != "not_checked" || status.LastAttempt != "not_recorded" || status.MaxSeconds != 180 {
+					if status.Config != tc.want || status.Native != "unavailable" || status.Model != "present_unverified" || status.Encoder != "found_unverified" || status.Synthesis != "not_checked" || status.LastAttempt != "not_recorded" || status.MaxSeconds != 180 {
 						t.Fatalf("status=%+v", status)
 					}
-				} else if !strings.Contains(r.stdout, "config="+tc.want+" ") || !strings.Contains(r.stdout, "synthesis=not_checked last_attempt=not_recorded") {
+				} else if !strings.Contains(r.stdout, "config="+tc.want+" ") || !strings.Contains(r.stdout, "native=unavailable") || !strings.Contains(r.stdout, "synthesis=not_checked last_attempt=not_recorded") {
 					t.Fatalf("status=%q", r.stdout)
 				}
 			}
@@ -149,6 +149,31 @@ func TestVoiceStatusReadOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(base); !os.IsNotExist(err) {
 		t.Fatal("status created config root")
+	}
+}
+
+func TestVoiceStatusDoesNotRunConfiguredHelper(t *testing.T) {
+	base := t.TempDir()
+	workerDir := t.TempDir()
+	worker := filepath.Join(workerDir, voice.WorkerName)
+	marker := filepath.Join(workerDir, "executed")
+	if err := os.WriteFile(worker, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	c := voice.Config{Enabled: true, MaxSeconds: voice.MaxSeconds, Worker: worker, WorkerSHA256: strings.Repeat("a", 64), ManifestSHA256: strings.Repeat("b", 64)}
+	if err := voice.Save(base, c); err != nil {
+		t.Fatal(err)
+	}
+	r := runVoiceStatus(t, base, "alice", "voice", "status", "--json").ok(t)
+	var status voice.Status
+	if err := json.Unmarshal([]byte(r.stdout), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Config != "enabled" || status.Native != "unavailable" || strings.Contains(r.stdout, worker) {
+		t.Fatalf("status inspected helper metadata or exposed a path: %+v", status)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("status executed configured helper")
 	}
 }
 
