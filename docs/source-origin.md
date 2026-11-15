@@ -174,14 +174,30 @@ For this producer's write-confined run, each command is prefixed with
 inside this wrapper before its `go ...` arguments:
 
 ```sh
-bwrap --ro-bind / / --dev /dev \
+bwrap --unshare-pid --die-with-parent --tmpfs / \
+  --ro-bind /usr /usr --ro-bind /etc /etc \
+  --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
+  --ro-bind /bin /bin --ro-bind /sbin /sbin --proc /proc --dev /dev \
+  --dir /home/agent/Werkstatt \
   --bind /home/agent/Werkstatt/keeper-p17a-dev /home/agent/Werkstatt/keeper-p17a-dev \
   --bind /home/agent/Werkstatt/keeper-p17a-dev/.goenv/tmp /tmp \
-  --setenv TMPDIR /tmp --setenv GOMAXPROCS 4 -- go test ./... -race
+  --chdir /home/agent/Werkstatt/keeper-p17a-dev/a2a-swarm \
+  --setenv TMPDIR /tmp --setenv GOTMPDIR /tmp --setenv GOMAXPROCS 4 -- \
+  go test ./... -race -timeout 60m -exec 'env -u GOTMPDIR'
 ```
 
 This keeps existing absolute `/tmp` fixtures physically within the authorized
-task root while preserving short Unix socket paths. No shared service is
+task root while preserving short Unix socket paths. The virtual root/ancestors
+are owned by the test user (a read-only bind of the host root would map UID 0
+to nobody and fail ownership controls). The private PID namespace keeps process
+scanners within this run. The task root and `.goenv` are made 0755; no host
+ancestor outside the task root is chmodded. Go 1.26's testing.TempDir gives
+GOTMPDIR priority over TMPDIR; `-exec 'env -u GOTMPDIR'` removes it only for test
+binaries, restoring the fixtures' ability to choose their own TMPDIR and
+avoiding cross-mount rename failures. Compiler scratch stays in the mapped
+private temp directory. The 60-minute budget matches repository CI. A bounded
+control run first confirmed the existing ownership, process-image, telemetry
+and clean-source archive tests pass in this environment. No shared service is
 activated. Same-UID fixtures with synthetic wrong-owner metadata and a fake
 generation authority do not qualify distinct-UID deployment, protected pins,
 FD theft exclusion, actual Matrix/rich-checker signatures, Keymaker final
