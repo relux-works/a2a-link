@@ -147,7 +147,7 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 					return nil, fmt.Errorf("%w%s", err, lost)
 				}
 				for i, it := range shown {
-					done[it.id] = summaryDelivered(it, records[i], *width, i < len(inline) && inline[i])
+					done[it.id] = briefDelivered(it, i < len(inline) && inline[i])
 				}
 			} else if len(shown) == 0 {
 				out = "no new peer events\n"

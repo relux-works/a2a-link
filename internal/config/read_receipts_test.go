@@ -132,8 +132,8 @@ func TestReadReceiptHiddenEarlierAndRoomsIndependent(t *testing.T) {
 	if got := r.Target(mb, "!s"); got != "$s1" {
 		t.Fatalf("other room: target %q, want $s1", got)
 	}
-	if got := r.Targets(mb); len(got) != 1 || got["!s"] != "$s1" {
-		t.Fatalf("targets %v", got)
+	if got := r.Claim(mb, 0, 1); len(got) != 1 || got["!s"] != "$s1" {
+		t.Fatalf("claimed %v", got)
 	}
 }
 
@@ -142,7 +142,7 @@ func TestReadReceiptHiddenEarlierAndRoomsIndependent(t *testing.T) {
 func TestReadReceiptAcceptedAndFailure(t *testing.T) {
 	_, mb, r := receiptWorld(t, "$1", "$2", "$3")
 	deliver(t, mb, r, []string{"$1", "$2"}, "$1", "$2")
-	r.Failure("!r")
+	r.Failure("!r", "$2")
 	if got := r.Target(mb, "!r"); got != "$2" || r.Rooms["!r"].Failed != 1 {
 		t.Fatalf("after failure: target %q failed %d", got, r.Rooms["!r"].Failed)
 	}
@@ -238,5 +238,76 @@ func TestReadReceiptsFile(t *testing.T) {
 	}
 	if _, err := LoadReadReceipts(p, "a"); err == nil {
 		t.Fatal("0644 ledger accepted")
+	}
+}
+
+// Proves the durable gap model across mailbox receipt, compaction and restart:
+// A=full, B=truncated, C=full, D=truncated, E=full gives target A; the full
+// read of B makes it exactly C (never E: D still holds), the full read of D
+// makes it E. Compaction keeps only received ids, without body, room or
+// disposition; the ledger alone carries the disposition.
+func TestReadReceiptDurableGapModel(t *testing.T) {
+	p, mb, r := receiptWorld(t, "$A", "$B", "$C", "$D", "$E")
+	deliver(t, mb, r, []string{"$A", "$B", "$C", "$D", "$E"}, "$A", "$C", "$E")
+	if err := SaveReadReceipts(p, "a", r); err != nil {
+		t.Fatal(err)
+	}
+	if err := mb.compact(); err != nil {
+		t.Fatal(err)
+	}
+	// Restart: both files are read back from disk.
+	mb, err := OpenMailbox(p, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mb.live) != 0 || !mb.Received("$B") || !mb.Received("$D") {
+		t.Fatalf("after compaction: live %d, B %v, D %v", len(mb.live), mb.Received("$B"), mb.Received("$D"))
+	}
+	if r, err = LoadReadReceipts(p, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Target(mb, "!r"); got != "$A" {
+		t.Fatalf("initial target %q, want $A", got)
+	}
+	r.NoteFullPrint("!r", []string{"$B"})
+	if got := r.Target(mb, "!r"); got != "$C" {
+		t.Fatalf("after B: target %q, want exactly $C", got)
+	}
+	r.NoteFullPrint("!r", []string{"$D"})
+	if got := r.Target(mb, "!r"); got != "$E" {
+		t.Fatalf("after D: target %q, want $E", got)
+	}
+}
+
+// Proves a competing sender is excluded: while one command holds a live claim
+// on a room, another gets no target there (so it cannot send an older event
+// after a newer one); the claim expires, and an accept or failure releases it.
+func TestReadReceiptClaimExcludesCompetingSender(t *testing.T) {
+	_, mb, r := receiptWorld(t, "$1", "$2")
+	deliver(t, mb, r, []string{"$1"}, "$1")
+	if got := r.Claim(mb, 100, 200); got["!r"] != "$1" {
+		t.Fatalf("first claim %v", got)
+	}
+	deliver(t, mb, r, []string{"$2"}, "$2")
+	if got := r.Claim(mb, 150, 300); len(got) != 0 {
+		t.Fatalf("competing claim during a live claim: %v", got)
+	}
+	r.Accepted("!r", "$1")
+	if got := r.Claim(mb, 150, 300); got["!r"] != "$2" {
+		t.Fatalf("after accept: %v", got)
+	}
+	r.Failure("!r", "$2")
+	if rr := r.Rooms["!r"]; rr.Claim != "" || rr.Sent != "$1" {
+		t.Fatalf("failure did not release: %+v", rr)
+	}
+	if got := r.Claim(mb, 400, 500); got["!r"] != "$2" {
+		t.Fatalf("retry claim: %v", got)
+	}
+	if got := r.Claim(mb, 501, 600); got["!r"] != "$2" {
+		t.Fatalf("expired claim not reclaimable: %v", got)
+	}
+	r.Release("!r", "$other") // a stale release never drops a newer claim
+	if r.Rooms["!r"].Claim != "$2" {
+		t.Fatal("stale release dropped the live claim")
 	}
 }

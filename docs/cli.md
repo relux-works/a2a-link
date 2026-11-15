@@ -1773,7 +1773,7 @@ frames have no expiry contract: even an old frame can be suggested. Selection
 does not test whether that frame contains the requested event; an explicit
 `--from` read still requires event membership before printing a body. It never repairs State or automatically displays a different batch.
 Malformed, non-0600, symlinked and other identities' frames are excluded.
-This is a local read: it never syncs, fetches an event, or receipts mail; it may complete a Seen by ledger mark (below), whose receipt the next inbox sends.
+This is a local read: it never syncs, fetches an event, or receipts mail.
 Unknown events, missing frames, malformed/incomplete frames, duplicate event
 ids, files over 16 MiB, non-regular files, symlinks and modes other than `0600`
 are refused without printing a body. File opening requires Unix no-follow
@@ -1787,20 +1787,25 @@ After `a2a inbox` the agent's account sends a public, unthreaded Matrix
 goes on the latest event up to which every earlier mailbox entry of that room
 reached the session **in full**:
 
-- delivered: an untruncated frame or `--json` body; a `--summary` excerpt
-  that holds the whole body (not cut by `--width`); a `--brief` inline body;
-  and, completing an entry that was cut, a later full print of that event by
+- delivered: an untruncated frame or `--json` body (also with `--out`
+  without `--summary`); a `--brief` inline body; and, completing an entry
+  that was cut, a later full print of exactly that event by
   `a2a read <room> --event <$event>` (the path the truncation marker names),
-  any other `a2a read` that prints it, or `a2a inbox show`;
-- not delivered: a truncated print, a cut excerpt, `a2a ack`, a `wait` or
-  `watch` line, a hook doorbell, a sync, and a gap record (a gap holds the
-  room's receipt where it is).
+  counted only after the whole output was written and flushed;
+- not delivered: a truncated print, any `--summary` excerpt (it is folded to
+  one line, so even an uncut excerpt is not the full body), `a2a inbox show`,
+  `a2a read` without `--event`, `a2a ack`, a `wait` or `watch` line, a hook
+  doorbell, a sync, and a gap record (a gap holds the room's receipt where it
+  is).
 
 An undelivered entry holds the receipt of its room just before it until it is
 completed; an entry received out of mailbox order is no target until every
 earlier entry of its room is received and delivered. Rooms are independent.
-Receipts never move backwards. Entries received before the ledger existed are
-the baseline and are not judged.
+Completing one entry never jumps over another undelivered one. Receipts never
+move backwards: a command claims a room for the receipt it is sending, and a
+competing command skips that room until the claim is released or expires.
+Entries received before the ledger existed are the baseline and are not
+judged.
 
 The ledger (`state/<name>.read-receipts.json`, mode 0600) is written under the
 delivery lock before the mailbox receipt. The receipt itself is posted after

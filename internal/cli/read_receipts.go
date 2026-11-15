@@ -2,9 +2,10 @@ package cli
 
 import (
 	"context"
+	"io"
+	"slices"
 	"sort"
 	"time"
-	"unicode/utf8"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 )
@@ -34,13 +35,11 @@ func fullyPrinted(it waitItem, server string) bool {
 	return cut == 0
 }
 
-// summaryDelivered reports whether a summary line, or the brief's inline
-// body, carried the complete body of record r.
-func summaryDelivered(it waitItem, r EventRecord, width int, inline bool) bool {
-	if it.ev == nil || it.gap != nil {
-		return false
-	}
-	return inline || utf8.RuneCountInString(sanitizeLine(r.Body)) <= width
+// briefDelivered reports whether the brief inlined the complete body of it.
+// A summary excerpt never counts: it is folded to one line before --width
+// applies, so even an uncut excerpt is not the full body.
+func briefDelivered(it waitItem, inline bool) bool {
+	return inline && it.ev != nil && it.gap == nil
 }
 
 // noteDelivered records, inside the delivery transaction and BEFORE the
@@ -58,8 +57,9 @@ func (s *session) noteDelivered(mb *config.Mailbox, entries []config.MailEntry, 
 	_ = config.SaveReadReceipts(s.paths, s.name, r)
 }
 
-// noteFullPrint completes ledger marks for events an explicit read printed in
-// full. It takes the lock only when room has a mark to complete.
+// noteFullPrint completes ledger marks for events `a2a read --event` printed
+// in full, after a successful write and flush. Only marks already in the
+// ledger change, each on its own. It takes the lock only when room has marks.
 func noteFullPrint(ctx context.Context, paths config.Paths, name, room string, ids []string) bool {
 	if len(ids) == 0 {
 		return false
@@ -89,9 +89,13 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, readReceiptBudget)
 	defer cancel()
 	var want map[string]string
+	now := s.app.Now()
+	// The claim outlives this command's attempts, so a competing command never
+	// sends an older target for the same room meanwhile.
+	until := now.Add(readReceiptBudget + readReceiptCallMax).UnixMilli()
 	if err := config.UpdateReadReceipts(ctx, s.paths, s.name, func(r *config.ReadReceipts, mb *config.Mailbox) (bool, error) {
-		want = r.Targets(mb)
-		return false, nil
+		want = r.Claim(mb, now.UnixMilli(), until)
+		return len(want) > 0, nil
 	}); err != nil || len(want) == 0 {
 		return
 	}
@@ -115,13 +119,52 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 	record, stop := context.WithTimeout(context.WithoutCancel(ctx), readReceiptCallMax)
 	defer stop()
 	_ = config.UpdateReadReceipts(record, s.paths, s.name, func(r *config.ReadReceipts, _ *config.Mailbox) (bool, error) {
+		for room := range want {
+			if !slices.Contains(tried, room) {
+				r.Release(room, want[room])
+			}
+		}
 		for _, room := range tried {
 			if accepted[room] {
 				r.Accepted(room, want[room])
 			} else {
-				r.Failure(room)
+				r.Failure(room, want[room])
 			}
 		}
-		return len(tried) > 0, nil
+		return true, nil
 	})
+}
+
+// trackedWriter remembers the first failed or short write, so a print that
+// did not fully reach the session is never counted as delivery.
+type trackedWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (t *trackedWriter) Write(p []byte) (int, error) {
+	if t.err != nil {
+		return 0, t.err
+	}
+	n, err := t.w.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		t.err = err
+	}
+	return n, err
+}
+
+// flush flushes the underlying writer, if it buffers, and reports any failure.
+func (t *trackedWriter) flush() error {
+	if t.err != nil {
+		return t.err
+	}
+	if f, ok := t.w.(interface{ Flush() error }); ok {
+		if err := f.Flush(); err != nil {
+			t.err = err
+		}
+	}
+	return t.err
 }

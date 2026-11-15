@@ -268,17 +268,7 @@ func cmdInboxShow(a *App, args []string) error {
 		fmt.Fprintf(&b, "--- event 1/1: from=%s room=%q kind=%q id=%q\n", senderText(r.Sender), inboxField(r.Room), inboxField(r.Kind), inboxField(r.EventID))
 		writeInboxBody(&b, r.Body)
 		b.WriteString(inboxEnd + "\n")
-		if err := writeCLIOutput(a.Stdout, a.secrets.Scrub(b.String())); err != nil {
-			return err
-		}
-		// The complete saved body reached the session: a mark inbox left
-		// undelivered is now complete; the next inbox may send its receipt.
-		if paths, err := a.paths(); err == nil {
-			if name, err := a.identity(); err == nil && r.RoomID != "" {
-				noteFullPrint(a.context(), paths, name, r.RoomID, []string{r.EventID})
-			}
-		}
-		return nil
+		return writeCLIOutput(a.Stdout, a.secrets.Scrub(b.String()))
 	}
 	return fmt.Errorf("event not found in saved inbox frame")
 }

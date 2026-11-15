@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,25 +113,99 @@ func TestSeenByAckDoorbellAndJSONTruncation(t *testing.T) {
 	e.wantReceipts(id1, id3, id4)
 }
 
-// Proves a saved inbox counts only what stdout carried in full: a summary
-// excerpt cut by --width is not delivery, an excerpt holding the whole body
-// is; `a2a inbox show` of the saved full body completes the cut entry without
-// HTTP, and the next inbox sends its receipt.
-func TestSeenBySummaryWidthAndInboxShow(t *testing.T) {
+// Proves a saved inbox counts only full bodies on stdout: a --summary excerpt
+// is never delivery, not even one holding the whole (folded) body, and
+// `a2a inbox show` does not complete it; a --brief inline body is delivery.
+func TestSeenBySummaryIsNotDeliveryBriefInlineIs(t *testing.T) {
 	e, room := seenWorld(t)
 	id1 := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "hi"))
 	e.as("alice", "inbox", "--out", filepath.Join(outputTestDir(t), "f1"), "--summary", "--width", "2000").ok(t)
-	e.wantReceipts(id1)
-	id2 := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", strings.Repeat("wide ", 80)))
-	e.as("alice", "inbox", "--out", filepath.Join(outputTestDir(t), "f2"), "--summary", "--width", "20").ok(t)
-	e.wantReceipts(id1)
-	requests := len(e.hs.urls())
-	e.as("alice", "inbox", "show", id2).ok(t)
-	if len(e.hs.urls()) != requests {
-		t.Fatal("inbox show performed HTTP")
+	e.wantReceipts()
+	if !e.received("alice", id1) {
+		t.Fatal("mail was not received")
 	}
+	e.as("alice", "inbox", "show", id1).ok(t)
 	e.as("alice", "inbox").ok(t)
+	e.wantReceipts()
+	e.as("alice", "read", "proj", "--event", id1).ok(t)
+	e.wantReceipts(id1)
+	id2 := e.hs.inject(room, "@bob:test.local", toMsg("bob", "request", "please review"))
+	e.as("alice", "inbox", "--brief").ok(t)
 	e.wantReceipts(id1, id2)
+}
+
+// Proves the durable gap model end to end: A=full, B=truncated, C=full,
+// D=truncated, E=full in one inbox gives a receipt on A; the full read of B
+// moves it to exactly C, the full read of D to E. Each command is a fresh
+// process over the same files (restart).
+func TestSeenByDurableGapModel(t *testing.T) {
+	e, room := seenWorld(t)
+	long := strings.Repeat("long ", 500)
+	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "B "+long))
+	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	d := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D "+long))
+	ev := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "E"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	e.as("alice", "read", "proj", "--event", b).ok(t)
+	e.wantReceipts(a, c)
+	e.as("alice", "read", "proj", "--event", d).ok(t)
+	e.wantReceipts(a, c, ev)
+}
+
+// Proves a full read completes only through --event and only after a full
+// write: a failed write (a closed pipe) and a --last listing complete
+// nothing, and the same --event read with a working stdout does.
+func TestSeenByReadCompletesOnlyAfterFullEventWrite(t *testing.T) {
+	e, room := seenWorld(t)
+	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", strings.Repeat("long ", 500)))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	e.configure = func(a *App) { a.Stdout = failWriter{} }
+	e.as("alice", "read", "proj", "--event", b)
+	e.configure = nil
+	e.wantReceipts(a)
+	e.as("alice", "read", "proj", "--last", "5").ok(t)
+	e.wantReceipts(a)
+	if rr := e.ledgerRoom("alice", room); len(rr.Log) != 1 || rr.Log[0].ID != b || rr.Log[0].Done {
+		t.Fatalf("ledger %+v", rr)
+	}
+	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	e.as("alice", "read", "proj", "--event", b).ok(t)
+	e.wantReceipts(a, c)
+}
+
+// Proves a competing sender's live claim on a room stops this command from
+// sending there (no older receipt can overtake a newer one), and that the
+// next command sends once the claim has expired.
+func TestSeenByCompetingSenderClaim(t *testing.T) {
+	e, room := seenWorld(t)
+	id := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "mail"))
+	e.as("alice", "inbox", "--limit", "1").ok(t)
+	e.wantReceipts(id)
+	id2 := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "more"))
+	claim := func(until int64) {
+		t.Helper()
+		if err := config.UpdateReadReceipts(context.Background(), e.paths(), "alice", func(r *config.ReadReceipts, _ *config.Mailbox) (bool, error) {
+			r.Rooms[room].Claim, r.Rooms[room].ClaimUntil = "$competing", until
+			return true, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim(time.Now().Add(time.Hour).UnixMilli())
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(id)
+	if !e.received("alice", id2) {
+		t.Fatal("mail was not received")
+	}
+	claim(1)
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(id, id2)
 }
 
 // Proves failure isolation for a failing endpoint: the inbox still succeeds,

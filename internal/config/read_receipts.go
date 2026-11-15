@@ -63,6 +63,11 @@ type ReadReceiptRoom struct {
 	Frozen bool `json:"frozen,omitempty"`
 	// Failed counts consecutive failed receipt attempts.
 	Failed int `json:"failed,omitempty"`
+	// Claim is the event one command is sending until ClaimUntil (Unix ms);
+	// a competing command skips the room meanwhile, so two senders never race
+	// an older receipt past a newer one.
+	Claim      string `json:"claim,omitempty"`
+	ClaimUntil int64  `json:"claim_until,omitempty"`
 }
 
 // ReadReceipts is the ledger of one identity.
@@ -301,8 +306,9 @@ func (r *ReadReceipts) Target(mb *Mailbox, room string) string {
 	return target
 }
 
-// Targets returns room -> event for every room whose receipt may advance.
-func (r *ReadReceipts) Targets(mb *Mailbox) map[string]string {
+// Claim returns room -> event for every room whose receipt may advance and
+// that no other command is sending, and claims each until (Unix ms).
+func (r *ReadReceipts) Claim(mb *Mailbox, now, until int64) map[string]string {
 	out := map[string]string{}
 	rooms := make([]string, 0, len(r.Rooms))
 	for room := range r.Rooms {
@@ -310,11 +316,23 @@ func (r *ReadReceipts) Targets(mb *Mailbox) map[string]string {
 	}
 	sort.Strings(rooms)
 	for _, room := range rooms {
+		rr := r.Rooms[room]
+		if rr.Claim != "" && rr.ClaimUntil > now {
+			continue
+		}
 		if t := r.Target(mb, room); t != "" {
 			out[room] = t
+			rr.Claim, rr.ClaimUntil = t, until
 		}
 	}
 	return out
+}
+
+// Release ends this command's claim on room for event (a later claim stays).
+func (r *ReadReceipts) Release(room, event string) {
+	if rr := r.Rooms[room]; rr != nil && rr.Claim == event {
+		rr.Claim, rr.ClaimUntil = "", 0
+	}
 }
 
 // Accepted records that the homeserver accepted a receipt for event in room:
@@ -331,11 +349,13 @@ func (r *ReadReceipts) Accepted(room, event string) {
 	rr.Sent = event
 	rr.Log = append([]ReadReceiptMark(nil), rr.Log[i+1:]...)
 	rr.Failed = 0
+	r.Release(room, event)
 }
 
-// Failure records one failed receipt attempt in room.
-func (r *ReadReceipts) Failure(room string) {
+// Failure records one failed attempt to send event in room.
+func (r *ReadReceipts) Failure(room, event string) {
 	if rr := r.Rooms[room]; rr != nil && rr.Failed < 1<<20 {
 		rr.Failed++
 	}
+	r.Release(room, event)
 }
