@@ -92,12 +92,13 @@ No private input or RPC error text is returned in admission decisions.
 
 Both hooks invoke the real grantcheck.New backend. Inbound Live reaches ordinary
 delivery; inbound no_grant/not_yet/expired or proven closure routes to Exchange;
-these states never allow an outbound send. Outbound requires a previously live
+these states never allow an outbound send. Current identity expiry is instead a
+named `identity_expired` refusal in both directions, closed and nonretryable. Outbound requires a previously live
 admitted proof and rechecks it. Scope remains CG1 metadata, not execution authority.
 
 The fork explicitly extends admission's reason vocabulary with CG1's exact codes:
 `live`, `no_grant`, `not_yet`, `expired`, `seal_spent`, `landlord_rotated`,
-`landlord_changed`, `identity_pending`, `grant_pending`, `binding_mismatch`,
+`landlord_changed`, `identity_expired`, `identity_pending`, `grant_pending`, `binding_mismatch`,
 `invalid_presentation`, `oversize`, `invalid_peer`, `verifier_unavailable`,
 `state_unavailable`, `clock_invalid`, `cancelled`, `busy`, `check_failed`.
 Only verifier/state unavailable, clock invalid, cancelled, busy, grant pending

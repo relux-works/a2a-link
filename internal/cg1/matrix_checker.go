@@ -39,7 +39,7 @@ func matrixUnavailable() admission.Decision {
 }
 func matrixDecision(v grantcheck.Verdict, inbound bool) admission.Decision {
 	switch v.Code {
-	case grantcheck.CodeCapacityExceeded, grantcheck.CodeExecutorMismatch, grantcheck.CodeTermsInvalid, grantcheck.CodeTipFuture, grantcheck.CodeIssuanceMismatch, grantcheck.CodeNodeNotSynced, grantcheck.CodeTipStale, grantcheck.CodeTipBelowFloor:
+	case grantcheck.CodeIdentityExpired, grantcheck.CodeVerifierUnavailable, grantcheck.CodeCapacityExceeded, grantcheck.CodeExecutorMismatch, grantcheck.CodeTermsInvalid, grantcheck.CodeTipFuture, grantcheck.CodeIssuanceMismatch, grantcheck.CodeNodeNotSynced, grantcheck.CodeTipStale, grantcheck.CodeTipBelowFloor:
 		return decision(v, inbound)
 	}
 	verdict, reason, retry := v.A2ADecision()
@@ -193,6 +193,7 @@ func (c *matrixChecker) check(parent context.Context, direction, room, id, sende
 	if ctx.Err() != nil || c.closed.Load() {
 		return matrixUnavailable()
 	}
+	ctx, answer := withNodeAnswer(ctx)
 	var verdict grantcheck.Verdict
 	if direction == "in" {
 		verdict = c.core.InboundFrom(ctx, grantcheck.SenderProof{Transport: grantcheck.SwarmEnvelopeV2, Key: signer}, proof)
@@ -202,7 +203,7 @@ func (c *matrixChecker) check(parent context.Context, direction, room, id, sende
 	if ctx.Err() != nil || c.closed.Load() {
 		return matrixUnavailable()
 	}
-	result := matrixDecision(verdict, direction == "in")
+	result := matrixDecision(answer.verdict(verdict), direction == "in")
 	if result.Verdict != admission.Live && result.Verdict != admission.Exchange {
 		return result
 	}

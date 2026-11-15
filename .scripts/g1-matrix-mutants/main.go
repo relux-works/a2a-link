@@ -85,6 +85,7 @@ func main() {
 }
 func run() error {
 	rootFlag := flag.String("root", ".", "repository root")
+	identity := flag.Bool("identity", false, "identity expiry/RPC mapping controls (Core witnesses require explicit Core opt-in)")
 	corePolicy := flag.Bool("core-policy", false, "genuine Core executor/freshness/provisioning controls (requires explicit Core environment)")
 	outFlag := flag.String("out", ".temp/g1-matrix-mutants", "fresh evidence directory under .temp")
 	flag.Parse()
@@ -110,7 +111,13 @@ func run() error {
 	if e = os.MkdirAll(out, 0700); e != nil {
 		return e
 	}
+	if *identity && *corePolicy {
+		return errors.New("choose one control suite")
+	}
 	selected := plants()
+	if *identity {
+		selected = identityPlants()
+	}
 	if *corePolicy {
 		if os.Getenv("CG1_REGTEST") != "1" || os.Getenv("CG1_A2A_BINARY") == "" {
 			return errors.New("core-policy requires explicit Core opt-in and a freshly built CG1_A2A_BINARY")
@@ -175,6 +182,9 @@ func run() error {
 	baselineArgs := []string{"test", "-p", "1", "-parallel", "2", "-count=1", "-json", "-timeout=2m", "./internal/cg1", "./internal/cg1cosign", "./internal/cli", "./internal/daemon", "-run", "^(TestMatrix|TestCoSignature|TestFixture|TestCG1Matrix|TestCG1Cosignature)"}
 	if *corePolicy {
 		baselineArgs = []string{"test", "-p", "1", "-parallel", "2", "-count=1", "-json", "-timeout=2m", "./internal/cg1", "-run", "^TestCoreMatrixPolicy$"}
+	}
+	if *identity {
+		baselineArgs = []string{"test", "-p", "1", "-parallel", "2", "-count=1", "-json", "-timeout=2m", "./internal/cg1", "-run", "^(TestReadNodeRPC.*|TestIdentityExpiredMapping|TestNodeAnswerScope|TestCoreIdentityExpired)$"}
 	}
 	code, _, e := child(root, out, "baseline", baselineArgs)
 	if e != nil || code != 0 {

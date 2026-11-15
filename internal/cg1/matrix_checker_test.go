@@ -256,7 +256,7 @@ func TestMatrixVerdictMapping(t *testing.T) {
 		retry    bool
 	}{
 		{grantcheck.Verdict{Decision: grantcheck.Live, Code: grantcheck.CodeLive}, true, admission.Live, "allowed", false},
-		{grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeVerifierUnavailable}, true, admission.Refused, "dependency_unavailable", true},
+		{grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeVerifierUnavailable, Retryable: true}, true, admission.Refused, "verifier_unavailable", true},
 		{grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeStateUnavailable}, true, admission.Refused, "storage_error", true},
 		{grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.Code("future")}, true, admission.Refused, "policy_invalid", false},
 		{grantcheck.Verdict{Decision: grantcheck.Exchange, Code: grantcheck.CodeNoGrant}, true, admission.Exchange, "exchange", false},

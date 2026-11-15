@@ -52,6 +52,7 @@ func TestReasonMapping(t *testing.T) {
 		{grantcheck.CodeSealSpent, admission.Exchange, admission.Refused, false, true},
 		{grantcheck.CodeLandlordRotated, admission.Exchange, admission.Refused, false, true},
 		{grantcheck.CodeLandlordChanged, admission.Exchange, admission.Refused, false, true},
+		{grantcheck.CodeIdentityExpired, admission.Refused, admission.Refused, false, true},
 	}
 	for _, code := range []grantcheck.Code{grantcheck.CodeIdentityPending, grantcheck.CodeGrantPending, grantcheck.CodeVerifierUnavailable, grantcheck.CodeStateUnavailable, grantcheck.CodeClockInvalid, grantcheck.CodeCancelled, grantcheck.CodeBusy, grantcheck.CodeNodeNotSynced, grantcheck.CodeTipStale, grantcheck.CodeTipBelowFloor} {
 		rows = append(rows, struct {

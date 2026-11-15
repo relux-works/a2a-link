@@ -59,7 +59,8 @@ func (c *checker) Inbound(ctx context.Context, in admission.Inbound) (admission.
 		}
 		proof = &grantcheck.Presentation{GrantID: n.Presentation.GrantID, Bytes: append([]byte(nil), n.Presentation.Bytes...)}
 	}
-	v := c.core.Inbound(ctx, n.Sender, proof)
+	ctx, answer := withNodeAnswer(ctx)
+	v := answer.verdict(c.core.Inbound(ctx, n.Sender, proof))
 	if c.closed.Load() {
 		return deny("check_failed"), nil
 	}
@@ -80,7 +81,8 @@ func (c *checker) Outbound(ctx context.Context, out admission.Outbound) (admissi
 	}
 	ctx, cancel := c.callContext(ctx)
 	defer cancel()
-	v := c.core.Outbound(ctx, out.Nostr.Recipient)
+	ctx, answer := withNodeAnswer(ctx)
+	v := answer.verdict(c.core.Outbound(ctx, out.Nostr.Recipient))
 	if c.closed.Load() {
 		return deny("check_failed"), nil
 	}
@@ -123,6 +125,8 @@ func decision(v grantcheck.Verdict, inbound bool) admission.Decision {
 		if inbound {
 			want = grantcheck.Exchange
 		}
+	case grantcheck.CodeIdentityExpired:
+		closed = true
 	case grantcheck.CodeSealSpent, grantcheck.CodeLandlordRotated, grantcheck.CodeLandlordChanged:
 		closed = true
 		if inbound {

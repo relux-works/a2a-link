@@ -9,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
+	"github.com/relux-works/swarma-chain-lab/experiments/grantcheck"
 	"github.com/relux-works/swarma-chain-lab/experiments/sealwatch"
 	su "github.com/relux-works/swarma-chain-lab/experiments/single-use"
 )
@@ -58,13 +60,51 @@ func (n *readNode) Call(ctx context.Context, method string, args ...any) (json.R
 	}
 	defer res.Body.Close()
 	raw, e = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
-	if e != nil || len(raw) > 8<<20 || res.StatusCode != http.StatusOK {
+	if e != nil || len(raw) > 8<<20 {
 		return nil, errNode
 	}
 	var id int
-	var result, rpcError json.RawMessage
-	if sealwatch.ProjectJSON(raw, map[string]any{"id": &id}, map[string]any{"result": &result, "error": &rpcError}) != nil || id != 1 || len(result) == 0 || string(bytes.TrimSpace(rpcError)) != "null" {
+	var envelope map[string]json.RawMessage
+	e = sealwatch.DecodeJSON(raw, &envelope)
+	result, rpcError := envelope["result"], envelope["error"]
+	// Match the pinned single-use JSON-RPC 1.0 rule before retaining a typed
+	// application answer. HTTP failure alone is never an identity lifecycle fact.
+	if e != nil || len(envelope) != 3 || json.Unmarshal(envelope["id"], &id) != nil || id != 1 || len(result) == 0 || len(rpcError) == 0 {
+		return nil, errNode
+	}
+	if string(bytes.TrimSpace(rpcError)) != "null" {
+		var application su.RPCError
+		if !bytes.Equal(bytes.TrimSpace(result), []byte("null")) || sealwatch.ProjectJSON(rpcError, map[string]any{"code": &application.Code, "message": &application.Message}, nil) != nil {
+			return nil, errNode
+		}
+		// Retain only the exact typed expiry answer for caller classification.
+		if method == "name_show" && application.NameExpired() {
+			if answer, ok := ctx.Value(nodeAnswerKey{}).(*nodeAnswer); ok {
+				answer.identityExpired.Store(true)
+			}
+		}
+		return nil, &application
+	}
+	if res.StatusCode != http.StatusOK {
 		return nil, errNode
 	}
 	return result, nil
+}
+
+// A request-local answer retains a typed RPC refusal across #116's kernel
+// receipt boundary (which otherwise reduces RPC_APPLICATION_ERROR to check_failed).
+// It can refine that refusal only; it never supplies a result or grants admission.
+type nodeAnswerKey struct{}
+type nodeAnswer struct{ identityExpired atomic.Bool }
+
+func withNodeAnswer(ctx context.Context) (context.Context, *nodeAnswer) {
+	answer := new(nodeAnswer)
+	return context.WithValue(ctx, nodeAnswerKey{}, answer), answer
+}
+func (a *nodeAnswer) verdict(v grantcheck.Verdict) grantcheck.Verdict {
+	if a.identityExpired.Load() && v.Decision == grantcheck.Refused && v.Code == grantcheck.CodeCheckFailed && !v.Closed && !v.Retryable {
+		v.Code = grantcheck.CodeIdentityExpired
+		v.Closed = true
+	}
+	return v
 }

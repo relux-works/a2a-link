@@ -39,5 +39,6 @@ func (c *matrixChecker) Provision(parent context.Context, p grantcheck.Presentat
 	if !ok {
 		return deny("check_failed")
 	}
-	return decision(core.Provision(ctx, p), false)
+	ctx, answer := withNodeAnswer(ctx)
+	return decision(answer.verdict(core.Provision(ctx, p)), false)
 }

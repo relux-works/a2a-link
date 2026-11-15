@@ -14,12 +14,15 @@ shared envelope format are unchanged. PR #4 remains independent.
 
 ## Source pins and scope
 
-- Grantcheck #111 and strict-parser commit `e70a35a41dec5948d5452f1f898f4d26977372d7`
-  are contained by the selected snapshot `d01e38f1c9665eccf1164b21680565d339b6f365`.
-  Grantcheck is pinned as `v0.1.2-0.20261115014216-d01e38f1c966`.
+- Grantcheck #116, #111 and strict-parser commit `e70a35a41dec5948d5452f1f898f4d26977372d7`
+  are contained by the selected snapshot `4f7f9ae72ed82a3af647ee881ff5d801dd7dbd8b`.
+  Grantcheck is pinned as `v0.1.2-0.20261115082735-4f7f9ae72ed8`.
   Every selected chain-lab module uses that same commit. Selection is checked
   with `git merge-base --is-ancestor`, never pseudo-version ordering.
-  The executable dependency check rejects the former `3baa201bafb6` selection.
+  The executable dependency check rejects the former `3baa201bafb6` selection
+  and pre-#116 snapshots such as `d01e38f1c966`. Explicit exclusions keep the
+  pre-merge `f1936aa1117a` references from winning Go module selection: that
+  parent shares the merge timestamp and sorts above it, but fails ancestry.
   Five graph-only indirect constraints intentionally keep grant-store,
   model-proxy, signer-service, station-lifecycle and its gatewaybind at this
   same ancestry floor. `go mod tidy` removes those currently unused graph
@@ -438,3 +441,60 @@ seven fixed plants cover executor, header equality, trusted floor, frozen-view
 age A+1, a genuine two-hour-future Core tip, cache preservation on a refused spent
 proof, and durable provisioning audit. An unrelated build/setup failure or a
 skip is never a successful control. The original mode retains its 76 controls.
+
+
+## Current identity expiry and RPC error classification
+
+Either current identity expiring yields `Refused / identity_expired`, nonretryable,
+with grantcheck's closed bit required on both adapters and both directions.
+Cached proof re-checks make a fresh chain observation. This closure describes the
+current identity observation; it does not permanently revoke the grant. A
+same-value `name_update` before expiry renews the identity without invalidating
+the admitted grant. Core does not permit ordinary renewal after expiration.
+
+The session-owned RPC client matches #116's strict JSON-RPC 1.0 envelope rule:
+exactly `id`, `result`, `error`; integer id 1; explicitly null result beside a
+non-null error; a valid integer code and string message; strict JSON including
+duplicate-member and trailing-data rejection. A complete error is an application
+answer even at HTTP 500/503. Only Core's exact code -4 expired-name messages on
+`name_show` establish expiry. Other application errors remain typed, never logged
+as remote text, and retain the existing definite policy-failure mapping.
+Transport failure, malformed bodies and success-shaped non-200 replies remain
+retryable `verifier_unavailable`. Matrix's envelope-clock/evidence unavailable
+classification remains `dependency_unavailable`.
+
+At this snapshot the kernel recognizes the successful `allowExpired` name
+projection, but its receipt boundary reduces a typed RPC application error to
+`check_failed`. A request-local, atomic typed-answer marker preserves an exact
+expired-name answer through that boundary. It refines only an existing definite
+`Refused / check_failed` to closed `identity_expired`; it cannot turn any refusal
+into Live, overwrite another failure, survive another request, or bypass the
+backend check. It contains no name, credential, proof bytes or remote text.
+Cancellation/lifetime checks still precede message admission. Protected
+provisioning uses the same refusal classifier; grantcheck retains its own audit
+of the underlying refusal and accepts no proof from that refusal.
+
+```sh
+go test -p 1 -parallel 2 -race ./internal/cg1 ./internal/admission
+CG1_REGTEST=1 CG1_RUN_ROOT=NEW_ABSOLUTE_SCRATCH CG1_CORE_DAEMON=PINNED_NAMECOIND CG1_CORE_CLI=PINNED_NAMECOIN_CLI go test -p 1 -parallel 2 -race -count=1 -timeout 5m -run '^TestCoreIdentityExpired$' -v ./internal/cg1
+CG1_REGTEST=1 CG1_CORE_DAEMON=PINNED_NAMECOIND CG1_CORE_CLI=PINNED_NAMECOIN_CLI go run -p 1 ./.scripts/g1-matrix-mutants --root . --out .temp/identity-mutants --identity
+```
+
+`TestCoreIdentityExpired` exercises the real registered Nostr and Matrix factories,
+real issued grants, mined identity expiry and same-value renewal, signed Matrix
+envelopes/co-signatures, cached re-checks and a stopped Core node. Both identity
+roles have independent isolated Core instances. Its explicitly declared HTTP
+`name_show` fault seam compares missing-result, non-null-result and missing-id
+refusals with complete expired and unrelated application-error controls; all
+other RPCs and grant issuance remain genuine Core. After each fault, the same
+checkers must admit the real live chain again. The broader RPC unit matrix checks
+HTTP 200/500/503, duplicate/trailing JSON, malformed error fields and matching id.
+`TestNodeAnswerScope` bounds the refusal marker to one call and one classification.
+
+The `--identity` mutation suite names each intended failure in `results.json`,
+checks restored positives and unchanged source hashes, and covers RPC expiry,
+missing/null result, missing id, strict JSON, HTTP-success status, exact expiry
+code, closed expiry routing, node-down routing and request isolation. Core is
+opt-in and otherwise explicitly skipped; hosted ordinary Go tests do not claim
+Core coverage. No real owner identity, live transport delivery or installed
+adoption is exercised by these fixtures.

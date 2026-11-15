@@ -12,7 +12,7 @@ import (
 
 const prefix = "github.com/relux-works/swarma-chain-lab/experiments/"
 
-var required = []string{"d01e38f1c9665eccf1164b21680565d339b6f365", "e70a35a41dec"}
+var required = []string{"4f7f9ae72ed82a3af647ee881ff5d801dd7dbd8b", "d01e38f1c9665eccf1164b21680565d339b6f365", "e70a35a41dec"}
 
 func main() {
 	repo := flag.String("repo", "", "local chain-lab source clone (complete ancestry required)")
