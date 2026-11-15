@@ -95,7 +95,7 @@ func TestDaemonStateFlockCancellation(t *testing.T) {
 // this control. A completed pipe write proves main has reached stdin reading.
 func TestDaemonStdinSIGINTBinary(t *testing.T) {
 	binary := filepath.Join(canonicalRoot(t), "a2a")
-	build := exec.Command("go", "build", "-o", binary, "../../cmd/a2a")
+	build := exec.Command("go", "build", "-p", "1", "-o", binary, "../../cmd/a2a")
 	build.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOPROXY=off", "GOFLAGS=-mod=readonly")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v: %s", err, output)
@@ -106,11 +106,11 @@ func TestDaemonStdinSIGINTBinary(t *testing.T) {
 		cmd := exec.Command(binary, "post", "room", "-")
 		cmd.Env = []string{"HOME=" + s.home, config.EnvConfigDir + "=" + s.home, "PATH=" + os.Getenv("PATH")}
 		inputRead, input, err := os.Pipe()
-		cmd.Stdin = inputRead
-		defer inputRead.Close()
 		if err != nil {
 			t.Fatal(err)
 		}
+		cmd.Stdin = inputRead
+		t.Cleanup(func() { input.Close(); inputRead.Close() })
 		var out, diag bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &diag
@@ -118,7 +118,18 @@ func TestDaemonStdinSIGINTBinary(t *testing.T) {
 			t.Fatal(err)
 		}
 		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
+		reaped := make(chan struct{})
+		go func() { done <- cmd.Wait(); close(reaped) }()
+		t.Cleanup(func() {
+			input.Close()
+			select {
+			case <-reaped:
+				return
+			default:
+				_ = cmd.Process.Kill()
+				<-reaped
+			}
+		})
 		inputDone := make(chan error, 1)
 		go func() { _, err := input.Write(bytes.Repeat([]byte("x"), 1024)); inputDone <- err }()
 		select {
@@ -137,17 +148,10 @@ func TestDaemonStdinSIGINTBinary(t *testing.T) {
 		}
 		// Kernel pending-byte observation proves the shipped main is reading
 		// stdin, even on Darwin where the pipe can buffer the entire test input.
-		request := uint(0x541b)
-		if runtime.GOOS == "darwin" {
-			request = 0x4004667f
-		}
 		ticker := time.NewTicker(time.Millisecond)
 		timer := time.NewTimer(daemon.LockReleaseBound)
 		for {
-			n, err := unix.IoctlGetInt(int(inputRead.Fd()), request)
-			if err != nil {
-				t.Fatal(err)
-			}
+			n := daemonStdinPending(t, inputRead)
 			if n == 0 {
 				break
 			}
@@ -210,6 +214,69 @@ func TestDaemonStdinSIGINTBinary(t *testing.T) {
 				t.Fatal("cancelled stdin posted")
 			default:
 			}
+		}
+	}
+}
+
+// Fd clears O_NONBLOCK on this pipe's shared open file description, including
+// the child's stdin. Control observes pending bytes without changing its flags.
+func daemonStdinPending(t *testing.T, input *os.File) int {
+	t.Helper()
+	request := uint(0x541b)
+	if runtime.GOOS == "darwin" {
+		request = 0x4004667f
+	}
+	raw, err := input.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending int
+	var ioctlErr error
+	if err := raw.Control(func(fd uintptr) {
+		pending, ioctlErr = unix.IoctlGetInt(int(fd), request)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ioctlErr != nil {
+		t.Fatal(ioctlErr)
+	}
+	return pending
+}
+
+// Both empty and buffered pipes retain the nonblocking flag required by the
+// child's cancellation loop; the probe must also report the actual byte count.
+func TestDaemonStdinPendingPreservesNonblock(t *testing.T) {
+	for _, size := range []int{0, 1024} {
+		input, writer, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { input.Close(); writer.Close() })
+		raw, err := input.SyscallConn()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := raw.Control(func(fd uintptr) { err = unix.SetNonblock(int(fd), true) }); err != nil {
+			t.Fatal(err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(bytes.Repeat([]byte("x"), size)); err != nil {
+			t.Fatal(err)
+		}
+		if got := daemonStdinPending(t, input); got != size {
+			t.Fatalf("pending bytes = %d, want %d", got, size)
+		}
+		var flags int
+		if err := raw.Control(func(fd uintptr) { flags, err = unix.FcntlInt(fd, unix.F_GETFL, 0) }); err != nil {
+			t.Fatal(err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if flags&unix.O_NONBLOCK == 0 {
+			t.Fatalf("pending-byte probe cleared shared O_NONBLOCK (buffered=%d)", size)
 		}
 	}
 }

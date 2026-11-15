@@ -19,6 +19,20 @@ import (
 	"github.com/relux-works/a2a-swarm/internal/wakemute/fixture"
 )
 
+// Capacity assertions concern bytes and generations, not operation latency.
+// Share the runner's deadline so race instrumentation and filesystem pressure
+// cannot spend the generic three-second fixture budget during a durable write.
+func capacityContext(t *testing.T) context.Context {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		t.Fatal("capacity tests require go test -timeout")
+	}
+	ctx, cancel := context.WithDeadline(t.Context(), deadline)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 // A reader-validated 499-operation history reaches 998. All four selected
 // connection counters and the root then cross 999 -> 1000 at cleanup.
 // The finite reserved envelope includes newline, maximum uint64 decimal widths
@@ -124,7 +138,7 @@ func cleanupCapacityFixture(t *testing.T, target int, reserved bool, overlapping
 	if err := os.WriteFile(filepath.Join(root, wakemute.Ledger), append(ledger, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
-	before, err := wakemute.Status(fixture.Context(t), scope)
+	before, err := wakemute.Status(capacityContext(t), scope)
 	if err != nil || before.Status != map[bool]string{false: "unmuted", true: "muted"}[hasOverlap] {
 		t.Fatalf("reader rejected fixture history: %v", err)
 	}
@@ -136,18 +150,19 @@ func cleanupCapacityFixture(t *testing.T, target int, reserved bool, overlapping
 func TestR2CapacityCleanupRollover(t *testing.T) {
 	for _, delta := range []int{-1, 0, 1} {
 		t.Run(fmt.Sprintf("reserved-bytes-%d", wakemute.MaxBytes+delta), func(t *testing.T) {
+			ctx := capacityContext(t)
 			scope, approved := cleanupCapacityFixture(t, wakemute.MaxBytes+delta, true)
 			root := scope[0].Root
 			beforeMarker, _ := os.ReadFile(filepath.Join(root, wakemute.Marker))
 			beforeLedger, _ := os.ReadFile(filepath.Join(root, wakemute.Ledger))
-			_, err := wakemute.Mute(fixture.Context(t), approved)
+			_, err := wakemute.Mute(ctx, approved)
 			if delta > 0 {
 				afterMarker, _ := os.ReadFile(filepath.Join(root, wakemute.Marker))
 				afterLedger, _ := os.ReadFile(filepath.Join(root, wakemute.Ledger))
 				if !errors.Is(err, wakemute.ErrUnsafe) || !bytes.Equal(beforeMarker, afterMarker) || !bytes.Equal(beforeLedger, afterLedger) {
 					t.Fatalf("cleanup capacity not reserved before activation: err=%v changed=%t/%t", err, !bytes.Equal(beforeMarker, afterMarker), !bytes.Equal(beforeLedger, afterLedger))
 				}
-				if err := wakemute.Admission(fixture.Context(t), root, scope[0].Connections[0].Path, func(uint64) error { return nil }); err != nil {
+				if err := wakemute.Admission(ctx, root, scope[0].Connections[0].Path, func(uint64) error { return nil }); err != nil {
 					t.Fatal(err)
 				}
 				return
@@ -155,10 +170,10 @@ func TestR2CapacityCleanupRollover(t *testing.T) {
 			if err != nil {
 				t.Fatalf("safe adjacent reservation refused: %v", err)
 			}
-			if _, err := wakemute.Unmute(fixture.Context(t), scope, approved.Run, approved.ID); err != nil {
+			if _, err := wakemute.Unmute(ctx, scope, approved.Run, approved.ID); err != nil {
 				t.Fatalf("authorized cleanup stranded by generation growth: %v", err)
 			}
-			status, err := wakemute.Status(fixture.Context(t), scope)
+			status, err := wakemute.Status(ctx, scope)
 			if err != nil || status.Status != "unmuted" || status.Roots[0].Generation != 1000 {
 				t.Fatalf("cleanup failed: %+v %v", status, err)
 			}
@@ -170,7 +185,7 @@ func TestR2CapacityCleanupRollover(t *testing.T) {
 			if len(status.Roots[0].Operations) != 500 {
 				t.Fatal("cleanup discarded replay history")
 			}
-			if err := wakemute.Admission(fixture.Context(t), root, scope[0].Connections[0].Path, func(uint64) error { return nil }); err != nil {
+			if err := wakemute.Admission(ctx, root, scope[0].Connections[0].Path, func(uint64) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
 		})
