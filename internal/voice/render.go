@@ -94,7 +94,10 @@ func (r LocalRenderer) synth(ctx context.Context, base string, c Config, text, o
 	}
 	worker, err := runner.PrepareWorker(ctx, c)
 	if err != nil {
-		return err
+		if failure := contextFailure(ctx, err); failure != nil {
+			return failure
+		}
+		return NewSynthesisError(SynthesisExecutable, -1)
 	}
 	defer worker.Close()
 	if err := runner.ValidateModel(ctx, base); err != nil {
@@ -103,15 +106,7 @@ func (r LocalRenderer) synth(ctx context.Context, base string, c Config, text, o
 		}
 		return NewSynthesisError(SynthesisValidation, -1)
 	}
-	exe := r.Executable
-	if exe == "" {
-		var err error
-		exe, err = os.Executable()
-		if err != nil {
-			return NewSynthesisError(SynthesisExecutable, -1)
-		}
-	}
-	if err := r.run(ctx, 120*time.Second, exe, []string{"--voice-worker", ModelDir(base), out}, strings.NewReader(text)); err != nil {
+	if err := r.run(ctx, 120*time.Second, worker.Path, []string{ModelDir(base), out}, strings.NewReader(text)); err != nil {
 		return synthesisFailure(ctx, err)
 	}
 	return nil
@@ -202,7 +197,7 @@ func (r LocalRenderer) Render(ctx context.Context, base string, c Config, text s
 	if err := privateOutput(raw); err != nil {
 		return result, err
 	}
-	if err := r.synth(ctx, base, string(input), raw); err != nil {
+	if err := r.synth(ctx, base, c, string(input), raw); err != nil {
 		return result, err
 	}
 	pcm, err := r.pcm(ctx, raw, filepath.Join(dir, "source.pcm"))
@@ -214,7 +209,7 @@ func (r LocalRenderer) Render(ctx context.Context, base string, c Config, text s
 		if err := privateOutput(noticeFile); err != nil {
 			return result, err
 		}
-		if err := r.synth(ctx, base, TruncationNotice, noticeFile); err != nil {
+		if err := r.synth(ctx, base, c, TruncationNotice, noticeFile); err != nil {
 			return result, err
 		}
 		notice, err := r.pcm(ctx, noticeFile, filepath.Join(dir, "notice.pcm"))
