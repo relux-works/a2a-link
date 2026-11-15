@@ -22,7 +22,10 @@ import (
 func TestVoiceConfigHelperPins(t *testing.T) {
 	e := newEnv(t)
 	c := cliVoiceRelease(t)
-	e.run("voice", "config", "--enable", "--worker", c.Worker, "--worker-sha256", c.WorkerSHA256, "--manifest-sha256", c.ManifestSHA256).ok(t)
+	configured := e.run("voice", "config", "--enable", "--worker", c.Worker, "--worker-sha256", c.WorkerSHA256, "--manifest-sha256", c.ManifestSHA256).ok(t)
+	if configured.stdout != "voice config: enabled; native helper pins recorded, cap=180s\n" {
+		t.Fatalf("configured helper status=%q", configured.stdout)
+	}
 	got, err := voice.Load(e.dir)
 	if err != nil || got != c {
 		t.Fatalf("pins=%+v err=%v", got, err)

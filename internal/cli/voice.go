@@ -141,7 +141,11 @@ func cmdVoice(ctx context.Context, a *App, args []string) error {
 		if err = voice.Save(p.Base, c); err != nil {
 			return err
 		}
-		a.printf("voice config: enabled sherpa/Irina, cap=%ds\n", c.MaxSeconds)
+		helperState := "no native helper pins (text-only)"
+		if c.Worker != "" {
+			helperState = "native helper pins recorded"
+		}
+		a.printf("voice config: enabled; %s, cap=%ds\n", helperState, c.MaxSeconds)
 		return nil
 	case "install":
 		if len(args) != 1 {

@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"github.com/relux-works/a2a-swarm/internal/voice"
 	"os"
 	"testing"
+
+	"github.com/relux-works/a2a-swarm/internal/voice"
 )
 
 func removeVoiceConfig(t *testing.T, base string) {
@@ -21,7 +22,10 @@ func TestVoiceConfigLocalOnly(t *testing.T) {
 	if _, err := voice.Load(e.dir); err == nil {
 		t.Fatal("implicitly enabled voice")
 	}
-	e.run("voice", "config", "--enable").ok(t)
+	configured := e.run("voice", "config", "--enable").ok(t)
+	if configured.stdout != "voice config: enabled; no native helper pins (text-only), cap=180s\n" {
+		t.Fatalf("unconfigured helper status=%q", configured.stdout)
+	}
 	c, err := voice.Load(e.dir)
 	if err != nil || !c.Enabled || c.MaxSeconds != 180 {
 		t.Fatalf("config=%+v err=%v", c, err)
