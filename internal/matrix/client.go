@@ -245,7 +245,7 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 			}
 		}
 		if !c.adminRegistration && resp.StatusCode == http.StatusUnauthorized && (me.ErrCode == "M_UNKNOWN_TOKEN" || me.ErrCode == "M_MISSING_TOKEN") {
-			return nil, fmt.Errorf("%w (%s)", ErrAuth, me.ErrCode)
+			return nil, &authRejection{response: me}
 		}
 		return nil, me
 	}
