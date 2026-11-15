@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
-	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 )
 
 // selectedConnection is resolved once per invocation; children pin only its
@@ -62,9 +61,14 @@ func (a *App) selectedConnection() (*config.Connection, error) {
 		a.connectionError = errors.New("legacy Matrix routing conflicts with selected profile")
 		return nil, a.connectionError
 	}
-	if v := a.Getenv(envSecretStore); v != "" && (v == config.BackendVaultV1 || c.Store.Backend == config.BackendVaultV1) {
+	ambientPresent := a.Getenv(envSecretStore) != ""
+	if a.lookupEnv != nil {
+		_, present := a.lookupEnv(envSecretStore)
+		ambientPresent = ambientPresent || present
+	}
+	if v := a.Getenv(envSecretStore); ambientPresent && (v == config.BackendVaultV1 || c.Store.Backend == config.BackendVaultV1) {
 		// The legacy ambient selector can neither select nor confirm vault-v1.
-		a.connectionError = vaultRefusal(vaultv1.EBackendConfig)
+		a.connectionError = vaultRefusal(vaultEBackendConfig)
 		return nil, a.connectionError
 	} else if v != "" && v != c.Store.Backend {
 		a.connectionError = errors.New("A2A_SECRET_STORE conflicts with selected profile")
@@ -107,7 +111,7 @@ func (a *App) namedMetadata(p config.Paths, name string) (config.Credentials, er
 	vault := c.Store.Backend == config.BackendVaultV1
 	if vault && a.human {
 		// vault-v1 is a per-agent release-only backend; human paths refuse first.
-		return config.Credentials{}, vaultRefusal(vaultv1.EBackendConfig)
+		return config.Credentials{}, vaultRefusal(vaultEBackendConfig)
 	}
 	b, e := c.Binding(name, a.human)
 	if e != nil {
@@ -123,7 +127,12 @@ func (a *App) namedMetadata(p config.Paths, name string) (config.Credentials, er
 	}
 	creds, e := config.LoadCredentialMetadata(p, name, a.human)
 	if e != nil {
-		return creds, e
+		return creds, vaultMetadataError(e)
+	}
+	if creds.VaultSelection.Present() {
+		if _, e := creds.VaultSelection.Selection(); e != nil {
+			return config.Credentials{}, vaultRefusal(vaultEFormat)
+		}
 	}
 	// Unlike legacy decoding, named metadata also refuses unknown/duplicate keys.
 	path := p.AgentFile(name)
@@ -132,24 +141,24 @@ func (a *App) namedMetadata(p config.Paths, name string) (config.Credentials, er
 	}
 	raw, e := os.ReadFile(path)
 	if e != nil {
-		return creds, e
+		return creds, vaultMetadataError(e)
 	}
 	if e = config.DecodeConnectionJSON(raw, &creds); e != nil {
 		if vault {
-			return config.Credentials{}, vaultRefusal(vaultv1.EFormat)
+			return config.Credentials{}, vaultRefusal(vaultEFormat)
 		}
 		return config.Credentials{}, errors.New("invalid named credential metadata")
 	}
-	if (creds.VaultSelection != nil) != vault {
+	if (creds.VaultSelection.Present()) != vault {
 		// Required for vault-v1, forbidden for legacy backends: no default,
 		// no generated mapping and no silent backend switch.
-		return config.Credentials{}, vaultRefusal(vaultv1.EBackendConfig)
+		return config.Credentials{}, vaultRefusal(vaultEBackendConfig)
 	}
 	if e = config.ValidateBoundCredentials(creds, b); e != nil {
 		return config.Credentials{}, e
 	}
 	if vault {
-		if _, e = a.latchVaultSelection(c, name, creds); e != nil {
+		if _, e = a.observeVaultSelection(c, name, creds); e != nil {
 			return config.Credentials{}, e
 		}
 	}

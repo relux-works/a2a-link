@@ -13,70 +13,7 @@ import (
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
-	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 )
-
-// cliVault is a TEST-ONLY logical double behind the private vaultDependency
-// seam. It counts the factory (discovery) and every driver/verifier call and
-// answers with the runner's synthetic token. It is not native verification.
-type cliVault struct {
-	factory   int
-	events    []string
-	token     []byte
-	openErr   error
-	verifyErr error
-	release   func(req vaultv1.Request) (vaultv1.Value, error) // nil: honest
-}
-
-type cliVaultConn struct{ v *cliVault }
-
-func (v *cliVault) Open(context.Context) (vaultv1.Conn, error) {
-	v.events = append(v.events, "open")
-	if v.openErr != nil {
-		return nil, v.openErr
-	}
-	return cliVaultConn{v}, nil
-}
-
-func (v *cliVault) VerifyService(context.Context, vaultv1.Conn) (vaultv1.ServiceProof, error) {
-	v.events = append(v.events, "verify")
-	if v.verifyErr != nil {
-		return vaultv1.ServiceProof{}, v.verifyErr
-	}
-	return vaultv1.ServiceProof{Role: vaultv1.RoleVaultServer, CodeID: "fixture.vault.server", LeafSHA256: strings.Repeat("cd", 32), PinsetVersion: 1}, nil
-}
-
-func field(v vaultv1.Value, key string) vaultv1.Value {
-	for _, f := range v.Fields() {
-		if f.Key == key {
-			return f.Value
-		}
-	}
-	return vaultv1.Value{}
-}
-
-func ok(req vaultv1.Request, result vaultv1.Value) vaultv1.Value {
-	return vaultv1.Dict(vaultv1.F("v", vaultv1.Uint(2)), vaultv1.F("request_id", vaultv1.String(req.ID)), vaultv1.F("op", vaultv1.String(string(req.Op))), vaultv1.F("ok", vaultv1.Bool(true)), vaultv1.F("result", result))
-}
-
-func (c cliVaultConn) Submit(_ context.Context, req vaultv1.Request) (vaultv1.Value, error) {
-	c.v.events = append(c.v.events, "submit:"+string(req.Op))
-	if req.Op == vaultv1.OpRegister {
-		return ok(req, vaultv1.Dict(vaultv1.F("identity", field(req.Body, "identity")),
-			vaultv1.F("session", vaultv1.Dict(vaultv1.F("epoch", vaultv1.String(strings.Repeat("e", 32))), vaultv1.F("session_id", vaultv1.String(strings.Repeat("5", 32))), vaultv1.F("generation", vaultv1.Uint(1)))),
-			vaultv1.F("lifetime_ms", vaultv1.Uint(900000)))), nil
-	}
-	if c.v.release != nil {
-		return c.v.release(req)
-	}
-	return ok(req, vaultv1.Dict(vaultv1.F("identity", field(req.Body, "identity")), vaultv1.F("consumer_binding", field(req.Body, "expected_binding")),
-		vaultv1.F("record_revision", vaultv1.Uint(1)), vaultv1.F("secret", vaultv1.Bytes(append([]byte(nil), c.v.token...))))), nil
-}
-
-func (c cliVaultConn) Close() error {
-	c.v.events = append(c.v.events, "close")
-	return nil
-}
 
 const vaultSelectionJSON = `{"identity":{"domain":"fixture-domain","kind":"explicit","name":"fixture-alpha","origin":null},"session_mode":"registered"}`
 
@@ -87,6 +24,8 @@ type vaultFixture struct {
 	*namedFixture
 	vault    *cliVault
 	keychain int
+	legacy   int
+	provider *vaultFixtureProvider
 }
 
 func newVaultFixture(t *testing.T, selection string) *vaultFixture {
@@ -138,6 +77,8 @@ func (f *vaultFixture) writeMetadata(t *testing.T, selection string, mut func(st
 
 func (f *vaultFixture) app(dep bool) *App {
 	a := f.namedFixture.app()
+	a.beforeLegacyCredentialRead = func() { f.legacy++ }
+	a.lookupEnv = func(k string) (string, bool) { v, ok := f.env[k]; return v, ok }
 	// Counting trap with an isolated fake backend: a correct vault path never
 	// constructs it, and a mutant that does reaches no platform Keychain.
 	a.keychain = func(p config.Paths) *keychainStore {
@@ -146,11 +87,23 @@ func (f *vaultFixture) app(dep bool) *App {
 		return &keychainStore{paths: p, fixture: filepath.Join(f.root, "trap.keychain-db"), hostID: "isolated-host", timeout: time.Second, probeCommand: unlockedProbe, backend: routingBackend{&calls}}
 	}
 	if dep {
-		a.vaultDependency = func() *vaultv1.Dependency {
-			f.vault.factory++
-			return &vaultv1.Dependency{Driver: f.vault, Verifier: f.vault}
+		// Snapshot explicitly qualified logical context; normal runtime metadata
+		// loading/admission/client are exercised by the real credential path.
+		c := f.r.Profiles["vault"]
+		b, _ := c.Binding("alice", false)
+		raw, _ := os.ReadFile(f.paths("vault", false).AgentFile("alice"))
+		var creds config.Credentials
+		if config.DecodeConnectionJSON(raw, &creds) == nil {
+			if sel, e := creds.VaultSelection.Selection(); e == nil {
+				if o, r := vaultObserve(sel, "alice", b); r == nil {
+					f.provider = &vaultFixtureProvider{value: vaultFixtureContext(o)}
+					a.vaultContext = f.provider
+				}
+			}
 		}
+		a.vaultDependency = func(vaultCredentialSelection) (*vaultDependency, error) { f.vault.factory++; return f.vault.dep(), nil }
 	}
+
 	return a
 }
 
@@ -177,13 +130,13 @@ func (f *vaultFixture) zero(t *testing.T, label string) {
 	f.store.mu.Lock()
 	reads := len(f.store.reads) + len(f.store.creates)
 	f.store.mu.Unlock()
-	if f.vault.factory != 0 || len(f.vault.events) != 0 || reads != 0 || f.keychain != 0 || f.httpCalls.Load() != 0 {
+	if f.legacy != 0 || (f.provider != nil && f.provider.calls != 0) || f.vault.factory != 0 || len(f.vault.events) != 0 || reads != 0 || f.keychain != 0 || f.httpCalls.Load() != 0 {
 		t.Fatalf("%s: factory=%d events=%v store=%d keychain=%d http=%d", label, f.vault.factory, f.vault.events, reads, f.keychain, f.httpCalls.Load())
 	}
 }
 
-func vaultCode(err error) string {
-	var r *vaultv1.Refusal
+func vaultErrorCode(err error) string {
+	var r *vaultFailure
 	if errors.As(err, &r) {
 		return string(r.Outcome) + " " + string(r.Code) + string(r.Diagnosis)
 	}
@@ -199,8 +152,8 @@ func vaultCode(err error) string {
 // touches the vault seam.
 func TestVaultV1CredentialFlow(t *testing.T) {
 	for _, tc := range []struct{ mode, events string }{
-		{"registered", "open,verify,submit:register,submit:release,close"},
-		{"direct", "open,verify,submit:release,close"},
+		{"registered", "open,verify:before_operation,prepare:register,verify:before_operation,invoke:register,verify:after_reply,discard:register,verify:before_operation,prepare:release,verify:before_operation,invoke:release,verify:after_reply,discard:release,close"},
+		{"direct", "open,verify:before_operation,prepare:release,verify:before_operation,invoke:release,verify:after_reply,discard:release,close"},
 	} {
 		f := newVaultFixture(t, strings.Replace(vaultSelectionJSON, "registered", tc.mode, 1))
 		a := f.app(true)
@@ -231,7 +184,7 @@ func TestVaultV1CredentialFlow(t *testing.T) {
 }
 
 // Claim: with the production default (no qualified native dependency), a
-// valid vault-v1 selection refuses NOT_SUBMITTED E_UNAVAILABLE before any
+// valid vault-v1 selection refuses NOT_SUBMITTED E_CONTEXT before any
 // vault, network or legacy secret call, and changes no file or item. The
 // positive neighbour is TestVaultV1CredentialFlow with the same fixture.
 func TestVaultV1ProductionDefaultUnavailable(t *testing.T) {
@@ -244,7 +197,7 @@ func TestVaultV1ProductionDefaultUnavailable(t *testing.T) {
 	if NewApp().vaultDependency != nil {
 		t.Fatal("NewApp installs a vault dependency")
 	}
-	if a.Run(context.Background(), []string{"--profile", "vault", "whoami"}) == 0 || !strings.Contains(f.err.String(), "vault-v1 NOT_SUBMITTED E_UNAVAILABLE") {
+	if a.Run(context.Background(), []string{"--profile", "vault", "whoami"}) == 0 || !strings.Contains(f.err.String(), "vault-v1 NOT_SUBMITTED E_CONTEXT") {
 		t.Fatalf("production default did not refuse: %s", f.err.String())
 	}
 	f.zero(t, "production default")
@@ -265,14 +218,14 @@ func TestVaultV1MetadataOnlyZeroCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid metadata session refused: %v", err)
 	}
-	if s.creds.AccessToken != "" || s.creds.VaultSelection == nil {
+	if s.creds.AccessToken != "" || !s.creds.VaultSelection.Present() {
 		t.Fatal("metadata session carries a secret or lost its selection")
 	}
 	f.zero(t, "metadata-only valid")
 	f.writeMetadata(t, strings.Replace(vaultSelectionJSON, `"registered"`, `"auto"`, 1), nil)
 	b := f.app(true)
 	b.profile = "vault"
-	if _, err := b.sessionMetadata(); vaultCode(err) != "NOT_SUBMITTED E_FORMAT" {
+	if _, err := b.sessionMetadata(); vaultErrorCode(err) != "NOT_SUBMITTED E_FORMAT" {
 		t.Fatalf("invalid metadata session: %v", err)
 	}
 	f.zero(t, "metadata-only invalid")
@@ -280,7 +233,7 @@ func TestVaultV1MetadataOnlyZeroCalls(t *testing.T) {
 	f.writeMetadata(t, vaultSelectionJSON, nil)
 	c := f.app(true)
 	c.profile = "vault"
-	if _, err := c.session(); err != nil || f.vault.factory != 1 || !strings.Contains(strings.Join(f.vault.events, ","), "verify,submit:register,submit:release") {
+	if _, err := c.session(); err != nil || f.vault.factory != 1 || f.vault.effects != 2 {
 		t.Fatalf("credential control: %v factory=%d events=%v", err, f.vault.factory, f.vault.events)
 	}
 }
@@ -300,6 +253,7 @@ func TestVaultV1SelectionRefusals(t *testing.T) {
 		want    string // vault outcome+code, or a source-owned diagnostic substring
 	}{
 		{"valid synthetic control", syn, nil, nil, "vault", ""},
+		{"null selection", "null", nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
 		{"missing vault_selection", "", nil, nil, "vault", "NOT_SUBMITTED E_BACKEND_CONFIG"},
 		{"unknown selection field", strings.Replace(vaultSelectionJSON, `"session_mode"`, `"trust":true,"session_mode"`, 1), nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
 		{"wrong-type mode", strings.Replace(vaultSelectionJSON, `"registered"`, `true`, 1), nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
@@ -320,6 +274,7 @@ func TestVaultV1SelectionRefusals(t *testing.T) {
 		{"user mismatch", vaultSelectionJSON, func(s string) string {
 			return strings.Replace(s, `"user_id":"@alice:alpha.invalid","device_id"`, `"user_id":"@bob:alpha.invalid","device_id"`, 1)
 		}, nil, "vault", "named credential binding mismatch"},
+		{"empty present ambient with vault profile", vaultSelectionJSON, nil, map[string]string{envSecretStore: ""}, "vault", "NOT_SUBMITTED E_BACKEND_CONFIG"},
 		{"ambient keychain with vault profile", vaultSelectionJSON, nil, map[string]string{envSecretStore: "keychain"}, "vault", "NOT_SUBMITTED E_BACKEND_CONFIG"},
 		{"ambient vault-v1 with vault profile", vaultSelectionJSON, nil, map[string]string{envSecretStore: "vault-v1"}, "vault", "NOT_SUBMITTED E_BACKEND_CONFIG"},
 		{"ambient vault-v1 with keychain profile", vaultSelectionJSON, nil, map[string]string{envSecretStore: "vault-v1"}, "alpha", "NOT_SUBMITTED E_BACKEND_CONFIG"},
@@ -341,7 +296,7 @@ func TestVaultV1SelectionRefusals(t *testing.T) {
 			}
 			continue
 		}
-		if err == nil || (vaultCode(err) != tc.want && !strings.Contains(err.Error(), tc.want)) {
+		if err == nil || (vaultErrorCode(err) != tc.want && !strings.Contains(err.Error(), tc.want)) {
 			t.Fatalf("%s: got %v want %s", tc.label, err, tc.want)
 		}
 		// The credential path refuses identically and still makes no call.
@@ -384,7 +339,7 @@ func TestVaultV1SelectionPlacement(t *testing.T) {
 	}
 	a = f.app(true)
 	a.profile = "alpha"
-	if _, err := a.session(); vaultCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
+	if _, err := a.session(); vaultErrorCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
 		t.Fatalf("vault_selection on keychain profile: %v", err)
 	}
 	f.zero(t, "selection on legacy profile")
@@ -392,7 +347,7 @@ func TestVaultV1SelectionPlacement(t *testing.T) {
 	f = newVaultFixture(t, vaultSelectionJSON)
 	a = f.app(true)
 	a.profile, a.human = "vault", true
-	if _, err := a.namedMetadata(f.paths("vault", false), "alice"); vaultCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
+	if _, err := a.namedMetadata(f.paths("vault", false), "alice"); vaultErrorCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
 		t.Fatalf("human vault use: %v", err)
 	}
 	f.zero(t, "human")
@@ -409,10 +364,10 @@ func TestVaultV1SelectionPlacement(t *testing.T) {
 		}
 		return ""
 	}
-	if _, err := l.loadCredentials(context.Background(), lp, "alice"); vaultCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
+	if _, err := l.loadCredentials(context.Background(), lp, "alice"); vaultErrorCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
 		t.Fatalf("legacy unnamed vault_selection: %v", err)
 	}
-	if _, err := l.credentialMetadata(lp, "alice"); vaultCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
+	if _, err := l.credentialMetadata(lp, "alice"); vaultErrorCode(err) != "NOT_SUBMITTED E_BACKEND_CONFIG" {
 		t.Fatalf("legacy unnamed metadata: %v", err)
 	}
 	// Legacy unnamed control without the field still loads its file token.
@@ -440,12 +395,12 @@ func TestVaultV1NoLegacyFallback(t *testing.T) {
 		{"unavailable", func(v *cliVault) { v.openErr = errors.New("isolated-alpha") }, context.Background(), "NOT_SUBMITTED E_UNAVAILABLE"},
 		{"verifier rejects", func(v *cliVault) { v.verifyErr = errors.New("isolated-alpha") }, context.Background(), "NOT_SUBMITTED E_SERVER_UNTRUSTED"},
 		{"authenticated refusal", func(v *cliVault) {
-			v.release = func(req vaultv1.Request) (vaultv1.Value, error) {
-				return vaultv1.Dict(vaultv1.F("v", vaultv1.Uint(2)), vaultv1.F("request_id", vaultv1.String(req.ID)), vaultv1.F("op", vaultv1.String("release")), vaultv1.F("ok", vaultv1.Bool(false)), vaultv1.F("error", vaultv1.Dict(vaultv1.F("code", vaultv1.String("E_REVOKED"))))), nil
+			v.release = func(req vaultRequest) (vaultValue, error) {
+				return vaultDict(vaultF("v", vaultUint(2)), vaultF("request_id", vaultString(req.id)), vaultF("op", vaultString("release")), vaultF("ok", vaultBool(false)), vaultF("error", vaultDict(vaultF("code", vaultString("E_REVOKED"))))), nil
 			}
 		}, context.Background(), "REFUSED E_REVOKED"},
 		{"unknown after submit", func(v *cliVault) {
-			v.release = func(vaultv1.Request) (vaultv1.Value, error) { return vaultv1.Value{}, errors.New("isolated-alpha") }
+			v.release = func(vaultRequest) (vaultValue, error) { return vaultValue{}, errors.New("isolated-alpha") }
 		}, context.Background(), "UNKNOWN transport_lost"},
 		{"cancelled", nil, cancelled, "NOT_SUBMITTED E_UNAVAILABLE"},
 	} {
@@ -465,13 +420,13 @@ func TestVaultV1NoLegacyFallback(t *testing.T) {
 			if err != nil || creds.AccessToken != "isolated-alpha" {
 				t.Fatalf("control: %v", err)
 			}
-		} else if vaultCode(err) != tc.want || creds.AccessToken != "" {
+		} else if vaultErrorCode(err) != tc.want || creds.AccessToken != "" {
 			t.Fatalf("%s: got %v want %s", tc.label, err, tc.want)
 		}
 		if err != nil && strings.Contains(err.Error(), "isolated-alpha") {
 			t.Fatalf("%s: raw dependency error leaked", tc.label)
 		}
-		if reads != 0 || f.keychain != 0 || f.httpCalls.Load() != 0 || a.profile != "vault" || f.snapshot(t) != before {
+		if reads != 0 || f.legacy != 0 || f.keychain != 0 || f.httpCalls.Load() != 0 || a.profile != "vault" || f.snapshot(t) != before {
 			t.Fatalf("%s: fallback or effect: reads=%d keychain=%d http=%d profile=%s", tc.label, reads, f.keychain, f.httpCalls.Load(), a.profile)
 		}
 	}
@@ -484,7 +439,7 @@ func TestVaultV1ReleaseOnlyCommands(t *testing.T) {
 	f := newVaultFixture(t, vaultSelectionJSON)
 	a := f.app(true)
 	a.profile, a.authorizeRegistration = "vault", true
-	if _, _, err := a.registerNamedAgentDestination(context.Background(), "alice", nil, nil); vaultCode(err) != "NOT_SUBMITTED E_OPERATION_DENIED" {
+	if _, _, err := a.registerNamedAgentDestination(context.Background(), "alice", nil, nil); vaultErrorCode(err) != "NOT_SUBMITTED E_OPERATION_DENIED" {
 		t.Fatalf("registration: %v", err)
 	}
 	f.zero(t, "registration")
@@ -511,7 +466,147 @@ func TestVaultV1SelectionChangeRefusesLiveSession(t *testing.T) {
 		t.Fatalf("unchanged selection refused: %v", err)
 	}
 	f.writeMetadata(t, strings.Replace(vaultSelectionJSON, "registered", "direct", 1), nil)
-	if err := s.checkConnection(); vaultCode(err) != "NOT_SUBMITTED E_IDENTITY_CONFLICT" {
+	if err := s.checkConnection(); vaultErrorCode(err) != "NOT_SUBMITTED E_IDENTITY_CONFLICT" {
 		t.Fatalf("changed selection: %v", err)
+	}
+}
+
+// Claim: independent admitted context is required before factory/open. A
+// grammar-valid public selection alone grants nothing; explicitly mapped
+// identity names may differ from the source selector. Actual CLI loading,
+// admission and client run on the matching fixture, never a release stub.
+func TestVaultAdmissionContext(t *testing.T) {
+	for _, kind := range []string{"missing", "zero", "unissued", "domain", "declared", "mapping_missing", "mapping_wrong", "binding", "connection", "provider_error", ""} {
+		t.Run(kind, func(t *testing.T) {
+			f := newVaultFixture(t, vaultSelectionJSON)
+			a := f.app(true)
+			a.profile = "vault"
+			before := f.snapshot(t)
+			want := vaultEIdentityConflict
+			switch kind {
+			case "missing":
+				a.vaultContext = nil
+				want = vaultEContext
+			case "zero":
+				f.provider.value = vaultAdmittedContext{}
+				want = vaultEContext
+			case "unissued":
+				f.provider.value.issuer = nil
+				want = vaultEContext
+			case "domain":
+				f.provider.value.installDomain = "other-domain"
+			case "declared":
+				f.provider.value.declared.Name = "other-enrolled"
+			case "mapping_missing":
+				f.provider.value.mappedIdentity = vaultIdentity{}
+				want = vaultEContext
+			case "mapping_wrong":
+				f.provider.value.mappedIdentity.Name = "other-enrolled"
+			case "binding":
+				f.provider.value.binding.HomeserverURL = "https://other.invalid"
+			case "connection":
+				f.provider.value.local.Connection.URL = "https://other.invalid"
+			case "provider_error":
+				f.provider.err = errors.New("isolated-alpha")
+				want = vaultEContext
+			}
+			_, err := a.session()
+			if kind == "" {
+				if err != nil || f.vault.factory != 1 || f.vault.effects != 2 {
+					t.Fatalf("admitted CLI neighbor: %v", err)
+				}
+				return
+			}
+			var failure *vaultFailure
+			if !errors.As(err, &failure) || failure.Outcome != vaultNotSubmitted || failure.Code != want || f.vault.factory != 0 || len(f.vault.events) != 0 || f.keychain != 0 || f.legacy != 0 || f.httpCalls.Load() != 0 || f.snapshot(t) != before {
+				t.Fatalf("context %s: %v factory=%d events=%v", kind, err, f.vault.factory, f.vault.events)
+			}
+		})
+	}
+	// Qualified context with absent driver reaches only local E_UNAVAILABLE;
+	// production without context stops earlier as E_CONTEXT.
+	f := newVaultFixture(t, vaultSelectionJSON)
+	a := f.app(true)
+	a.profile = "vault"
+	a.vaultDependency = nil
+	if _, e := a.session(); vaultErrorCode(e) != "NOT_SUBMITTED E_UNAVAILABLE" || len(f.vault.events) != 0 {
+		t.Fatal("absent driver order")
+	}
+}
+
+// Claim: origin scalar spelling is byte-preserving across metadata decode and
+// observation, using a literal independent public derivation pin. Limits use
+// decoded UTF-8 bytes (256 admitted, 257 refused) with a valid astral scalar.
+func TestVaultSelectionUnicode(t *testing.T) {
+	const pinned = "syn1:e694f628e0b9cd8261616a446ceabee4d0ab16aeffb12f2cb9655f6f9da35ff0"
+	var reference vaultIdentity
+	for _, spelling := range []string{"h😀", `h\uD83D\uDE00`} {
+		raw := `{"identity":{"domain":"fixture-domain","kind":"synthetic","name":"` + pinned + `","origin":{"host_id":"` + spelling + `","project_id":"p","profile_id":"r"}},"session_mode":"direct"}`
+		f := newVaultFixture(t, raw)
+		a := f.app(true)
+		a.profile = "vault"
+		c := f.r.Profiles["vault"]
+		creds, e := a.namedMetadata(f.paths("vault", false), "alice")
+		if e != nil {
+			t.Fatal("valid Unicode metadata refused")
+		}
+		o, e := a.observeVaultSelection(&c, "alice", creds)
+		if e != nil {
+			t.Fatal("valid Unicode observation refused")
+		}
+		if o.identity.Name != pinned || o.identity.Origin.HostID != "h😀" {
+			t.Fatal("independent derivation/decoded bytes")
+		}
+		if reference.Name != "" && !reference.Equal(o.Identity()) {
+			t.Fatal("pair/raw identity differs")
+		}
+		reference = o.Identity()
+		f.zero(t, "Unicode observation")
+	}
+	for _, n := range []int{256, 257} {
+		origin := config.VaultOrigin{HostID: strings.Repeat("a", n-4) + "😀", ProjectID: "p", ProfileID: "r"}
+		syn := vaultSyntheticContext{HostID: origin.HostID, ProjectID: origin.ProjectID, ProfileID: origin.ProfileID}
+		name := "syn1:" + strings.Repeat("0", 64)
+		if n == 256 {
+			name, _ = vaultSyntheticName(syn)
+		}
+		c := config.Connection{ID: "fixture-a", URL: "https://a.invalid", ServerName: "a.invalid", Store: config.CredentialStore{Backend: config.BackendVaultV1}}
+		b, _ := c.Binding("fixture", false)
+		_, r := vaultObserve(config.VaultSelection{Identity: config.VaultIdentity{Domain: "fixture-domain", Kind: vaultKindSynthetic, Name: name, Origin: &origin}, SessionMode: vaultSessionDirect}, "fixture", b)
+		if n == 256 && r != nil {
+			t.Fatal("256 decoded bytes refused")
+		}
+		if n == 257 && (r == nil || r.Code != vaultELimit) {
+			t.Fatal("257 decoded bytes admitted")
+		}
+	}
+}
+
+// Claim: a differently spelled valid synthetic launch origin cannot replace
+// the separately admitted origin; late cancellation after native success has
+// zero fallback and no Matrix handoff, without relabeling the native effect.
+func TestVaultContextOriginAndLateCancellation(t *testing.T) {
+	syn := `{"identity":{"domain":"fixture-domain","kind":"synthetic","name":"syn1:09155b1290b5e9bc09a1a929ad8d9fffcb21002e553fdf849acda156d6b74bb7","origin":{"host_id":"host-fixture-01","project_id":"project-fixture-01","profile_id":"profile-fixture-01"}},"session_mode":"direct"}`
+	f := newVaultFixture(t, syn)
+	a := f.app(true)
+	a.profile = "vault"
+	f.provider.value.declared.Origin.HostID = "other-host"
+	f.provider.value.declared.Name, _ = vaultSyntheticName(*f.provider.value.declared.Origin)
+	if _, e := a.session(); vaultErrorCode(e) != "NOT_SUBMITTED E_IDENTITY_CONFLICT" || f.vault.factory != 0 || f.vault.effects != 0 || f.legacy != 0 || f.keychain != 0 {
+		t.Fatal("admitted origin mismatch reached seam")
+	}
+	f = newVaultFixture(t, vaultSelectionJSON)
+	a = f.app(true)
+	a.profile = "vault"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.vault.afterReply = func(r vaultRequest) {
+		if r.op == vaultOpRelease {
+			cancel()
+		}
+	}
+	before := f.snapshot(t)
+	if _, e := a.loadCredentials(ctx, f.paths("vault", false), "alice"); e == nil || !strings.Contains(e.Error(), "SUCCEEDED handoff_cancelled") || f.vault.effects != 2 || f.legacy != 0 || f.keychain != 0 || f.httpCalls.Load() != 0 || f.snapshot(t) != before {
+		t.Fatal("late cancellation changed outcome/backend/state")
 	}
 }

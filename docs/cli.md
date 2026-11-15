@@ -3833,12 +3833,13 @@ selected profile's card-room setting changes; start a fresh invocation to use th
 new setting. Existing binaries that do not recognize `card_room` refuse such a
 registry rather than silently ignoring the setting.
 
-The credential-store schema accepts exactly these two backends:
+The credential-store schema accepts these explicit backends:
 
 | Backend | Configuration | Secret storage |
 | --- | --- | --- |
 | `keychain` | Requires distinct valid `access_token_service` and `password_service` names, as above; macOS only | Access token and recovery password in the selected Keychain services, keyed by full MXID |
 | `file` | `"credential_store": {"backend": "file"}`; no Keychain service names and no `registration_token_ref` | Access token in the existing connection-scoped credential file, mode `0600`; passwords stay in memory |
+| `vault-v1` | Named release-only backend; no Keychain service names, `registration_token_ref` or `admin_registration` | Portable boundary only; production native/context dependencies are unavailable |
 
 `registration_token_ref` resolves only through Keychain, so any such reference
 is invalid on a file connection. File connections work on Linux and macOS and
@@ -3947,6 +3948,71 @@ or manufacture receipts. Preserve the old working path until separately
 admitted migration and retirement are verified. Binary installation, profile
 activation, bindings, identity creation, federation and rollout each retain
 their existing owner/keeper admission gates.
+
+### Portable vault-v1 metadata and release boundary
+
+The profile selects only the backend. Each selected agent's connection-scoped
+public metadata supplies this complete object (no token/password):
+
+```json
+{
+  "vault_selection": {
+    "identity": {
+      "domain": "fixture-domain",
+      "kind": "explicit",
+      "name": "fixture-alpha",
+      "origin": null
+    },
+    "session_mode": "registered"
+  }
+}
+```
+
+This public schema example is not enrollment or launch authority. The actual
+metadata retains its existing exact connection_binding/user_id/homeserver fields.
+`session_mode` must be explicitly `registered` or `direct`; no default exists.
+Synthetic identity uses the exact three-field origin and its frozen derivation.
+The field must be genuinely absent on legacy backends: null, malformed values,
+duplicates and case shadows are invalid, including on lenient legacy loads.
+Absent legacy serialization/fingerprints and unrelated legacy unknown-key handling
+are preserved. Valid JSON surrogate pairs and raw scalars decode to identical
+UTF-8 bytes; malformed Unicode is refused without replacement.
+
+Any ambient A2A_SECRET_STORE override conflicts with a selected vault profile,
+including an equal or explicitly empty value. Ambient vault-v1 alone cannot
+select/admit this backend. Agent identity need not equal the Matrix selector:
+only an independently admitted exact typed choice, trusted installation domain
+and explicit identity-to-full-account/endpoint binding can admit credentials.
+Profiles do not carry identity, origin or service trust material. These checks
+do not authenticate an individual same-UID agent: a peer using the genuinely
+admitted route may freshly select another enrolled identity, under the frozen
+trust model.
+
+Production has no context issuer/provider, so valid metadata alone returns
+NOT_SUBMITTED E_CONTEXT before the factory. Qualified context without a driver
+returns NOT_SUBMITTED E_UNAVAILABLE. No native driver, endpoint, bootstrap, codec,
+peer proof, custody, home/resume receiver or usable service is implemented.
+There is no override to manufacture those facts. These source interfaces do not
+qualify real code signatures, Keychain/Enclave behavior or installed adoption.
+
+On a future qualified route, every operation requires exact live-connection
+service-signature/pin-policy verification and its own trusted invocation receipt.
+Register success does not mean release was invoked. Only a complete authenticated
+matching refusal is REFUSED; uncertain invoked/unadmitted replies are UNKNOWN
+with zero consumer bytes. Known valid release success stays SUCCEEDED if later
+consumer or cleanup work fails; local handoff/cleanup reporting remains separate.
+No automatic retry occurs. A later authorized attempt after UNKNOWN uses a fresh
+connection/request/session as required by the frozen contract. Connections are
+closed per attempt; no session/plaintext cache is persisted.
+
+Metadata-only observation makes zero context-provider, factory, discovery,
+connect/bootstrap/verification/prepare/invoke/close or legacy-secret calls.
+Every selected-vault failure keeps the selected identity/backend, reads no legacy
+token and writes no home/config/journal. Matrix account registration/admin and
+daemon custody migration refuse before effects. Ordinary metadata/credential
+validation and existing typed member/auth behavior still apply. No native or
+live operation is authorized by this documentation.
+
 
 ## Stale addressed-mail alarm (`a2a mail-alarm`)
 

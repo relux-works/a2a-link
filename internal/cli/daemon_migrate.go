@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
-	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 )
 
 // No current native deletion/recovery contract is available to the CLI. This
@@ -53,7 +52,7 @@ func cmdDaemonMigrate(ctx context.Context, a *App, args []string) error {
 	}
 	if c != nil && c.Store.Backend == config.BackendVaultV1 {
 		// No a2ad token custody move and no daemon path to a previous backend.
-		return vaultRefusal(vaultv1.EOperationDenied)
+		return vaultRefusal(vaultEOperationDenied)
 	}
 	if _, err := a.selectedStore(); err != nil {
 		return config.ErrDaemonMigration

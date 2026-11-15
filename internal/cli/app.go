@@ -17,7 +17,6 @@ import (
 	"github.com/relux-works/a2a-swarm/internal/daemon"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 	"github.com/relux-works/a2a-swarm/internal/redact"
-	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 	"github.com/relux-works/a2a-swarm/internal/voice"
 	"github.com/relux-works/a2a-swarm/internal/wakemute"
 )
@@ -129,10 +128,13 @@ type App struct {
 	nativeDial                        func(context.Context, string) (nativeRuntime, error)
 	afterWakeReserve, afterWakeSubmit func() error
 
-	// vaultDependency is a private in-process seam for vault-v1. Production
-	// leaves it nil (no qualified native driver), so vault-v1 refuses
-	// E_UNAVAILABLE before submission. No environment, flag or file sets it.
-	vaultDependency func() *vaultv1.Dependency
+	// The public metadata observer cannot grant credentials. Production has no
+	// context issuer/provider or native driver: E_CONTEXT precedes factory use;
+	// with admitted context but no driver, E_UNAVAILABLE. No runtime override.
+	beforeLegacyCredentialRead func()
+	lookupEnv                  func(string) (string, bool)
+	vaultContext               vaultContextProvider
+	vaultDependency            func(vaultCredentialSelection) (*vaultDependency, error)
 }
 
 // NewApp returns an App bound to the real process environment.
@@ -143,6 +145,7 @@ func NewApp() *App {
 		Stderr:              os.Stderr,
 		Stdin:               os.Stdin,
 		Getenv:              os.Getenv,
+		lookupEnv:           os.LookupEnv,
 		HTTP:                &http.Client{},
 		Now:                 time.Now,
 	}
@@ -721,7 +724,7 @@ func (a *App) sessionAsMode(name string, metadataOnly bool) (*session, error) {
 			// A changed vault selection needs a fresh qualified selection and
 			// registration; it never retargets a live session.
 			if !sameVaultSelection(current.VaultSelection, latchedVault) {
-				return vaultRefusal(vaultv1.EIdentityConflict)
+				return vaultRefusal(vaultEIdentityConflict)
 			}
 			return nil
 		}

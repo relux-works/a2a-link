@@ -356,6 +356,37 @@ The registry-free legacy path remains supported.
 
 ## Credential storage
 
+### Portable vault-v1 boundary (native path unavailable)
+
+Named profiles may explicitly select `credential_store.backend="vault-v1"`.
+Profiles contain no identity. Per-agent named metadata must contain the complete
+`vault_selection={identity,session_mode}` object described in
+[the named-credentials reference](docs/cli.md#portable-vault-v1-metadata-and-release-boundary).
+This is portable validation and orchestration support. Production has no admitted
+parent-context issuer or native driver: it refuses `NOT_SUBMITTED E_CONTEXT`
+before dependency construction. With an explicitly qualified logical context but
+no driver it refuses `NOT_SUBMITTED E_UNAVAILABLE`. It provides no usable vault
+service or adoption path.
+
+The private adapter in `internal/cli/vault_*.go` requires independent launch,
+trusted-install domain and enrolled account binding, mandatory live service
+signature verification, and exact operation-specific response admission.
+`metadataOnly` performs no context/provider/vault/secret calls; selected-vault
+failures never read another backend. Bootstrap, encoding, actual peer/session
+mechanics, custody, parent receiving/home integration and native qualification
+remain prerequisites owned elsewhere. No migration or daemon token move is added.
+
+The focused validation tool is the existing Go test runner. Under an authorized
+isolated environment, enumerate and run the package-cli/config test names with
+anchored selectors, for example `go test -list '^TestVaultSelectionUnicode$'
+./internal/config` followed by `go test -count=1 -run
+'^TestVaultSelectionUnicode$' ./internal/config`. The ordinary Go compiler excludes
+`vault_fixtures_test.go`; it contains explicitly invoked logical test fixtures,
+not a production issuer or native verification. Validation logs and omission
+controls belong in task-owned `.temp/` artifacts. Producer scope uses focused
+selectors; independent review owns the full suite.
+
+
 E2EE foundations for #308 live in `internal/e2ee` and are not activated by any
 CLI command. They use mautrix-go v0.30.0's pure-Go goolm primitives, explicit
 isolated checkpoints and AES-GCM snapshots. The backend takes an explicit root

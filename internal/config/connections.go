@@ -448,13 +448,18 @@ func (c Connection) Paths(p Paths, name string, human bool) (Paths, error) {
 
 // ValidateBoundCredentials runs before secret-store lookup or client creation.
 func ValidateBoundCredentials(c Credentials, want ConnectionBinding) error {
+	if c.VaultSelection.Present() {
+		if _, e := c.VaultSelection.Selection(); e != nil {
+			return ErrVaultSelectionShape
+		}
+	}
 	if c.Password != "" || c.AccessToken != "" && want.Connection.Store.Backend != "file" {
 		return errors.New("named metadata must not contain secrets")
 	}
 	if c.ConnectionBinding == nil || c.ConnectionBinding.Fingerprint() != want.Fingerprint() || c.UserID != want.UserID || c.Homeserver != want.Connection.URL {
 		return errors.New("named credential binding mismatch; explicit migration required")
 	}
-	if (c.VaultSelection != nil) != (want.Connection.Store.Backend == BackendVaultV1) {
+	if c.VaultSelection.Present() != (want.Connection.Store.Backend == BackendVaultV1) {
 		return errors.New("vault_selection is required for vault-v1 and forbidden for other backends")
 	}
 	return nil

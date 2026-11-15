@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -45,10 +46,10 @@ var ErrVaultSelectionShape = errors.New("invalid vault_selection shape")
 
 // UnmarshalJSON accepts exactly the closed shape: every key present once, no
 // unknown keys, string-typed scalars and byte-exact UTF-8. encoding/json would
-// otherwise replace invalid UTF-8 or lone surrogate escapes with U+FFFD, which
-// silently changes identity bytes, so both are refused before decoding.
+// otherwise replace malformed UTF-8/surrogates with U+FFFD. Validate lexical
+// encoding first, including valid pairs, without changing decoded bytes.
 func (s *VaultSelection) UnmarshalJSON(data []byte) error {
-	if !utf8.Valid(data) || hasSurrogateEscape(data) {
+	if !strictJSONStringEncoding(data) {
 		return ErrVaultSelectionShape
 	}
 	top, err := closedObject(data, "identity", "session_mode")
@@ -131,18 +132,148 @@ func jsonString(raw json.RawMessage, dst *string) error {
 	return nil
 }
 
-// hasSurrogateEscape reports a \uD800-\uDFFF escape. Astral characters must be
-// written as raw UTF-8 bytes in vault_selection; this is a deliberate, narrow
-// restriction so decoding can never substitute U+FFFD for a lone surrogate.
-func hasSurrogateEscape(data []byte) bool {
-	for i := 0; i+5 < len(data); i++ {
-		if data[i] != '\\' {
+// strictJSONStringEncoding rejects repair-prone JSON before encoding/json.
+// Valid high/low surrogate pairs decode to the same UTF-8 scalar as raw input.
+func strictJSONStringEncoding(data []byte) bool {
+	if !utf8.Valid(data) {
+		return false
+	}
+	quoted := false
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if !quoted {
+			if c == '"' {
+				quoted = true
+			}
 			continue
 		}
-		if data[i+1] == 'u' && (data[i+2] == 'd' || data[i+2] == 'D') && bytes.IndexByte([]byte("89abAB"), data[i+3]) >= 0 {
-			return true
+		if c == '"' {
+			quoted = false
+			continue
 		}
-		i++ // skip the escaped character, including an escaped backslash
+		if c < 0x20 {
+			return false
+		}
+		if c != '\\' {
+			continue
+		}
+		i++
+		if i >= len(data) {
+			return false
+		}
+		switch data[i] {
+		case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		case 'u':
+			if i+4 >= len(data) {
+				return false
+			}
+			n, ok := jsonHex4(data[i+1 : i+5])
+			if !ok {
+				return false
+			}
+			i += 4
+			if n >= 0xdc00 && n <= 0xdfff {
+				return false
+			}
+			if n >= 0xd800 && n <= 0xdbff {
+				if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+					return false
+				}
+				low, ok := jsonHex4(data[i+3 : i+7])
+				if !ok || low < 0xdc00 || low > 0xdfff {
+					return false
+				}
+				i += 6
+			}
+		default:
+			return false
+		}
 	}
-	return false
+	return !quoted
+}
+func jsonHex4(b []byte) (uint16, bool) {
+	var n uint16
+	for _, c := range b {
+		n *= 16
+		switch {
+		case c >= '0' && c <= '9':
+			n += uint16(c - '0')
+		case c >= 'a' && c <= 'f':
+			n += uint16(c - 'a' + 10)
+		case c >= 'A' && c <= 'F':
+			n += uint16(c - 'A' + 10)
+		default:
+			return 0, false
+		}
+	}
+	return n, true
+}
+
+// VaultSelectionField preserves reserved presence separately from a value.
+// Its zero value is absent; null is never an absent legacy spelling.
+type VaultSelectionField struct {
+	present bool
+	value   VaultSelection
+	invalid bool
+}
+
+func (f VaultSelectionField) Present() bool { return f.present }
+func (f VaultSelectionField) IsZero() bool  { return !f.present }
+func (f VaultSelectionField) Selection() (VaultSelection, error) {
+	if !f.present || f.invalid {
+		return VaultSelection{}, ErrVaultSelectionShape
+	}
+	return cloneVaultSelection(f.value), nil
+}
+func NewVaultSelectionField(s VaultSelection) VaultSelectionField {
+	return VaultSelectionField{present: true, value: cloneVaultSelection(s)}
+}
+func cloneVaultSelection(s VaultSelection) VaultSelection {
+	if s.Identity.Origin != nil {
+		o := *s.Identity.Origin
+		s.Identity.Origin = &o
+	}
+	return s
+}
+func (f VaultSelectionField) MarshalJSON() ([]byte, error) {
+	if !f.present || f.invalid {
+		return nil, ErrVaultSelectionShape
+	}
+	return json.Marshal(f.value)
+}
+func scanVaultSelection(data []byte) (VaultSelectionField, error) {
+	d := json.NewDecoder(bytes.NewReader(data))
+	t, e := d.Token()
+	if e != nil || t != json.Delim('{') {
+		return VaultSelectionField{}, e
+	}
+	var f VaultSelectionField
+	for d.More() {
+		t, e := d.Token()
+		if e != nil {
+			return f, e
+		}
+		key, ok := t.(string)
+		if !ok {
+			return f, ErrVaultSelectionShape
+		}
+		var raw json.RawMessage
+		if e = d.Decode(&raw); e != nil {
+			return f, e
+		}
+		if !strings.EqualFold(key, "vault_selection") {
+			continue
+		}
+		if f.present || key != "vault_selection" {
+			f.present = true
+			f.invalid = true
+			return f, ErrVaultSelectionShape
+		}
+		f.present = true
+		if e = f.value.UnmarshalJSON(raw); e != nil {
+			f.invalid = true
+			return f, ErrVaultSelectionShape
+		}
+	}
+	return f, nil
 }

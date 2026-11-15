@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
-	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 )
 
 const envSecretStore = "A2A_SECRET_STORE"
@@ -52,7 +51,7 @@ func (a *App) credentialMetadata(p config.Paths, name string) (config.Credential
 	} else if c != nil {
 		return a.namedMetadata(p, name)
 	}
-	c, err := config.LoadCredentialMetadata(p, name, a.human)
+	c, err := a.readLegacyCredentialMetadata(p, name, a.human)
 	if err == nil {
 		err = validateCredentialIdentity(c, name)
 	}
@@ -81,7 +80,7 @@ func (a *App) selectedStore() (string, error) {
 	case config.BackendVaultV1:
 		// The legacy ambient selector lacks identity/domain/account/session
 		// binding; vault-v1 exists only as an explicit named backend.
-		return "", vaultRefusal(vaultv1.EBackendConfig)
+		return "", vaultRefusal(vaultEBackendConfig)
 	default:
 		return "", fmt.Errorf("unknown A2A_SECRET_STORE; use file or keychain")
 	}
@@ -95,9 +94,12 @@ func (a *App) keychainStore(p config.Paths) *keychainStore {
 }
 
 func validateCredentialIdentity(c config.Credentials, name string) error {
-	if c.VaultSelection != nil {
+	if c.VaultSelection.Present() {
+		if _, e := c.VaultSelection.Selection(); e != nil {
+			return vaultRefusal(vaultEFormat)
+		}
 		// Legacy (unnamed) metadata never carries a vault selection.
-		return vaultRefusal(vaultv1.EBackendConfig)
+		return vaultRefusal(vaultEBackendConfig)
 	}
 	prefix := "@" + name + ":"
 	if !strings.HasPrefix(c.UserID, prefix) || len(c.UserID) == len(prefix) || strings.ContainsAny(c.UserID, "\x00\r\n\t \"\\") {
@@ -124,11 +126,13 @@ func (a *App) loadCredentials(ctx context.Context, p config.Paths, name string) 
 		if store == config.BackendVaultV1 {
 			// Latch local identity/backend/connection/B1 before any native
 			// submission; the Matrix BeforeRequest guard runs only later.
-			sel, e := a.latchVaultSelection(c, name, creds)
+			sel, e := a.observeVaultSelection(c, name, creds)
 			if e != nil {
 				return config.Credentials{}, e
 			}
-			if creds.AccessToken, e = a.releaseVaultToken(ctx, sel); e != nil {
+			var report vaultAttemptReport
+			creds.AccessToken, report = a.releaseVaultToken(ctx, sel)
+			if e = report.diagnostic(); e != nil {
 				return config.Credentials{}, e
 			}
 		}
@@ -148,13 +152,13 @@ func (a *App) loadCredentials(ctx context.Context, p config.Paths, name string) 
 	if err != nil {
 		return config.Credentials{}, err
 	}
-	c, err := config.LoadCredentialMetadata(p, name, a.human)
+	c, err := a.readLegacyCredentialMetadata(p, name, a.human)
 	if err != nil {
 		return config.Credentials{}, err
 	}
 	a.secrets.Add(c.AccessToken, c.Password)
 	if err := validateCredentialIdentity(c, name); err != nil {
-		return config.Credentials{}, err
+		return config.Credentials{}, vaultMetadataError(err)
 	}
 	if store == "keychain" {
 		if a.human {
@@ -295,4 +299,13 @@ func (a *App) migrateCredentials(ctx context.Context, args []string) error {
 	}
 	a.printf("migrated %s to keychain; credential file contains metadata only\n", name)
 	return nil
+}
+
+// The observer counts the real legacy metadata/secret read boundary in tests;
+// it cannot return credentials, select a store or grant vault authority.
+func (a *App) readLegacyCredentialMetadata(p config.Paths, name string, human bool) (config.Credentials, error) {
+	if a.beforeLegacyCredentialRead != nil {
+		a.beforeLegacyCredentialRead()
+	}
+	return config.LoadCredentialMetadata(p, name, human)
 }

@@ -41,20 +41,14 @@ func (c *Credentials) decodeJSON(data []byte, strict bool) error {
 	if err := d.Decode(&wire); err != nil {
 		return err
 	}
-	next.VaultSelection = nil
-	if raw := bytes.TrimSpace(wire.Vault); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
-		var sel VaultSelection
-		if err := sel.UnmarshalJSON(raw); err != nil {
-			if strict {
-				return err
-			}
-			// Lenient legacy decoding keeps only PRESENCE of a malformed value:
-			// the zero selection never validates, and every legacy path refuses
-			// any present vault_selection before a secret-store access.
-			sel = VaultSelection{}
+	field, err := scanVaultSelection(data)
+	if err != nil {
+		if strict || !field.present {
+			return err
 		}
-		next.VaultSelection = &sel
+		field.invalid = true // legacy decode retains reserved invalid presence for validation
 	}
+	next.VaultSelection = field
 	next.waitKeywordsRaw = wire.Keywords
 	for _, raw := range wire.Keywords {
 		// Invalid optional data stays opaque; it never becomes an active filter.
