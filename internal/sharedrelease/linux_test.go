@@ -157,10 +157,16 @@ func TestLinuxPackageSBOMBinding(t *testing.T) {
 				}
 			})
 		}
+		if strings.HasSuffix(n, ".rpm") {
+			bad := []byte(strings.ReplaceAll(string(good), `"epoch":0`, `"epoch":1`))
+			if e := verifySBOM(bad, n, sha, "0.1.2", arch); e == nil || e.Error() != "linux-sbom-package-binding" {
+				t.Fatal("wrong RPM epoch admitted", e)
+			}
+		}
 	}
 }
 
-func tgz(t *testing.T, files map[string][]byte) []byte {
+func tgz(t *testing.T, files map[string][]byte, binaryMode ...int64) []byte {
 	t.Helper()
 	var b bytes.Buffer
 	g := gzip.NewWriter(&b)
@@ -175,6 +181,9 @@ func tgz(t *testing.T, files map[string][]byte) []byte {
 		mode := int64(0644)
 		if n == "./usr/bin/a2a" {
 			mode = 0755
+			if len(binaryMode) > 0 {
+				mode = binaryMode[0]
+			}
 		}
 		if e := w.WriteHeader(&tar.Header{Name: n, Typeflag: tar.TypeReg, Mode: mode, Size: int64(len(x))}); e != nil {
 			t.Fatal(e)
@@ -191,7 +200,7 @@ func tgz(t *testing.T, files map[string][]byte) []byte {
 	}
 	return b.Bytes()
 }
-func debFixture(t *testing.T, arch string, bin []byte, script bool) []byte {
+func debFixture(t *testing.T, arch string, bin []byte, script bool, binaryMode ...int64) []byte {
 	t.Helper()
 	control := map[string][]byte{"control": []byte("Package: a2a\nVersion: 0.1.2\nArchitecture: " + arch + "\n")}
 	if script {
@@ -202,7 +211,7 @@ func debFixture(t *testing.T, arch string, bin []byte, script bool) []byte {
 	for _, f := range []struct {
 		n string
 		b []byte
-	}{{"debian-binary", []byte("2.0\n")}, {"control.tar.gz", tgz(t, control)}, {"data.tar.gz", tgz(t, map[string][]byte{"./usr/bin/a2a": bin})}} {
+	}{{"debian-binary", []byte("2.0\n")}, {"control.tar.gz", tgz(t, control)}, {"data.tar.gz", tgz(t, map[string][]byte{"./usr/bin/a2a": bin}, binaryMode...)}} {
 		fmt.Fprintf(&out, "%-16s%-12d%-6d%-6d%-8o%-10d`\n", f.n+"/", 0, 0, 0, 0644, len(f.b))
 		out.Write(f.b)
 		if len(f.b)%2 != 0 {
@@ -211,7 +220,29 @@ func debFixture(t *testing.T, arch string, bin []byte, script bool) []byte {
 	}
 	return out.Bytes()
 }
-func rpmFixture(t *testing.T, arch string, bin []byte, script bool) []byte {
+
+// Normal RPM build-architecture metadata is accepted, while body/interpreter,
+// file-trigger and transaction-trigger surfaces are refused by tag presence.
+// RPM epoch changes and package setuid bits cannot hide behind equal payload bytes.
+func TestLinuxPackageForbiddenMetadata(t *testing.T) {
+	bin := []byte("reference binary")
+	if e := verifyRPM(rpmFixture(t, "x86_64", bin, false, map[uint32]string{1089: "x86_64"}), bin, "0.1.2", "x86_64"); e != nil {
+		t.Fatal("ordinary RPM metadata refused", e)
+	}
+	for _, tag := range []uint32{1023, 1085, 1065, 1151, 5066, 5076, 5104} {
+		bad := rpmFixture(t, "x86_64", bin, false, map[uint32]string{tag: "forbidden script metadata"})
+		if e := verifyRPM(bad, bin, "0.1.2", "x86_64"); e == nil || e.Error() != "rpm-script-or-trigger" {
+			t.Fatalf("script tag %d admitted: %v", tag, e)
+		}
+	}
+	if e := verifyRPM(rpmFixture(t, "x86_64", bin, false, map[uint32]string{1003: "1"}), bin, "0.1.2", "x86_64"); e == nil || e.Error() != "package-architecture-or-version" {
+		t.Fatal("RPM epoch change admitted", e)
+	}
+	if e := verifyDeb(debFixture(t, "amd64", bin, false, 04755), bin, "0.1.2", "amd64"); e == nil || e.Error() != "package-executable-mode-or-owner" {
+		t.Fatal("setuid package admitted", e)
+	}
+}
+func rpmFixture(t *testing.T, arch string, bin []byte, script bool, extra ...map[uint32]string) []byte {
 	t.Helper()
 	header := func(tags map[uint32]string) []byte {
 		keys := []int{}
@@ -243,6 +274,11 @@ func rpmFixture(t *testing.T, arch string, bin []byte, script bool) []byte {
 		lead = append(lead, 0)
 	}
 	tags := map[uint32]string{1000: "a2a", 1001: "0.1.2", 1002: "1", 1022: arch, 1124: "cpio", 1125: "gzip"}
+	for _, more := range extra {
+		for k, v := range more {
+			tags[k] = v
+		}
+	}
 	if script {
 		tags[1024] = "forbidden fixture script"
 	}

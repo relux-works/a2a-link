@@ -103,12 +103,12 @@ func sbomFixture(n, sum string) []byte {
 			arch = "arm64"
 		}
 		if strings.HasSuffix(n, ".rpm") {
-			kind, version, arch, release = "rpm", "0.1.2-1", "x86_64", "1"
+			kind, version, arch, release = "rpm", "0:0.1.2-1", "x86_64", "1"
 			if strings.Contains(n, "aarch64") {
 				arch = "aarch64"
 			}
 		}
-		artifacts = `[{"name":"a2a","type":"` + kind + `","version":"` + version + `","metadata":{"architecture":"` + arch + `","version":"0.1.2","release":"` + release + `"}}]`
+		artifacts = `[{"name":"a2a","type":"` + kind + `","version":"` + version + `","metadata":{"architecture":"` + arch + `","version":"0.1.2","release":"` + release + `","epoch":0}}]`
 	}
 	return []byte(`{"descriptor":{"name":"syft","version":"1.38.0"},"source":{"type":"file","metadata":{"path":"` + n + `","digests":[{"algorithm":"sha256","value":"` + sum + `"}]}},"artifacts":` + artifacts + `}`)
 }

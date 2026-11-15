@@ -223,7 +223,10 @@ func verifySBOM(raw []byte, name, sha, version, arch string) error {
 		} `json:"source"`
 		Artifacts []struct {
 			Name, Type, Version string
-			Metadata            struct{ Architecture, Version, Release string }
+			Metadata            struct {
+				Architecture, Version, Release string
+				Epoch                          *int
+			}
 		} `json:"artifacts"`
 	}
 	if json.Unmarshal(raw, &s) != nil || s.Descriptor.Name != "syft" || s.Descriptor.Version != "1.38.0" || s.Source.Type != "file" || filepath.Base(s.Source.Metadata.Path) != name {
@@ -254,7 +257,7 @@ func verifySBOM(raw []byte, name, sha, version, arch string) error {
 	// inventory; independently verified payload byte equality links the two.
 	kind, packageArch, packageVersion := "deb", arch, version
 	if strings.HasSuffix(name, ".rpm") {
-		kind, packageVersion = "rpm", version+"-1"
+		kind, packageVersion = "rpm", "0:"+version+"-1"
 		packageArch = "x86_64"
 		if arch == "arm64" {
 			packageArch = "aarch64"
@@ -265,7 +268,7 @@ func verifySBOM(raw []byte, name, sha, version, arch string) error {
 		if a.Name != "a2a" || a.Type != kind {
 			continue
 		}
-		if a.Version != packageVersion || a.Metadata.Architecture != packageArch || a.Metadata.Version != version || kind == "rpm" && a.Metadata.Release != "1" {
+		if a.Version != packageVersion || a.Metadata.Architecture != packageArch || a.Metadata.Version != version || kind == "rpm" && (a.Metadata.Release != "1" || a.Metadata.Epoch == nil || *a.Metadata.Epoch != 0) {
 			return errors.New("linux-sbom-package-binding")
 		}
 		matchedPackage++

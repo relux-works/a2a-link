@@ -163,6 +163,12 @@ func rpmHeader(b []byte) (map[uint32]string, int, error) {
 			}
 			tags[tag] = string(tail[:j])
 		}
+		if typ == 4 && count == 1 {
+			if offset+4 > size {
+				return nil, 0, errors.New("rpm-header")
+			}
+			tags[tag] = strconv.FormatUint(uint64(binary.BigEndian.Uint32(store[offset:offset+4])), 10)
+		}
 	}
 	return tags, int(end), nil
 }
@@ -186,9 +192,21 @@ func verifyRPM(b, binaryBytes []byte, version, arch string) error {
 	if tags[1000] != "a2a" || tags[1001] != version || tags[1002] != "1" || tags[1022] != arch {
 		return errors.New("package-architecture-or-version")
 	}
+	if epoch, exists := tags[1003]; exists && epoch != "0" {
+		return errors.New("package-architecture-or-version")
+	}
 	// All script bodies, interpreters and transaction/file triggers are forbidden,
 	// even when an empty value would appear harmless.
-	for _, tag := range []uint32{1023, 1024, 1025, 1026, 1065, 1079, 1085, 1086, 1087, 1088, 1089, 1090, 1091, 1092, 1093, 1094, 1095, 1096, 1151, 1152, 1153, 1154, 1155, 1156, 1157, 1158, 5025, 5026, 5027, 5028, 5029, 5030, 5031, 5032, 5033, 5034, 5035, 5036, 5037, 5038, 5039, 5040} {
+	// RPMTAG_* from rpm-software-management/rpm include/rpm/rpmtag.h:
+	// script bodies/interpreters/flags and ordinary/file/transaction triggers.
+	// BUILDARCHS (1089), for example, is metadata rather than a script.
+	for _, tag := range []uint32{
+		1023, 1024, 1025, 1026, 1065, 1066, 1067, 1068, 1069, 1079, 1085, 1086, 1087, 1088, 1091, 1092,
+		1100, 1101, 1102, 1151, 1152, 1153, 1154, 1171, 1174, 1175, 5005, 5006,
+		5020, 5021, 5022, 5023, 5024, 5025, 5026, 5027,
+		5063, 5064, 5065, 5066, 5067, 5068, 5069, 5070, 5071, 5072, 5073, 5074, 5075, 5076, 5077, 5078, 5079, 5080, 5081, 5082,
+		5084, 5085, 5086, 5087, 5088, 5089, 5103, 5104, 5105, 5106, 5107, 5108,
+	} {
 		if _, ok := tags[tag]; ok {
 			return errors.New("rpm-script-or-trigger")
 		}
