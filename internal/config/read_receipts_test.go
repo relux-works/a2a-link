@@ -311,3 +311,70 @@ func TestReadReceiptClaimExcludesCompetingSender(t *testing.T) {
 		t.Fatal("stale release dropped the live claim")
 	}
 }
+
+// Proves a failed ledger write never widens a receipt: entries the mailbox
+// received while the ledger kept its older state (B truncated, C full) are
+// detected at the next note, the ledger becomes Broken, and no receipt ever
+// covers them, not even after a full print of B. The control saves the
+// ledger and keeps its normal target.
+func TestReadReceiptLedgerWriteFailureBreaks(t *testing.T) {
+	for _, saved := range []bool{true, false} {
+		p, mb, r := receiptWorld(t, "$A", "$B", "$C", "$D")
+		deliver(t, mb, r, []string{"$A"}, "$A")
+		if err := SaveReadReceipts(p, "a", r); err != nil {
+			t.Fatal(err)
+		}
+		deliver(t, mb, r, []string{"$B", "$C"}, "$C") // B truncated
+		if saved {
+			if err := SaveReadReceipts(p, "a", r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r, err := LoadReadReceipts(p, "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		deliver(t, mb, r, []string{"$D"}, "$D")
+		r.NoteFullPrint("!r", []string{"$B"})
+		got := r.Target(mb, "!r")
+		switch {
+		case saved && (got != "$D" || r.Broken):
+			t.Fatalf("control: target %q broken %v", got, r.Broken)
+		case !saved && (got != "" || !r.Broken || len(r.Claim(mb, 0, 1)) != 0):
+			t.Fatalf("lost write: target %q broken %v", got, r.Broken)
+		}
+	}
+}
+
+// Proves an interrupted inbox (ledger noted, mailbox receipt never written)
+// stays sound: the entries are printed and noted again, then received.
+func TestReadReceiptInterruptedReceiptStaysSound(t *testing.T) {
+	_, mb, r := receiptWorld(t, "$1", "$2")
+	r.NoteReceived(mb, mb.InOrder([]string{"$1", "$2"}), func(MailEntry) bool { return true })
+	if !r.Verify(mb) {
+		t.Fatal("unreceived noted batch broke the ledger")
+	}
+	deliver(t, mb, r, []string{"$1", "$2"}, "$1", "$2")
+	if got := r.Target(mb, "!r"); got != "$2" || r.Broken {
+		t.Fatalf("target %q broken %v", got, r.Broken)
+	}
+}
+
+// Proves an attempt with no definite answer holds its room: the claim stays
+// until the quarantine ends, so no other receipt for the room goes meanwhile;
+// afterwards the newest target is claimable.
+func TestReadReceiptUncertainQuarantine(t *testing.T) {
+	_, mb, r := receiptWorld(t, "$1", "$2")
+	deliver(t, mb, r, []string{"$1"}, "$1")
+	if got := r.Claim(mb, 100, 200); got["!r"] != "$1" {
+		t.Fatalf("claim %v", got)
+	}
+	r.Uncertain("!r", "$1", 10_000)
+	deliver(t, mb, r, []string{"$2"}, "$2")
+	if got := r.Claim(mb, 5_000, 6_000); len(got) != 0 {
+		t.Fatalf("claimed during quarantine: %v", got)
+	}
+	if got := r.Claim(mb, 10_001, 11_000); got["!r"] != "$2" {
+		t.Fatalf("after quarantine: %v", got)
+	}
+}

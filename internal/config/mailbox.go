@@ -283,6 +283,14 @@ func (m *Mailbox) earlierLive(room, id string) []string {
 	return out
 }
 
+// LastReceived is the newest id in the receipt index ("" when it is empty).
+func (m *Mailbox) LastReceived() string {
+	if len(m.received) == 0 {
+		return ""
+	}
+	return m.received[len(m.received)-1]
+}
+
 // Received reports whether id was received (it is in the receipt index).
 func (m *Mailbox) Received(id string) bool { return m.recv[id] }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -241,9 +242,9 @@ func TestSeenByFailingEndpointIsQuietAndRetried(t *testing.T) {
 // inbox returns promptly with the mail received, and the next inbox against a
 // responsive endpoint sends the receipt.
 func TestSeenByHangingEndpointIsBounded(t *testing.T) {
-	oldBudget, oldCall := readReceiptBudget, readReceiptCallMax
-	readReceiptBudget, readReceiptCallMax = 300*time.Millisecond, 150*time.Millisecond
-	t.Cleanup(func() { readReceiptBudget, readReceiptCallMax = oldBudget, oldCall })
+	oldBudget, oldCall, oldQ := readReceiptBudget, readReceiptCallMax, readReceiptQuarantine
+	readReceiptBudget, readReceiptCallMax, readReceiptQuarantine = 300*time.Millisecond, 150*time.Millisecond, 0
+	t.Cleanup(func() { readReceiptBudget, readReceiptCallMax, readReceiptQuarantine = oldBudget, oldCall, oldQ })
 	e, room := seenWorld(t)
 	hang := make(chan struct{})
 	e.hs.mu.Lock()
@@ -280,5 +281,81 @@ func TestSeenByRoomsIndependent(t *testing.T) {
 	got := e.hs.readReceipts()
 	if len(got) != 1 || got[0].room != lobby || got[0].event != id {
 		t.Fatalf("receipts %+v", got)
+	}
+}
+
+// Proves an attempt without a definite answer (a timeout) quarantines its
+// room: the next inbox sends no receipt there, even for newer mail, so the
+// abandoned request cannot be overtaken; once the quarantine ends the newest
+// target is sent. A definite refusal (500) releases at once: see
+// TestSeenByFailingEndpointIsQuietAndRetried.
+func TestSeenByUncertainAttemptQuarantinesRoom(t *testing.T) {
+	oldBudget, oldCall := readReceiptBudget, readReceiptCallMax
+	readReceiptBudget, readReceiptCallMax = 300*time.Millisecond, 150*time.Millisecond
+	t.Cleanup(func() { readReceiptBudget, readReceiptCallMax = oldBudget, oldCall })
+	e, room := seenWorld(t)
+	hang := make(chan struct{})
+	e.hs.mu.Lock()
+	e.hs.receiptHang = hang
+	e.hs.mu.Unlock()
+	e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "first"))
+	e.as("alice", "inbox").ok(t)
+	e.hs.mu.Lock()
+	e.hs.receiptHang = nil
+	e.hs.mu.Unlock()
+	close(hang)
+	id2 := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "second"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts()
+	if err := config.UpdateReadReceipts(context.Background(), e.paths(), "alice", func(r *config.ReadReceipts, _ *config.Mailbox) (bool, error) {
+		r.Rooms[room].ClaimUntil = 1 // the quarantine has ended
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(id2)
+}
+
+// Proves a ledger that could not be written never widens a receipt: while the
+// ledger file is unusable, inbox delivers mail (B truncated, C full) without
+// marks; after the storage recovers (the older ledger is back), the ledger
+// detects the unmarked receipts and sends nothing more, not even after a full
+// read of B and a fully delivered D. Beside TestSeenByTruncatedEntryHoldsUntilFullRead.
+func TestSeenByLedgerWriteFailureNeverWidens(t *testing.T) {
+	e, room := seenWorld(t)
+	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	path := e.paths().ReadReceiptsFile("alice")
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil { // the ledger cannot be read or replaced
+		t.Fatal(err)
+	}
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", strings.Repeat("long ", 500)))
+	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	e.as("alice", "inbox").ok(t)
+	if !e.received("alice", b) || !e.received("alice", c) {
+		t.Fatal("mail was not received")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.as("alice", "read", "proj", "--event", b).ok(t)
+	e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	r, err := config.LoadReadReceipts(e.paths(), "alice")
+	if err != nil || !r.Broken {
+		t.Fatalf("ledger not marked broken: %v %+v", err, r)
 	}
 }

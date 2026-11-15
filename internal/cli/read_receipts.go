@@ -2,12 +2,14 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"sort"
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
+	"github.com/relux-works/a2a-swarm/internal/matrix"
 )
 
 // Seen by: after `a2a inbox` the agent's account places a public m.read receipt
@@ -23,6 +25,9 @@ import (
 var (
 	readReceiptBudget  = 5 * time.Second
 	readReceiptCallMax = 3 * time.Second
+	// readReceiptQuarantine holds a room after an attempt with no definite
+	// homeserver answer, which the homeserver may still apply later.
+	readReceiptQuarantine = 2 * time.Minute
 )
 
 // fullyPrinted reports whether inbox's frame or JSON line carries the
@@ -94,8 +99,9 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 	// sends an older target for the same room meanwhile.
 	until := now.Add(readReceiptBudget + readReceiptCallMax).UnixMilli()
 	if err := config.UpdateReadReceipts(ctx, s.paths, s.name, func(r *config.ReadReceipts, mb *config.Mailbox) (bool, error) {
+		wasBroken := r.Broken
 		want = r.Claim(mb, now.UnixMilli(), until)
-		return len(want) > 0, nil
+		return len(want) > 0 || r.Broken != wasBroken, nil
 	}); err != nil || len(want) == 0 {
 		return
 	}
@@ -104,7 +110,7 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 		rooms = append(rooms, room)
 	}
 	sort.Strings(rooms)
-	accepted := map[string]bool{}
+	accepted, definite := map[string]bool{}, map[string]bool{}
 	tried := []string{}
 	for _, room := range rooms {
 		if ctx.Err() != nil {
@@ -115,7 +121,10 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 		done()
 		tried = append(tried, room)
 		accepted[room] = err == nil
+		var refused *matrix.Error
+		definite[room] = err == nil || errors.As(err, &refused) || errors.Is(err, matrix.ErrAuth)
 	}
+	quarantine := s.app.Now().Add(readReceiptQuarantine).UnixMilli()
 	record, stop := context.WithTimeout(context.WithoutCancel(ctx), readReceiptCallMax)
 	defer stop()
 	_ = config.UpdateReadReceipts(record, s.paths, s.name, func(r *config.ReadReceipts, _ *config.Mailbox) (bool, error) {
@@ -125,10 +134,13 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 			}
 		}
 		for _, room := range tried {
-			if accepted[room] {
+			switch {
+			case accepted[room]:
 				r.Accepted(room, want[room])
-			} else {
+			case definite[room]:
 				r.Failure(room, want[room])
+			default:
+				r.Uncertain(room, want[room], quarantine)
 			}
 		}
 		return true, nil

@@ -1801,9 +1801,15 @@ reached the session **in full**:
 An undelivered entry holds the receipt of its room just before it until it is
 completed; an entry received out of mailbox order is no target until every
 earlier entry of its room is received and delivered. Rooms are independent.
-Completing one entry never jumps over another undelivered one. Receipts never
-move backwards: a command claims a room for the receipt it is sending, and a
-competing command skips that room until the claim is released or expires.
+Completing one entry never jumps over another undelivered one. Every event a
+receipt is ever sent for was a valid target when sent and stays one (a
+delivered entry never becomes undelivered), so the safety rule does not depend
+on the order in which the homeserver applies receipts. Ordering is best effort:
+this identity never sends an older receipt after a newer one (a command claims
+a room for the receipt it is sending, and a competing command skips that room
+until the claim is released or expires), but a homeserver may still apply an
+abandoned request after the 2-minute hold below. The room then shows an older,
+still truthful position until the next receipt.
 Entries received before the ledger existed are the baseline and are not
 judged.
 
@@ -1811,9 +1817,16 @@ The ledger (`state/<name>.read-receipts.json`, mode 0600) is written under the
 delivery lock before the mailbox receipt. The receipt itself is posted after
 the lock is released, one bounded attempt per room per command (3 s per
 request, 5 s in total), prints nothing and never changes the exit code; a
-failure is counted in the ledger and retried by the next inbox. A ledger that
-cannot be read or written only withholds receipts: mail is never affected. A
-room with more than 512 undelivered entries stops sending receipts.
+failure with a definite homeserver answer is counted and retried by the next
+inbox. An attempt without one (a timeout, a broken connection) may still be
+applied later, so its room sends no other receipt for 2 minutes. A ledger that
+cannot be read or written only withholds receipts: mail is never affected.
+The ledger records the newest mailbox receipt it noted; if the mailbox later
+shows entries received without a ledger mark (a failed ledger write, an older
+binary on the same identity), the ledger is marked broken and sends no
+receipt again. Removing `state/<name>.read-receipts.json` starts a new
+baseline explicitly. A room with more than 512 undelivered entries stops
+sending receipts.
 
 ### Environment delivery: the Claude Code and Codex hook doorbell (`a2a hook`)
 Notifications reach the agent's session (protocol rule 4) through the public hook mechanism of its runtime: commands that Claude Code or the Codex

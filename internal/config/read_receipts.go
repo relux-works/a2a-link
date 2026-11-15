@@ -73,7 +73,42 @@ type ReadReceiptRoom struct {
 // ReadReceipts is the ledger of one identity.
 type ReadReceipts struct {
 	Rooms map[string]*ReadReceiptRoom `json:"rooms,omitempty"`
+	// Before and Last bracket the newest mailbox receipt this ledger noted:
+	// the receipt index ended at Before when the batch was noted, and ends at
+	// Last once that batch is received. Any other newest receipt means
+	// entries were received without a ledger mark (a failed ledger write, an
+	// older binary): their disposition is unknown, so the ledger is Broken.
+	Before string `json:"before,omitempty"`
+	Last   string `json:"last,omitempty"`
+	Noted  bool   `json:"noted,omitempty"`
+	// Broken: no receipt is ever sent again from this ledger. Recovery is an
+	// explicit new baseline (removing the ledger file).
+	Broken bool `json:"broken,omitempty"`
 }
+
+// verify marks the ledger Broken when the mailbox received entries that the
+// ledger never noted. It returns whether the ledger may still be used.
+func (r *ReadReceipts) verify(mb *Mailbox) bool {
+	if r.Broken {
+		return false
+	}
+	if !r.Noted {
+		return true
+	}
+	got := mb.LastReceived()
+	switch {
+	case got == r.Last:
+	case got == r.Before && r.Last != r.Before && mb.Live(r.Last):
+		// The noted batch was not received (an interrupted inbox): consistent.
+	default:
+		r.Broken = true
+		return false
+	}
+	return true
+}
+
+// Verify is verify for callers that persist the result.
+func (r *ReadReceipts) Verify(mb *Mailbox) bool { return r.verify(mb) }
 
 // ReadReceiptsFile is the ledger file of name.
 func (p Paths) ReadReceiptsFile(name string) string {
@@ -181,13 +216,25 @@ func (r *ReadReceipts) room(id string) *ReadReceiptRoom {
 // done reports whether an event entry's complete body reached the session.
 // It must run before mb.Receive of the same entries (Waits reads the live set).
 // Invites are not room events and carry no mark.
+//
+// entries must be in the order the caller passes their ids to mb.Receive: the
+// expected newest receipt (Last) is derived from it.
 func (r *ReadReceipts) NoteReceived(mb *Mailbox, entries []MailEntry, done func(MailEntry) bool) {
+	if !r.verify(mb) {
+		return
+	}
 	batch := map[string]bool{}
 	ids := make([]string, 0, len(entries))
+	before := mb.LastReceived()
+	last := before
 	for _, e := range entries {
+		if !batch[e.ID] && mb.Live(e.ID) {
+			last = e.ID
+		}
 		batch[e.ID] = true
 		ids = append(ids, e.ID)
 	}
+	r.Before, r.Last, r.Noted = before, last, true
 	for _, e := range mb.InOrder(ids) {
 		if e.Kind != MailEvent && e.Kind != MailGap {
 			continue
@@ -272,7 +319,7 @@ func (rr *ReadReceiptRoom) bound() {
 // may not advance past Sent.
 func (r *ReadReceipts) Target(mb *Mailbox, room string) string {
 	rr := r.Rooms[room]
-	if rr == nil || rr.Frozen {
+	if rr == nil || rr.Frozen || !r.verify(mb) {
 		return ""
 	}
 	undelivered := map[string]bool{}
@@ -310,6 +357,9 @@ func (r *ReadReceipts) Target(mb *Mailbox, room string) string {
 // that no other command is sending, and claims each until (Unix ms).
 func (r *ReadReceipts) Claim(mb *Mailbox, now, until int64) map[string]string {
 	out := map[string]string{}
+	if !r.verify(mb) {
+		return out
+	}
 	rooms := make([]string, 0, len(r.Rooms))
 	for room := range r.Rooms {
 		rooms = append(rooms, room)
@@ -350,6 +400,24 @@ func (r *ReadReceipts) Accepted(room, event string) {
 	rr.Log = append([]ReadReceiptMark(nil), rr.Log[i+1:]...)
 	rr.Failed = 0
 	r.Release(room, event)
+}
+
+// Uncertain records an attempt whose outcome is unknown (no definite
+// homeserver answer: a timeout or a broken connection). The homeserver may
+// still apply it, so the claim on event is held until until (Unix ms): no
+// other receipt for room is sent before then, so a late apply of this one
+// cannot land after a newer one sent meanwhile.
+func (r *ReadReceipts) Uncertain(room, event string, until int64) {
+	rr := r.Rooms[room]
+	if rr == nil {
+		return
+	}
+	if rr.Failed < 1<<20 {
+		rr.Failed++
+	}
+	if rr.Claim == event {
+		rr.ClaimUntil = until
+	}
 }
 
 // Failure records one failed attempt to send event in room.
