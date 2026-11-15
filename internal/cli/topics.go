@@ -864,8 +864,7 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 	for _, ev := range events {
 		verdict := observer.Observe(ev, roomID, s.creds.UserID, a.Now())
 		if !*asJSON {
-			a.printf("verification: %s\n", verdict)
-			a.printEvent(ev, s.server)
+			a.printEvent(ev, s.server, verdict)
 			printed = append(printed, ev.EventID)
 			continue
 		}
@@ -978,7 +977,7 @@ func (s *session) collectWhere(ctx context.Context, n int, keep func(matrix.Even
 	return out, nil
 }
 
-func (a *App) printEvent(ev matrix.Event, server string) {
+func (a *App) printEvent(ev matrix.Event, server string, verification ...string) {
 	m := ev.Message()
 	ts := time.UnixMilli(ev.OriginServerTS).UTC().Format(time.RFC3339)
 	meta := []string{}
@@ -1017,6 +1016,9 @@ func (a *App) printEvent(ev matrix.Event, server string) {
 	line := fmt.Sprintf("[%s] %s %s", ts, senderText(ev.Sender), sanitizeLine(ev.EventID))
 	if len(meta) > 0 {
 		line += " " + sanitizeLine(strings.Join(meta, " "))
+	}
+	if len(verification) > 0 {
+		line += verificationField(verification[0])
 	}
 	a.printf("%s\n", line)
 	body := sanitizeText(m.Body)

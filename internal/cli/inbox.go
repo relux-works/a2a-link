@@ -309,10 +309,7 @@ func inboxFrame(items []waitItem, server string, more int) string {
 				fields = append(fields, f.k+"="+inboxField(f.v))
 			}
 		}
-		b.WriteString(strings.Join(fields, " ") + "\n")
-		if rec.Verification != "" {
-			b.WriteString(inboxIndent + "verification: " + sanitizeLine(rec.Verification) + "\n")
-		}
+		b.WriteString(strings.Join(fields, " ") + verificationField(rec.Verification) + "\n")
 		if rec.Media != nil {
 			data, _ := json.Marshal(rec.Media)
 			// JSON escapes retain full opaque handles within one indented line.

@@ -196,7 +196,7 @@ func TestSenderMailboxConsumers(t *testing.T) {
 						if mode == "wait-text" {
 							fmt.Fprintf(&want, "to #proj %s from=%s kind=question topic=alpha: bounded body\n", ids[i], tc.text)
 						} else {
-							fmt.Fprintf(&want, "--- event %d/%d: to from=%s room=#proj kind=question id=%s topic=alpha\n  | bounded body\n", i+1, len(ids), tc.text, ids[i])
+							fmt.Fprintf(&want, "--- event %d/%d: to from=%s room=#proj kind=question id=%s topic=alpha verification=\"unsigned (no envelope)\"\n  | bounded body\n", i+1, len(ids), tc.text, ids[i])
 						}
 					}
 					if mode == "inbox-text" {

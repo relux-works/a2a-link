@@ -10,7 +10,8 @@ Ordinary `a2a inbox` and `a2a read` label messages with exactly one result:
 - `unknown-author`: a structurally parseable author cannot be resolved against
   an available protected host roster, including missing/unreadable configuration.
 
-Text prints a `verification:` line; `--json` adds the string `verification`
+Text adds a quoted `verification` field to the generated event header;
+`--json` adds the string `verification`
 member to each message record. Inbox brief summaries, private saved frames and
 `inbox show` retain the observation. Saved observations describe the original
 read; `inbox show` does not refresh them. Invites and gap records have no label.

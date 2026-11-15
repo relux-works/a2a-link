@@ -194,7 +194,7 @@ func TestInboxLegacyFrameBytesUnchanged(t *testing.T) {
 	e.as("alice", "inbox").ok(t)
 	id := e.hs.inject(room, "@bob:test.local", ping(7))
 	got := e.as("alice", "inbox").ok(t).stdout
-	want := inboxBegin + "\n--- event 1/1: mention from=@bob:test.local room=#proj kind=- id=" + id + "\n  | verification: unsigned (no envelope)\n  | @alice:test.local ping 7\n" + inboxEnd + "\n"
+	want := inboxBegin + "\n--- event 1/1: mention from=@bob:test.local room=#proj kind=- id=" + id + " verification=\"unsigned (no envelope)\"\n  | @alice:test.local ping 7\n" + inboxEnd + "\n"
 	if got != want {
 		t.Fatalf("default frame bytes changed:\ngot %q\nwant %q", got, want)
 	}

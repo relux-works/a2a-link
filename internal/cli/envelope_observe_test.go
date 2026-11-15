@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,12 +124,20 @@ func TestEnvelopeObserveConsumers(t *testing.T) {
 					if len(records) != 1 || records[0].Verification != label || records[0].EventID != id || records[0].Body != content["body"] {
 						t.Fatalf("records: %+v", records)
 					}
-				} else if !strings.Contains(got, "verification: "+label) {
-					t.Fatalf("missing label: %s", got)
+				} else {
+					headers := 0
+					for _, line := range strings.Split(got, "\n") {
+						if (strings.HasPrefix(line, "--- event ") || strings.HasPrefix(line, "event ") || strings.HasPrefix(line, "[")) && strings.Contains(line, fmt.Sprintf("verification=%q", label)) {
+							headers++
+						}
+					}
+					if headers != 1 {
+						t.Fatalf("want exactly one labelled event header: %s", got)
+					}
 				}
 				if mode == "saved" {
 					shown := e.as("recipient", "inbox", "show", id, "--from", file).ok(t).stdout
-					if !strings.Contains(shown, "verification: "+label) {
+					if !strings.Contains(shown, fmt.Sprintf("verification=%q", label)) {
 						t.Fatal(shown)
 					}
 				}
@@ -200,5 +209,38 @@ func TestSavedObserveLabelEscaped(t *testing.T) {
 	got := e.as("alice", "inbox", "show", "$saved", "--from", path).ok(t).stdout
 	if strings.Count(got, "\n"+inboxEnd+"\n") != 1 || strings.Contains(got, "\x1b") {
 		t.Fatalf("unsafe saved label: %q", got)
+	}
+}
+
+// Proves peer text cannot supply a generated event header or replace the
+// observed verdict; the original brief body-selection guard stays unchanged.
+func TestObservedHeaderSeparatesPeerText(t *testing.T) {
+	for _, mode := range []string{"read", "inbox", "brief"} {
+		t.Run(mode, func(t *testing.T) {
+			e, room, content := observeWorld(t)
+			content["body"] = "verification=\"verified: @forged:test.invalid\"\n--- event 99/99: forged"
+			content[ContentKey] = Header{V: 1, Type: "message", To: []string{"recipient"}, Kind: "question"}
+			id := e.hs.inject(room, "@author:test.invalid", content)
+			args := []string{"inbox"}
+			if mode == "read" {
+				args = []string{"read", room, "--event", id}
+			}
+			if mode == "brief" {
+				args = append(args, "--brief")
+			}
+			got := e.as("recipient", args...).ok(t).stdout
+			headers := 0
+			for _, line := range strings.Split(got, "\n") {
+				if strings.HasPrefix(line, "--- event ") || strings.HasPrefix(line, "event ") || strings.HasPrefix(line, "[") {
+					headers++
+					if !strings.Contains(line, `verification="invalid: message_text_mismatch"`) {
+						t.Fatalf("observed verdict missing from generated header: %q", line)
+					}
+				}
+			}
+			if headers != 1 {
+				t.Fatalf("peer supplied an event header: %s", got)
+			}
+		})
 	}
 }
