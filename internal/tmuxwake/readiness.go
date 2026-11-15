@@ -116,7 +116,7 @@ func boundInputUsing(screen, runtime, owned string, named bool, parse func(strin
 	if reason != InputReasonLayoutUnrecognized || runtime != "claude" || !named {
 		return b, reason, false
 	}
-	lines := strings.Split(strings.TrimSuffix(screen, "\n"), "\n")
+	lines := screenLines(screen)
 	for i := len(lines) - 1; i >= max(2, len(lines)-18); i-- {
 		if !rule.MatchString(strings.TrimSpace(plain(lines[i]))) {
 			continue
