@@ -176,7 +176,7 @@ Posting never installs/downloads. The model bundle
 retains its upstream model card, which marks dataset license Unknown. This
 feature asserts no model licensing clearance and does not redistribute it.
 
-For #185, only the dedicated `--voice-worker` process opens the installed model
+For #185, only the dedicated `a2a-voice-worker` process opens the installed model
 directory, checks its identity against the non-symlink directory it inspected,
 and enters it through that held descriptor. It revalidates the pinned manifest
 and every asset through cwd before constructing the native engine. Model and
