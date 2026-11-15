@@ -139,6 +139,7 @@ func verifyEffective(raw, ruby []byte, m cask.Manifest, prefix, platform string)
 	if json.Unmarshal(c["variations"], &variations) != nil {
 		return errors.New("brew-variations")
 	}
+	macOS := map[string]bool{"golden_gate": true, "tahoe": true, "sequoia": true, "sonoma": true, "ventura": true, "monterey": true, "big_sur": true}
 	for key, patch := range variations {
 		target := "darwin/arm64"
 		switch key {
@@ -147,7 +148,8 @@ func verifyEffective(raw, ruby []byte, m cask.Manifest, prefix, platform string)
 		case "arm64_linux":
 			target = "linux/arm64"
 		default:
-			if !strings.HasPrefix(key, "arm64_") && !strings.HasPrefix(key, "x86_64_") {
+			osName := strings.TrimPrefix(strings.TrimPrefix(key, "arm64_"), "x86_64_")
+			if !macOS[osName] {
 				return errors.New("brew-variation-platform")
 			}
 		}
@@ -184,7 +186,7 @@ func verifyEffective(raw, ruby []byte, m cask.Manifest, prefix, platform string)
 		case "arm64_linux":
 			linuxARM = true
 		default:
-			if !strings.HasPrefix(p, "arm64_") {
+			if !strings.HasPrefix(p, "arm64_") || !macOS[strings.TrimPrefix(p, "arm64_")] {
 				return errors.New("brew-intel-macos-refused")
 			}
 			darwin = true

@@ -21,7 +21,7 @@ import (
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: a2a-distribution tools|linux|collect|crosscheck|manifest")
+		return errors.New("usage: a2a-distribution tools|linux|collect|crosscheck|manifest|reconcile")
 	}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := fs.String("root", ".", "reviewed source checkout")
@@ -32,6 +32,7 @@ func run(ctx context.Context, args []string) error {
 	tagObject := fs.String("tag-object", "", "expected annotated tag object")
 	archive := fs.String("source-archive", "", "git archive --format=tar of source commit")
 	epoch := fs.Int64("epoch", 0, "source commit timestamp")
+	releaseID := fs.Int64("release-id", 0, "recorded draft ID for read-only recovery")
 	artifactZIP := fs.String("artifact-zip", "", "captured private artifact ZIP")
 	artifactID := fs.Int64("artifact-id", 0, "immutable artifact ID")
 	artifactRun := fs.Int64("artifact-run", 0, "producer workflow run ID")
@@ -57,10 +58,20 @@ func run(ctx context.Context, args []string) error {
 	if e = b.Validate(); e != nil {
 		return e
 	}
-	if *out == "" && args[0] != "crosscheck" {
+	if *out == "" && args[0] != "crosscheck" && args[0] != "reconcile" {
 		return errors.New("usage: -out required")
 	}
 	switch args[0] {
+	case "reconcile":
+		if *qualification {
+			return errors.New("production-fixture-trust-refused")
+		}
+		state, e := sharedrelease.ReconcileCandidate(ctx, b, *releaseID, *dist)
+		if e != nil {
+			return e
+		}
+		fmt.Fprintln(os.Stdout, "read-only reconciliation:", state)
+		return nil
 	case "crosscheck":
 		if e = sourceBinding(ctx, *root, *archive, b.Commit, *epoch); e != nil {
 			return e
