@@ -99,6 +99,13 @@ func (r *ReadReceipts) verify(mb *Mailbox) bool {
 		return false
 	}
 	if !r.Noted {
+		// The fence says entries were received under a ledger that is not
+		// here (its first save failed, or it was lost): their disposition is
+		// unknown, so this is never a new baseline.
+		if mb.SeenByFence() {
+			r.Broken = true
+			return false
+		}
 		return true
 	}
 	got := mb.LastReceived()
@@ -121,16 +128,9 @@ func (p Paths) ReadReceiptsFile(name string) string {
 	return filepath.Join(p.Base, "state", name+".read-receipts.json")
 }
 
-// ReadReceiptsMarkerFile records that the ledger of name was created. A ledger
-// that is missing while its marker exists was lost after it began judging
-// deliveries, so it is broken, never a new baseline.
-func (p Paths) ReadReceiptsMarkerFile(name string) string {
-	return filepath.Join(p.Base, "state", name+".read-receipts.init")
-}
-
-// LoadReadReceipts reads the ledger; a missing file is an empty ledger, unless
-// its marker shows it existed (then it is broken). Anything but a regular 0600
-// file with a valid ledger is refused.
+// LoadReadReceipts reads the ledger; a missing file is an empty ledger (whose
+// use the mailbox fence may still forbid, see verify). Anything but a regular
+// 0600 file with a valid ledger is refused.
 func LoadReadReceipts(p Paths, name string) (*ReadReceipts, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
@@ -139,9 +139,6 @@ func LoadReadReceipts(p Paths, name string) (*ReadReceipts, error) {
 	r := &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{}}
 	if err := checkSecretFile(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			if _, merr := os.Lstat(p.ReadReceiptsMarkerFile(name)); !errors.Is(merr, fs.ErrNotExist) {
-				r.Broken, r.Noted = true, true
-			}
 			return r, nil
 		}
 		return nil, fmt.Errorf("read receipts: %w", err)
@@ -184,19 +181,6 @@ func SaveReadReceipts(p Paths, name string, r *ReadReceipts) error {
 	if err != nil {
 		return err
 	}
-	// The marker exists before the first ledger does, and is never removed by a2a.
-	marker := p.ReadReceiptsMarkerFile(name)
-	if f, err := os.OpenFile(marker, os.O_WRONLY|os.O_CREATE|os.O_EXCL|openNoFollow, SecretFileMode); err == nil {
-		if err := f.Sync(); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("read receipts: %w", err)
-	}
 	return writeSecretAtomic(path, name+".read-receipts", append(data, '\n'))
 }
 
@@ -233,6 +217,35 @@ func UpdateReadReceipts(ctx context.Context, p Paths, name string, fn func(*Read
 	return SaveReadReceipts(p, name, r)
 }
 
+// ResetReadReceipts is the explicit recovery: under the state lock it makes
+// sure the mailbox fence is durable, then replaces whatever ledger exists
+// (broken, corrupt or missing) with a fresh one whose baseline is the current
+// mailbox position. It returns that position.
+func ResetReadReceipts(ctx context.Context, p Paths, name string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(p.StateFile(name))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	unlock, err := lockFileContext(ctx, filepath.Join(dir, name+".lock"))
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	mb, err := OpenMailbox(p, name)
+	if err != nil {
+		return "", err
+	}
+	if err := mb.AddSeenByFence(); err != nil {
+		return "", err
+	}
+	last := mb.LastReceived()
+	fresh := &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{}, Before: last, Last: last, Noted: true}
+	return last, SaveReadReceipts(p, name, fresh)
+}
+
 func (r *ReadReceipts) room(id string) *ReadReceiptRoom {
 	rr := r.Rooms[id]
 	if rr == nil {
@@ -265,6 +278,8 @@ func (r *ReadReceipts) NoteReceived(mb *Mailbox, entries []MailEntry, done func(
 		ids = append(ids, e.ID)
 	}
 	r.Before, r.Last, r.Noted = before, last, true
+	// The fence goes into the same append as this batch's receipt.
+	mb.FenceNextReceipt()
 	for _, e := range mb.InOrder(ids) {
 		if e.Kind != MailEvent && e.Kind != MailGap {
 			continue

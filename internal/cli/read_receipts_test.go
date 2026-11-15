@@ -390,10 +390,11 @@ func TestSeenByHangingRoomsDoNotStarveOthers(t *testing.T) {
 	}
 }
 
-// Proves unreadable-ledger neighbours fail closed while mail still flows:
-// a corrupt ledger sends nothing and is left as found; a ledger removed after
-// creation (its marker left) is broken, not a new baseline; removing both
-// files is the explicit reset, after which receipts resume.
+// Proves unreadable-ledger neighbours fail closed while mail still flows: a
+// corrupt ledger sends nothing and is left as found; a ledger removed later is
+// broken (the mailbox fence remains), not a new baseline; reset-seen-by
+// without --confirm changes nothing, and with it receipts resume from the next
+// full delivery only.
 func TestSeenByUnreadableLedgerFailsClosed(t *testing.T) {
 	e, room := seenWorld(t)
 	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
@@ -412,20 +413,55 @@ func TestSeenByUnreadableLedgerFailsClosed(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
 	e.as("alice", "inbox").ok(t)
 	e.wantReceipts(a)
 	if r, err := config.LoadReadReceipts(e.paths(), "alice"); err != nil || !r.Broken {
 		t.Fatalf("lost ledger not broken: %v %+v", err, r)
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
+	before := readFile(t, path)
+	e.as("alice", "inbox", "reset-seen-by").failsWith(t, ExitUsage, "--confirm")
+	if readFile(t, path) != before {
+		t.Fatal("reset without --confirm changed the ledger")
 	}
-	if err := os.Remove(e.paths().ReadReceiptsMarkerFile("alice")); err != nil {
-		t.Fatal(err)
-	}
+	e.as("alice", "inbox", "reset-seen-by", "--confirm").ok(t)
+	e.wantReceipts(a) // a reset sends nothing by itself
 	d := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D"))
 	e.as("alice", "inbox").ok(t)
 	e.wantReceipts(a, d)
-	_ = c
+}
+
+// Proves the FIRST-initialization witness: before any ledger exists, the
+// ledger cannot be created while mailbox appends work; inbox still delivers A
+// (full) and B (truncated). After the storage recovers, no receipt ever
+// passes B: not for a later full C, not after a full read of B. Only the
+// explicit reset starts a new baseline. Beside the healthy first init in
+// TestSeenByTruncatedEntryHoldsUntilFullRead.
+func TestSeenByFirstInitFailureNeverBecomesBaseline(t *testing.T) {
+	e, room := seenWorld(t)
+	path := e.paths().ReadReceiptsFile("alice")
+	if _, err := os.Lstat(path); err == nil {
+		t.Fatal("a ledger already exists before the first delivery")
+	}
+	if err := os.Mkdir(path, 0o700); err != nil { // the ledger cannot be created
+		t.Fatal(err)
+	}
+	e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", strings.Repeat("long ", 500)))
+	e.as("alice", "inbox").ok(t)
+	if !e.received("alice", b) || !e.mailbox("alice").SeenByFence() {
+		t.Fatal("mail not received, or its receipt carried no fence")
+	}
+	e.wantReceipts()
+	if err := os.Remove(path); err != nil { // storage recovers
+		t.Fatal(err)
+	}
+	e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	e.as("alice", "inbox").ok(t)
+	e.as("alice", "read", "proj", "--event", b).ok(t)
+	e.wantReceipts()
+	e.as("alice", "inbox", "reset-seen-by", "--confirm").ok(t)
+	d := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(d)
 }

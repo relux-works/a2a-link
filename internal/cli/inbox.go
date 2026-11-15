@@ -48,6 +48,9 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 	if len(args) > 0 && args[0] == "show" {
 		return cmdInboxShow(a, args[1:])
 	}
+	if len(args) > 0 && args[0] == "reset-seen-by" {
+		return cmdInboxResetSeenBy(ctx, a, args[1:])
+	}
 	fs := newFlagSet("inbox")
 	limit := fs.Int("limit", inboxMax, "most events to print (1..50)")
 	asJSON := fs.Bool("json", false, "one JSON object per event (EventRecord with body) instead of the frame")

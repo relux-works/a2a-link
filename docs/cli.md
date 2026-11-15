@@ -1810,8 +1810,8 @@ a room for the receipt it is sending, and a competing command skips that room
 until the claim is released or expires), but a homeserver may still apply an
 abandoned request after the 2-minute hold below. The room then shows an older,
 still truthful position until the next receipt.
-Entries received before the ledger existed are the baseline and are not
-judged.
+Entries received before Seen by first ran on this mailbox (before its
+fence, below) are the baseline and are not judged.
 
 The ledger (`state/<name>.read-receipts.json`, mode 0600) is written under the
 delivery lock before the mailbox receipt. The receipt itself is posted after
@@ -1824,10 +1824,15 @@ cannot be read or written only withholds receipts: mail is never affected.
 The ledger records the newest mailbox receipt it noted; if the mailbox later
 shows entries received without a ledger mark (a failed ledger write, an older
 binary on the same identity), the ledger is marked broken and sends no
-receipt again. Removing `state/<name>.read-receipts.json` starts a new
-baseline explicitly, together with its marker
-`state/<name>.read-receipts.init`. A ledger file lost while its marker remains
-is broken, not a new baseline. A room with more than 512 undelivered entries,
+receipt again. The first receipt under a ledger also writes a one-line Seen by
+fence into the mailbox, in the same append; compaction keeps it. A ledger that
+is missing while the fence is present (its first save failed, or the file was
+lost) is broken too, never a new baseline. Older a2a releases read a fenced
+mailbox unchanged; an older release compacting the same identity's mailbox
+before any ledger exists drops the fence (a same-identity downgrade). The
+explicit recovery is `a2a inbox reset-seen-by --confirm`: it starts a new
+baseline at the current mailbox position, sends nothing, and changes nothing
+without `--confirm`. A room with more than 512 undelivered entries,
 or an entry received ahead of more than 512 earlier pending ones, stops
 sending receipts. The ledger keeps each room's entries in timeline (mailbox)
 order whatever order they were received in, so the receipt names the latest

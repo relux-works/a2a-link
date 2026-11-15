@@ -55,6 +55,9 @@ func (s *session) noteDelivered(mb *config.Mailbox, entries []config.MailEntry, 
 	}
 	r, err := config.LoadReadReceipts(s.paths, s.name)
 	if err != nil {
+		// No mark can be kept, but this receipt still carries the fence, so a
+		// later ledger never treats these entries as baseline.
+		mb.FenceNextReceipt()
 		return
 	}
 	r.NoteReceived(mb, entries, func(e config.MailEntry) bool { return done[e.ID] })
@@ -176,4 +179,38 @@ func (t *trackedWriter) flush() error {
 		}
 	}
 	return t.err
+}
+
+const resetSeenByUsage = "usage: a2a inbox reset-seen-by --confirm  (starts a new Seen by baseline at the current mailbox position; nothing is changed without --confirm)"
+
+// cmdInboxResetSeenBy is the explicit recovery of a broken, corrupt or lost
+// Seen by ledger. Without --confirm it changes nothing. It never touches mail
+// and sends no receipt: receipts resume with the next full delivery.
+func cmdInboxResetSeenBy(ctx context.Context, a *App, args []string) error {
+	fs := newFlagSet("inbox reset-seen-by")
+	confirm := fs.Bool("confirm", false, "really start a new Seen by baseline")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 0 || !*confirm {
+		return usagef("%s", resetSeenByUsage)
+	}
+	paths, err := a.paths()
+	if err != nil {
+		return err
+	}
+	name, err := a.identity()
+	if err != nil {
+		return err
+	}
+	at, err := config.ResetReadReceipts(ctx, paths, name)
+	if err != nil {
+		return err
+	}
+	if at == "" {
+		at = "an empty receipt index"
+	}
+	a.printf("Seen by ledger reset; new baseline at %s; receipts resume with the next full delivery\n", sanitizeLine(at))
+	return nil
 }

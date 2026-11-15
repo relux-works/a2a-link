@@ -2,7 +2,9 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -195,25 +197,109 @@ func TestReadReceiptOrderLeastRecentlyTried(t *testing.T) {
 	}
 }
 
-// Proves a ledger lost after creation is broken, not a new baseline: with its
-// marker left, a missing file loads as Broken; with both removed (the explicit
-// reset) it loads empty and usable.
-func TestReadReceiptsLostLedgerIsBroken(t *testing.T) {
-	p, _, _ := receiptWorld(t, "$1")
-	if err := SaveReadReceipts(p, "a", &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{}}); err != nil {
+// Proves the mailbox fence: the first receipt under a ledger carries it in
+// the same append; it survives compaction and reopening; a ledger missing
+// while the fence is present (its first save failed, or it was lost) is
+// Broken, never a new baseline; a mailbox without the fence keeps the
+// pre-ledger baseline rule; the explicit reset makes a fresh usable ledger at
+// the current position, and nothing older is targeted afterwards.
+func TestReadReceiptsMailboxFence(t *testing.T) {
+	p, mb, r := receiptWorld(t, "$1", "$2", "$3")
+	if mb.SeenByFence() {
+		t.Fatal("fresh mailbox fenced")
+	}
+	deliver(t, mb, r, []string{"$1"}) // ledger never saved: a failed first save
+	if !mb.SeenByFence() {
+		t.Fatal("the receipt did not carry the fence")
+	}
+	if err := mb.compact(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(p.ReadReceiptsFile("a")); err != nil {
+	mb, err := OpenMailbox(p, "a")
+	if err != nil || !mb.SeenByFence() {
+		t.Fatalf("fence lost by compaction or reopen: %v", err)
+	}
+	lost, err := LoadReadReceipts(p, "a")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err := LoadReadReceipts(p, "a"); err != nil || !r.Broken {
-		t.Fatalf("lost ledger: %v %+v", err, r)
+	deliver(t, mb, lost, []string{"$2"}, "$2")
+	if !lost.Broken || lost.Target(mb, "!r") != "" || len(lost.Claim(mb, 0, 1)) != 0 {
+		t.Fatalf("missing ledger with fence: %+v", lost)
 	}
-	if err := os.Remove(p.ReadReceiptsMarkerFile("a")); err != nil {
+	// Control: an unfenced mailbox keeps the pre-ledger baseline.
+	_, mb2, r2 := receiptWorld(t, "$a")
+	deliver(t, mb2, r2, []string{"$a"}, "$a")
+	if r2.Broken || r2.Target(mb2, "!r") != "$a" {
+		t.Fatalf("unfenced control: %+v", r2)
+	}
+	// Reset: a fresh ledger at the current position; $3 then delivers normally.
+	pos, err := ResetReadReceipts(context.Background(), p, "a")
+	if err != nil || pos != "$2" {
+		t.Fatalf("reset: %q %v", pos, err)
+	}
+	fresh, err := LoadReadReceipts(p, "a")
+	if err != nil || fresh.Broken || len(fresh.Rooms) != 0 {
+		t.Fatalf("after reset: %v %+v", err, fresh)
+	}
+	mb, _ = OpenMailbox(p, "a")
+	if got := fresh.Target(mb, "!r"); got != "" {
+		t.Fatalf("reset targeted an older entry: %q", got)
+	}
+	deliver(t, mb, fresh, []string{"$3"}, "$3")
+	if got := fresh.Target(mb, "!r"); got != "$3" || fresh.Broken {
+		t.Fatalf("after reset: target %q broken %v", got, fresh.Broken)
+	}
+}
+
+// Proves an older reader is unaffected by a fenced mailbox: with every fence
+// form removed (the op seenby lines and the rcpt seenby field), as a reader
+// that does not know them sees the file, the same entries are pending and
+// received.
+func TestReadReceiptsFenceOlderReader(t *testing.T) {
+	p, mb, r := receiptWorld(t, "$1", "$2", "$3")
+	deliver(t, mb, r, []string{"$1"}, "$1")
+	if err := mb.AddSeenByFence(); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := LoadReadReceipts(p, "a"); err != nil || r.Broken {
-		t.Fatalf("explicit reset: %v %+v", err, r)
+	if err := mb.compact(); err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, mb, r, []string{"$2"}, "$2")
+	raw, err := os.ReadFile(p.MailboxFile("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var l map[string]any
+		if err := json.Unmarshal([]byte(line), &l); err != nil {
+			t.Fatalf("fenced line is not JSON: %q", line)
+		}
+		if l["op"] == "seenby" {
+			continue
+		}
+		delete(l, "seenby")
+		data, _ := json.Marshal(l)
+		old = append(old, string(data))
+	}
+	stripped := testPaths(t)
+	if err := os.MkdirAll(filepath.Dir(stripped.MailboxFile("a")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stripped.MailboxFile("a"), []byte(strings.Join(old, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := OpenMailbox(p, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := OpenMailbox(stripped, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pendingIDs(a), ",") != strings.Join(pendingIDs(b), ",") || a.LastReceived() != b.LastReceived() || b.SeenByFence() || !a.SeenByFence() {
+		t.Fatalf("fenced %v/%q vs older view %v/%q", pendingIDs(a), a.LastReceived(), pendingIDs(b), b.LastReceived())
 	}
 }
 
