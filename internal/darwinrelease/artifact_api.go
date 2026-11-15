@@ -66,7 +66,7 @@ func (g *githubAPI) observeArtifact(ctx context.Context, id, runID int64, jobNam
 	if e := g.get(ctx, fmt.Sprintf("%s/actions/runs/%d", prefix, runID), &r); e != nil {
 		return zero, e
 	}
-	if r.Event != "push" || r.ID != runID || r.HeadSHA != a.Run.HeadSHA || r.HeadBranch != a.Run.HeadBranch || r.Repo.ID <= 0 || r.Repo.ID != a.Run.RepositoryID || r.HeadRepo.ID != a.Run.HeadRepositoryID || r.Repo.FullName != "relux-works/a2a-swarm" || r.HeadRepo.FullName != r.Repo.FullName {
+	if r.Event != "push" || r.ID != runID || r.HeadSHA != a.Run.HeadSHA || r.HeadBranch != a.Run.HeadBranch || r.Repo.ID <= 0 || r.Repo.ID != a.Run.RepositoryID || r.HeadRepo.ID <= 0 || r.HeadRepo.ID != a.Run.HeadRepositoryID || r.Repo.FullName != "relux-works/a2a-swarm" || r.HeadRepo.FullName != r.Repo.FullName {
 		return zero, errors.New("artifact-run-association")
 	}
 	if !(r.Status == "in_progress" && r.Conclusion == "" || r.Status == "completed" && r.Conclusion == "success") {

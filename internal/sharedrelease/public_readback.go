@@ -17,7 +17,29 @@ import (
 // exact public member set. It sends no credentials and performs no write to
 // GitHub or the tap. A URL, status or byte mismatch is never a successful readback.
 func PublicReadback(ctx context.Context, b Binding, dir string) error {
-	if e := VerifyCandidate(ctx, b, dir, nil); e != nil {
+	// Authenticate one private captured candidate, then use only those same bytes
+	// for expected digests. Later mutations of the caller's directory are irrelevant.
+	if e := b.Validate(); e != nil {
+		return e
+	}
+	if e := exactDirectory(dir, FinalMembers(b.Version())); e != nil {
+		return e
+	}
+	expectedDir, e := os.MkdirTemp("", "a2a-public-expected-")
+	if e != nil {
+		return e
+	}
+	defer os.RemoveAll(expectedDir)
+	for _, n := range FinalMembers(b.Version()) {
+		raw, e := readRegular(dir, n)
+		if e != nil {
+			return e
+		}
+		if e = os.WriteFile(filepath.Join(expectedDir, n), raw, 0600); e != nil {
+			return e
+		}
+	}
+	if e := VerifyCandidate(ctx, b, expectedDir, nil); e != nil {
 		return e
 	}
 	client := &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -32,7 +54,7 @@ func PublicReadback(ctx context.Context, b Binding, dir string) error {
 	}
 	defer os.RemoveAll(captured)
 	for _, n := range FinalMembers(b.Version()) {
-		expected, e := readRegular(dir, n)
+		expected, e := readRegular(expectedDir, n)
 		if e != nil {
 			return e
 		}
