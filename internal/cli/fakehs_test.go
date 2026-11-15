@@ -102,11 +102,14 @@ func (hs *fakeHS) receipt(w http.ResponseWriter, r *http.Request, u string) {
 	hang := hs.receiptHang
 	hs.mu.Unlock()
 	if hang != nil {
+		// A held request never succeeds, even when released after the client
+		// gave up: it must not be mistaken for a later attempt.
 		select {
 		case <-hang:
 		case <-r.Context().Done():
-			return
 		}
+		writeErr(w, 503, "M_UNKNOWN", "receipt endpoint was hanging")
+		return
 	}
 	body, _ := io.ReadAll(r.Body)
 	hs.mu.Lock()
