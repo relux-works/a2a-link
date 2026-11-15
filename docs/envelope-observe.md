@@ -123,8 +123,8 @@ body aliases cannot become verified. Input remains untrusted after labelling.
 
 ## Tools and validation
 
-Go >=1.26.0 is required by the pinned module. No tool or native signer is
-installed. From this repository, with task-scoped temporary/cache directories:
+The repository requires Go >=1.26.8; the pinned module requires >=1.26.0.
+No tool or native signer is installed. From this repository, with task-scoped temporary/cache directories:
 
 | Tool | Entry point | Output |
 | --- | --- | --- |

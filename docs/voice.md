@@ -155,8 +155,9 @@ The recipe copies the two exact libraries from that pinned module, removes
 module-cache rpaths and ad-hoc signs the result. Other platforms retain normal
 text operation. There is no say engine or voice picker.
 
-The `go 1.25.12` directive in `go.mod` sets the minimum Go version to include
-the fix for the `os.Root` escape advisory CVE-2026-39822 (GO-2026-4970; #150);
+The `go 1.26.8` directive in `go.mod` now satisfies the signed-envelope
+dependency minimum and retains the `os.Root` escape fix previously required by
+the Go 1.25.12 minimum (CVE-2026-39822 / GO-2026-4970; #150);
 it is not an exact toolchain pin. Reproducing a worker binary's digest requires
 the same exact toolchain and build inputs. The historical #185 Linux
 qualification used Go 1.25.5.

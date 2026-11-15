@@ -55,7 +55,7 @@ func LoadTools(root string) (Tools, error) {
 }
 
 func (t Tools) Validate() error {
-	if t.Schema != "a2a-linux-tools/1" || t.Go != "go1.25.12" || t.Cosign != "v2.6.1" || t.GoReleaser.Version != "v2.20.2" || t.Syft.Version != "v1.38.0" ||
+	if t.Schema != "a2a-linux-tools/1" || t.Go != "go1.26.8" || t.Cosign != "v2.6.1" || t.GoReleaser.Version != "v2.20.2" || t.Syft.Version != "v1.38.0" ||
 		t.GoReleaser.Commit != "1bf59683fabedd7b446d089ec31b1e343b472ce6" || t.Syft.Commit != "a033ae525f6c7ef937c6f49513e3403f07a1d6c0" {
 		return errors.New("linux-tool-policy")
 	}
@@ -189,7 +189,7 @@ func VerifyELF(raw []byte, arch string) error {
 		}
 	}
 	info, e := buildinfo.Read(bytes.NewReader(raw))
-	if e != nil || info.GoVersion != "go1.25.12" || info.Path != "github.com/relux-works/a2a-swarm/cmd/a2a" {
+	if e != nil || info.GoVersion != "go1.26.8" || info.Path != "github.com/relux-works/a2a-swarm/cmd/a2a" {
 		return errors.New("linux-binary-go-identity")
 	}
 	settings := map[string]string{}
@@ -407,7 +407,7 @@ func VerifyLinuxEvidence(raw []byte, b Binding, dir string) error {
 	if ev.Trust != "production" {
 		return errors.New("production-fixture-trust-refused")
 	}
-	if ev.GoVersion != "go1.25.12" || ev.SourceDateEpoch <= 0 || !digestForm.MatchString(ev.SourceArchiveSHA256) || strings.Join(ev.Flags, "\n") != strings.Join(BuildFlags, "\n") {
+	if ev.GoVersion != "go1.26.8" || ev.SourceDateEpoch <= 0 || !digestForm.MatchString(ev.SourceArchiveSHA256) || strings.Join(ev.Flags, "\n") != strings.Join(BuildFlags, "\n") {
 		return errors.New("linux-evidence-build-contract")
 	}
 	if ev.Tools.Validate() != nil || ev.Tools.Go != ev.GoVersion {

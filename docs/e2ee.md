@@ -81,10 +81,10 @@ and policy around these primitives. No high-level SDK sync is installed.
 
 No download is attempted here. Cached-source provenance, checksums, licenses,
 security-history limits and Go compatibility are recorded in the U1 handoff.
-The repository remains on `go 1.25.12`; v0.31.0 and v0.32.0 require Go 1.26 and
-are not candidates without a separately approved toolchain change. v0.30.0's
-`go 1.25.0` minimum is compatible; its dependency `toolchain` directive does not
-change this repository's toolchain under `GOTOOLCHAIN=local`.
+The signed-envelope dependency raises the repository minimum to `go 1.26.8`.
+Mautrix remains pinned at v0.30.0; newer versions still require a separate
+dependency review. Its `go 1.25.0` minimum remains compatible, and its dependency
+`toolchain` directive does not change the selected local toolchain.
 With admitted inputs, compile the full CLI offline using `CGO_ENABLED=0 GOPROXY=off
 GOSUMDB=off GOTOOLCHAIN=local GOENV=off`; prove no libolm/toolchain fetch. Targets
 are darwin/linux amd64/arm64, not mobile. No libolm or cgo is admitted.

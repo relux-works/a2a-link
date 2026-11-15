@@ -23,7 +23,7 @@ func CompareLinuxBuild(root, dir, independent, arch string, b Binding, epoch int
 		return e
 	}
 	var ev LinuxEvidence
-	if DecodeExact(raw, &ev) != nil || ev.Binding != b || ev.SourceDateEpoch != epoch || ev.GoVersion != "go1.25.12" || ev.Schema != LinuxSchema || strings.Join(ev.Flags, "\n") != strings.Join(BuildFlags, "\n") || ev.Tools.Validate() != nil || (ev.Trust != "production" && ev.Trust != "qualification") {
+	if DecodeExact(raw, &ev) != nil || ev.Binding != b || ev.SourceDateEpoch != epoch || ev.GoVersion != "go1.26.8" || ev.Schema != LinuxSchema || strings.Join(ev.Flags, "\n") != strings.Join(BuildFlags, "\n") || ev.Tools.Validate() != nil || (ev.Trust != "production" && ev.Trust != "qualification") {
 		return errors.New("crossbuild-evidence-binding")
 	}
 	// Verification remains production-only elsewhere. Qualification comparison
