@@ -64,7 +64,11 @@ func reviewerRPMIntegrity(t *testing.T, b []byte, write bool) {
 		}
 		wantCount := len(d.digest)
 		if d.kind == 6 {
-			wantCount++
+			// RPM STRING count is one value, not the byte length of its text.
+			wantCount = 1
+			if f.offset+len(d.digest) >= len(b) || b[f.offset+len(d.digest)] != 0 {
+				t.Fatal("fixture digest terminator")
+			}
 		}
 		if int(f.count) != wantCount {
 			t.Fatal("fixture digest cardinality")
