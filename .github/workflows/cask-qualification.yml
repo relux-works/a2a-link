@@ -53,7 +53,9 @@ jobs:
           Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
           T="$RUNNER_TEMP"
           # The fixture source is the immutable v0.1.1 tag; the qualification config stays outside it.
-          git worktree add --detach "$T/src" "$FIXTURE_TAG"
+          git fetch --no-tags https://github.com/relux-works/a2a-swarm.git "refs/tags/$FIXTURE_TAG"
+          "$Q" gate fixture-tag-is-pinned-commit -- test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$FIXTURE_COMMIT"
+          git worktree add --detach "$T/src" 'FETCH_HEAD^{commit}'
           "$Q" gate fixture-source-is-v0.1.1 -- test "$(git -C "$T/src" rev-parse HEAD)" = "$FIXTURE_COMMIT"
           curl -fsSL -o "$T/goreleaser.tgz" "https://github.com/goreleaser/goreleaser/releases/download/$GORELEASER_VERSION/goreleaser_Linux_x86_64.tar.gz"
           # Gate controls, recorded apart from this job's results: a mismatching
@@ -281,7 +283,9 @@ jobs:
           export Q0_RESULTS="$T/q0-results"
           Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
           # Independent cross-build of the Linux binaries on macOS, same source and flags.
-          git worktree add --detach "$T/src" "$FIXTURE_TAG"
+          git fetch --no-tags https://github.com/relux-works/a2a-swarm.git "refs/tags/$FIXTURE_TAG"
+          "$Q" gate fixture-tag-is-pinned-commit -- test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$FIXTURE_COMMIT"
+          git worktree add --detach "$T/src" 'FETCH_HEAD^{commit}'
           for a in amd64 arm64; do
             mkdir -p "$T/x-$a" && tar -xzf "$IN/a2a_0.1.1_linux_$a.tar.gz" -C "$T/x-$a" a2a
             ( cd "$T/src" && GOOS=linux GOARCH=$a CGO_ENABLED=0 go build -trimpath -buildvcs=false -buildmode=exe -compiler=gc -pgo=off -ldflags='-linkmode=internal -libgcc=none' -o "$T/cross-$a" ./cmd/a2a )
