@@ -24,11 +24,14 @@ const SharedReleaseScope = "a2a-shared-distribution-r3"
 // Mandatory production checks are bound to their reviewed workflow paths,
 // rather than accepting a same-named job from any syntactically valid workflow.
 var requiredWorkflows = map[string]string{
-	"test-linux":                ".github/workflows/go.yml",
-	"release-controls":          ".github/workflows/release-controls.yml",
-	"release-native-controls":   ".github/workflows/release-controls.yml",
-	"distribution-controls":     ".github/workflows/distribution-controls.yml",
-	"linux-production-packages": ".github/workflows/distribution-controls.yml",
+	"test-linux":                             ".github/workflows/go.yml",
+	"release-controls":                       ".github/workflows/release-controls.yml",
+	"release-native-controls":                ".github/workflows/release-controls.yml",
+	"distribution-controls":                  ".github/workflows/distribution-controls.yml",
+	"linux-production-packages":              ".github/workflows/distribution-controls.yml",
+	"macos-crossbuild":                       ".github/workflows/distribution-controls.yml",
+	"brew-installer-controls (ubuntu-24.04)": ".github/workflows/distribution-controls.yml",
+	"brew-installer-controls (macos-15)":     ".github/workflows/distribution-controls.yml",
 }
 
 // Source authority is separate from the single release-tag signer. These are

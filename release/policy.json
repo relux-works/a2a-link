@@ -9,7 +9,10 @@
     "release-controls",
     "release-native-controls",
     "distribution-controls",
-    "linux-production-packages"
+    "linux-production-packages",
+    "macos-crossbuild",
+    "brew-installer-controls (ubuntu-24.04)",
+    "brew-installer-controls (macos-15)"
   ],
   "go_version": "go1.25.12",
   "xcode_version": "16.4",

@@ -123,8 +123,10 @@ manifest. The pure `/1` renderer, golden and existing Q0 controls remain.
 
 ## Review and outstanding integration
 
-The mandatory main-push checks now also include `distribution-controls` and
-`linux-production-packages`, bound to `distribution-controls.yml`. Retained
+The mandatory main-push checks also include `distribution-controls`,
+`linux-production-packages`, `macos-crossbuild` and both
+`brew-installer-controls (ubuntu-24.04)` / `brew-installer-controls (macos-15)`,
+bound to `distribution-controls.yml`. Retained
 mandatory checks are bound to their own reviewed workflow paths. Existing exact
 job/run/check/repository/current-main, signature, history, protection/rules and
 fail-closed API gates still apply. An accepted review must carry
