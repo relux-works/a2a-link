@@ -87,6 +87,11 @@ without `ReceivedRawAtSize`, `raw_bounds/received` reports a named skip.
 
 The optional per-identity [admission interface](docs/admission.md) gates mailbox delivery and prepared message sends.
 
+The Linux [P17-A Source origin library](docs/source-origin.md) provides a separate
+closed control socket and optional typed producer seam. Stock upstream has no
+producer and refuses prepare with `origin_not_supported`. Service wiring, rich
+checker implementation and deployment qualification remain downstream work.
+
 The default-off [agent pair DM](docs/agent-dm.md) supports exact host-admitted
 keeper/orchestrator pairs with explicit peer join and sole-recipient delivery:
 `a2a agent-dm ensure|status|say|unset|leave FULL_PEER`.
@@ -117,6 +122,7 @@ scope admission remain separate from source delivery.
 | `a2a daemon` | Run a2ad with an immutable root owner policy; enroll stations and migrate file-backed identities (Keychain initial/resume/rollback deferred; #460) | `a2a daemon serve --home HOME --owner-pin FILE --owner-pin-sha256 HASH --image-sha256 HASH --service-gid GID`; `daemon enroll --dir HOME/.a2a --from -`; `daemon status`; [reference](docs/cli.md#daemon-authentication-endpoint) | Private daemon home and station `.a2a/`; hook logs and listener endpoint under station `state/` |
 | a2ad service (`launchctl`, `systemctl`, Go renderer) | Explicit root install/uninstall/status with exact unit matching; independent scheduled read-only sweep | `a2a daemon service install\|uninstall\|status --plan ROOT_PLAN`; [service commands, policy, rescue and soak](docs/daemon-service.md) | `/Library/LaunchDaemons` or `/etc/systemd/system`; rendered examples `internal/daemonsvc/testdata/`; private heartbeat, sweep and soak reports under daemon home |
 | `a2a connection` | Validate and manage public named Matrix routing | `a2a connection list`; `a2a connection show NAME`; `a2a connection add NAME --file FILE`; `a2a connection use NAME` | `<config-root>/connections.json`; no network or credential lookup |
+| Source origin fixtures and gate plants (Go) | Exercise closed P17 prepare/consume-once validate, peer/generation and path checks | `go test ./internal/daemon -run '^TestSourceOrigin' -race -count=1 -v`; opt-in `A2A_RUN_ORIGIN_PLANTS=1 go test ./internal/daemon -run '^TestSourceOriginNarrowingPlants$' -count=1 -v`; [contract and confined runner](docs/source-origin.md) | Test-temp Unix sockets, overlay plants and `.temp/P17-A/` logs; no CLI or live service wiring |
 | `go test` | Unit tests against an in-memory fake homeserver; integration test against the local server | `go test ./...`; `A2A_MATRIX_IT=1 go test ./internal/cli -run Integration -v` | test output; the integration test writes only to `#a2a-swarm` and deactivates its throwaway account at the end |
 | Offline Go checks | Format, statically analyze (including test sources), and build without running tests or fetching dependencies; requires a populated local module cache | `gofmt -w <changed.go>`; `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go vet -mod=readonly ./...`; `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go build -mod=readonly ./...` | Diagnostics on stdout/stderr; task logs and writable Go caches under `.temp/` |
 | GitHub Actions `go` | Same-repository PRs run `test-linux` plus `darwin-smoke` (build/vet only); `train-*` or `full-ci` PRs instead run `test-linux`, `test` and `voice-native`, even for docs-only changes; adding `full-ci` triggers a run; main pushes run `test-linux` only | `.github/workflows/go.yml` (runs automatically) | Actions tab of relux-works/a2a-swarm |

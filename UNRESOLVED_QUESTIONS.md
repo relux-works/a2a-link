@@ -254,3 +254,28 @@ manual tap custody work listed in [shared distribution](docs/shared-distribution
 remain unimplemented. The legacy publisher is held under the combined policy.
 No real release or tap delivery is claimed. v0.1.2 remains a proposal requiring a
 fresh unused-ref check and reviewed VERSION successor when integration is ready.
+
+## P17-A: Source/client wire pinning and downstream qualification
+
+The accepted r2/r1.2 inputs leave the envelope, hello/error shape, scalar
+encodings/widths, registration domain and validate request-ID correlation
+unspecified. `docs/source-origin.md` states the explicit minimal candidate
+implemented here; Source and curator-run must pin these choices before claiming
+interoperability. No new refusal codes are introduced; specific parse/path/
+nonce/timeout subcodes are not named in the inputs and remain unspecified.
+
+A reviewed downstream rich producer must supply protected identity/connection/
+Matrix-user/policy/registration mapping, its own checker/private scope, signed
+inner-request/profile verification and fresh admission/pin rechecks. Upstream
+checks typed shape and immutable equality, not authenticity of a malicious
+linked producer's well-shaped claims. Generic Live, `none` and Matrix-ID origin
+substitution remain unsupported. Image/ABI alignment and authoritative account
+pins are separate prerequisites.
+
+Operator-approved numeric L/A/H/S/R_i placement, generation authority,
+SourceControlDir with protected ancestors/ACL policy, and real distinct-UID/FD/
+final-release qualification remain outside this producer. Same-UID fake tests
+and synthetic wrong-owner metadata do not establish those gates. Source owns
+review; no deployment or enforcing approval follows from this source candidate.
+Launcher H6 v1 never rebinds; hosted managers and Werkstaetten refuse enforcing
+under the co-lead's ruling, with no implementation of either route in P17-A.
