@@ -1,11 +1,12 @@
 module github.com/relux-works/a2a-swarm
 
-go 1.25.12
+go 1.26.0
 
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/k2-fsa/sherpa-onnx-go-macos v1.13.8
 	github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1
+	github.com/relux-works/swarma-envelope v0.0.0-20261114153213-065e25f69da8
 	github.com/yuin/goldmark v1.8.7
 	golang.org/x/net v0.58.0
 	maunium.net/go/mautrix v0.30.0
@@ -13,6 +14,11 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/btcsuite/btcd/btcec/v2 v2.3.5 // indirect
+	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
+	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
+	github.com/relux-works/swarma-registrar v0.0.0-20261023164451-5f44ebf3f788 // indirect
 	go.mau.fi/util v0.10.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 )

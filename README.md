@@ -101,9 +101,14 @@ wake admissions for explicitly enrolled roots/connections. They preserve mail
 and independent pauses and always report `quiesced=false`; installation and
 scope admission remain separate from source delivery.
 
+Receive-side signed-envelope [observation](docs/envelope-observe.md) labels
+`inbox` and `read` text/JSON as verified, unsigned, invalid or unknown-author.
+It uses an explicit protected local host roster and refuses nothing.
+
 ## Tools
 
 | Tool | Purpose | How to run | Output |
+| Signed-envelope observation (Go >=1.26.0) | Verify received envelopes locally using pinned host evidence, with delivery unchanged | `a2a inbox [--json]`; `a2a read ROOM [--json]`; [configuration and tests](docs/envelope-observe.md) | `verification` label on stdout and saved inbox frames; no network lookup or trust-store writes |
 | --- | --- | --- | --- |
 | Typed room properties (Go) | Read or set one avatar MXC or child-side parent state with expected IDs, bounded ACK and exact readback | `a2a room avatar get`, `a2a room avatar set`, `a2a room parent get`, `a2a room parent set`; [arguments and result schema](docs/cli.md#typed-room-properties) | Version 1 JSON/text stdout; no media upload, reciprocal link, membership or local configuration change |
 | Scope wake mute (Go, OS TTY checks, local directory flocks) | Owner-confirmed finite-scope wake admission fence and exact cleanup | `a2a host mute capability`; `host mute enroll --scope FILE --run RUN --budget DUR`; `host mute --scope FILE --run RUN --budget DUR`; `host mute status --scope FILE --budget DUR`; `host unmute --scope FILE --run RUN --budget DUR --token OPERATION_ID`; [contract and focused fixture commands](docs/host-mute.md) | Versioned JSON stdout; selected roots contain private `wake-mute.enrolled.json` and `wake-mute.operations.json`; test evidence under `.temp/`; no live qualification or quiescence claim |

@@ -41,7 +41,7 @@ func TestReadEventJSON(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(recs))
 	}
 	r := recs[0]
-	want := EventRecord{Type: "message", Room: "#proj", RoomID: "!projRoomID", EventID: id, Sender: "@bob:test.local", At: r.At, AtMS: r.AtMS,
+	want := EventRecord{Verification: "unsigned (no envelope)", Type: "message", Room: "#proj", RoomID: "!projRoomID", EventID: id, Sender: "@bob:test.local", At: r.At, AtMS: r.AtMS,
 		Kind: "question", Topic: "alpha", Root: root, To: []string{"alice", "carol"}, Re: root,
 		ReplyBy: "2026-10-01T00:00:00Z", Trunk: "abcdef1", Body: "line one\n" + long}
 	if !reflect.DeepEqual(r, want) {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 	"github.com/relux-works/a2a-swarm/internal/daemon"
+	"github.com/relux-works/a2a-swarm/internal/envelopeobserve"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 	"github.com/relux-works/a2a-swarm/internal/redact"
 	"github.com/relux-works/a2a-swarm/internal/voice"
@@ -31,6 +32,8 @@ const (
 
 // App carries the process environment so tests can run commands in-process.
 type App struct {
+	// Test-only host-file loader; production always validates protected ownership.
+	loadEnvelopeRoster       func(string) (*envelopeobserve.Observer, error)
 	wakeRequiredVersion      string                                       // Immutable process-start admission; never read from a daemon request or ambient selector.
 	wakeContext              context.Context                              // Bounded terminal dispatch copy; never changes ambient command cleanup.
 	terminalFixture          func(config.TerminalBinding) terminalEffects // Isolated tests only; production always uses the bound terminal.

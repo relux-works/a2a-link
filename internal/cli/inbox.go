@@ -115,6 +115,7 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 	if _, err := s.syncNow(ctx, st, subs.Subs, time.Time{}); err != nil {
 		return err
 	}
+	observer := a.envelopeObserver(s)
 	const lost = "; nothing was acknowledged, the next inbox prints these entries again"
 	printed := false
 	_, err = s.lockedDeliver(ctx, time.Time{}, false, func(cur *config.State, mb *config.Mailbox) ([]string, error) {
@@ -124,6 +125,11 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 		}
 		entries := pending[:min(*limit, len(pending))]
 		shown := itemsOf(entries, s.server)
+		for i := range shown {
+			if shown[i].ev != nil {
+				shown[i].rec.Verification = observer.Observe(*shown[i].ev, shown[i].rec.RoomID, s.creds.UserID, a.Now())
+			}
+		}
 		more := len(pending) - len(shown)
 		var out string
 		if *asJSON {
@@ -229,6 +235,7 @@ func inboxRecord(it waitItem, server string) (EventRecord, int) {
 		return it.rec, 0
 	}
 	rec := eventRecord(it.rec.Type, it.rec.Room, it.rec.RoomID, *it.ev, server, false)
+	rec.Verification = it.rec.Verification
 	rec.Media = inboundmedia.Inspect(*it.ev, it.rec.RoomID)
 	rec.Sub = it.rec.Sub
 	rec.Kind, rec.Topic, rec.Re, rec.ReplyBy, rec.Trunk = sanitizeLine(rec.Kind), sanitizeLine(rec.Topic), sanitizeLine(rec.Re), sanitizeLine(rec.ReplyBy), sanitizeLine(rec.Trunk)
@@ -303,6 +310,9 @@ func inboxFrame(items []waitItem, server string, more int) string {
 			}
 		}
 		b.WriteString(strings.Join(fields, " ") + "\n")
+		if rec.Verification != "" {
+			b.WriteString(inboxIndent + "verification: " + sanitizeLine(rec.Verification) + "\n")
+		}
 		if rec.Media != nil {
 			data, _ := json.Marshal(rec.Media)
 			// JSON escapes retain full opaque handles within one indented line.

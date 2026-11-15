@@ -211,6 +211,9 @@ func inboxSummary(records []EventRecord, width, more int, inline []bool) (string
 		excerpt, _ := truncateRunes(sanitizeLine(r.Body), width)
 		fmt.Fprintf(&b, "event %d sender=%s kind=%q room=%q topic=%q id=%q %s\n",
 			i+1, senderText(r.Sender), summaryField(r.Kind), summaryField(firstNonEmpty(r.Room, r.RoomID)), summaryField(r.Topic), summaryField(r.EventID), excerpt)
+		if r.Verification != "" {
+			fmt.Fprintf(&b, "%sverification: %s\n", inboxIndent, sanitizeLine(r.Verification))
+		}
 		if i < len(inline) && inline[i] {
 			writeInboxBody(&b, r.Body)
 		}
@@ -266,6 +269,9 @@ func cmdInboxShow(a *App, args []string) error {
 		var b strings.Builder
 		b.WriteString(inboxBegin + "\n")
 		fmt.Fprintf(&b, "--- event 1/1: from=%s room=%q kind=%q id=%q\n", senderText(r.Sender), inboxField(r.Room), inboxField(r.Kind), inboxField(r.EventID))
+		if r.Verification != "" {
+			fmt.Fprintf(&b, "%sverification: %s\n", inboxIndent, sanitizeLine(r.Verification))
+		}
 		writeInboxBody(&b, r.Body)
 		b.WriteString(inboxEnd + "\n")
 		return writeCLIOutput(a.Stdout, a.secrets.Scrub(b.String()))

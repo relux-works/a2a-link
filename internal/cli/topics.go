@@ -860,8 +860,11 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 		a.Stdout = out
 		defer func() { a.Stdout = out.w }()
 	}
+	observer := a.envelopeObserver(s)
 	for _, ev := range events {
+		verdict := observer.Observe(ev, roomID, s.creds.UserID, a.Now())
 		if !*asJSON {
+			a.printf("verification: %s\n", verdict)
 			a.printEvent(ev, s.server)
 			printed = append(printed, ev.EventID)
 			continue
@@ -870,7 +873,9 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 		if h, ok := decodeHeader(ev.Message().A2A); ok && h.Type == "topic" {
 			typ = "topic"
 		}
-		if err := a.printJSON(eventRecord(typ, label, roomID, ev, s.server, false)); err != nil {
+		rec := eventRecord(typ, label, roomID, ev, s.server, false)
+		rec.Verification = verdict
+		if err := a.printJSON(rec); err != nil {
 			return err
 		}
 		printed = append(printed, ev.EventID)
