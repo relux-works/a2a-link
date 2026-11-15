@@ -64,11 +64,16 @@ func (a *App) releaseVaultToken(ctx context.Context, observed vaultObservedSelec
 		if e != nil {
 			return vaultLocalFailure(vaultEIdentityConflict)
 		}
-		// A new resolver sees changes to the named profile rather than trusting the
-		// invocation's cached connection. Metadata is public; no token lookup occurs.
+		// Resolve public routing afresh, then pin the backend and operational
+		// binding BEFORE following paths or loading any named credential leaf.
+		// A changed file profile can contain a token even in its metadata leaf.
 		check := &App{Getenv: a.Getenv, lookupEnv: a.lookupEnv, profile: a.profile, human: a.human, connectionSecretStore: a.connectionSecretStore, keychain: a.keychain}
 		c, e := check.selectedConnection()
 		if e != nil || c == nil {
+			return vaultLocalFailure(vaultEIdentityConflict)
+		}
+		fresh, e := c.Binding(name, a.human)
+		if e != nil || c.Store.Backend != config.BackendVaultV1 || fresh.Fingerprint() != latched.observed.fingerprint {
 			return vaultLocalFailure(vaultEIdentityConflict)
 		}
 		p, e := check.pathsFor(name)

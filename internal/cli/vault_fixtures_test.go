@@ -12,13 +12,17 @@ import (
 // Fixture issuance lives ONLY in this normal same-package test file. No init,
 // registry, native/signature claim, overlay or production fixture constructor.
 type vaultFixtureProvider struct {
-	value vaultAdmittedContext
-	calls int
-	err   error
+	value        vaultAdmittedContext
+	calls        int
+	err          error
+	beforeReturn func(int)
 }
 
 func (p *vaultFixtureProvider) Current(context.Context) (vaultAdmittedContext, error) {
 	p.calls++
+	if p.beforeReturn != nil {
+		p.beforeReturn(p.calls)
+	}
 	return p.value, p.err
 }
 func vaultFixtureContext(o vaultObservedSelection) vaultAdmittedContext {
