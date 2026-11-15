@@ -561,3 +561,67 @@ func TestReadReceiptUncertainQuarantine(t *testing.T) {
 		t.Fatalf("after quarantine: %v", got)
 	}
 }
+
+// Proves the legacy/unnoted path is closed with the reviewer's witness: an
+// existing ledger file that never noted a batch (an earlier revision's empty
+// ledger) is Broken on load. With it on disk, a batch noted in memory whose
+// ledger write is lost while the mailbox receipt succeeds can never become a
+// new baseline: a later fully delivered entry yields no target. Beside a
+// never-initialised mailbox (no file, no fence), which keeps the baseline rule.
+func TestReadReceiptsUnnotedLedgerFileIsBroken(t *testing.T) {
+	p, mb, _ := receiptWorld(t, "$A", "$B", "$C")
+	if err := os.MkdirAll(filepath.Dir(p.ReadReceiptsFile("a")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ReadReceiptsFile("a"), []byte(`{"rooms":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadReadReceipts(p, "a")
+	if err != nil || !r.Broken {
+		t.Fatalf("unnoted ledger file: %v %+v", err, r)
+	}
+	inMemory := &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{}}
+	deliver(t, mb, inMemory, []string{"$A", "$B"}, "$A") // B truncated; this write is lost
+	r, err = LoadReadReceipts(p, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, mb, r, []string{"$C"}, "$C")
+	if got := r.Target(mb, "!r"); got != "" || !r.Broken {
+		t.Fatalf("recovery after a lost write: target %q broken %v", got, r.Broken)
+	}
+	// Control: no file and no fence is a never-initialised mailbox.
+	p2, mb2, _ := receiptWorld(t, "$x")
+	fresh, err := LoadReadReceipts(p2, "a")
+	if err != nil || fresh.Broken {
+		t.Fatalf("never initialised: %v %+v", err, fresh)
+	}
+	deliver(t, mb2, fresh, []string{"$x"}, "$x")
+	if got := fresh.Target(mb2, "!r"); got != "$x" {
+		t.Fatalf("never-initialised control: %q", got)
+	}
+}
+
+// Proves the integrity checkpoint follows the exact order the receipt is
+// committed in: entries noted and received in the same (timeline) order keep
+// the ledger sound, while a receipt committed in a different order than noted
+// is detected (the guard is not weakened).
+func TestReadReceiptCheckpointFollowsReceiveOrder(t *testing.T) {
+	_, mb, r := receiptWorld(t, "$A", "$B", "$C")
+	live := mb.InOrder([]string{"$B", "$A"}) // timeline order, whatever the argument order
+	r.NoteReceived(mb, live, func(MailEntry) bool { return true })
+	if _, err := mb.Receive([]string{live[0].ID, live[1].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if !r.Verify(mb) {
+		t.Fatal("timeline-ordered receipt broke the ledger")
+	}
+	_, mb2, r2 := receiptWorld(t, "$A", "$B")
+	r2.NoteReceived(mb2, mb2.InOrder([]string{"$A", "$B"}), func(MailEntry) bool { return true })
+	if _, err := mb2.Receive([]string{"$B", "$A"}); err != nil { // committed in another order
+		t.Fatal(err)
+	}
+	if r2.Verify(mb2) {
+		t.Fatal("a receipt committed in another order than noted was not detected")
+	}
+}

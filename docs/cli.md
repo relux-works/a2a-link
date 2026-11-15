@@ -1827,7 +1827,8 @@ binary on the same identity), the ledger is marked broken and sends no
 receipt again. The first receipt under a ledger also writes a one-line Seen by
 fence into the mailbox, in the same append; compaction keeps it. A ledger that
 is missing while the fence is present (its first save failed, or the file was
-lost) is broken too, never a new baseline. Older a2a releases read a fenced
+lost) is broken too, never a new baseline, and so is an existing ledger file
+that never noted a batch. Older a2a releases read a fenced
 mailbox unchanged; an older release compacting the same identity's mailbox
 before any ledger exists drops the fence (a same-identity downgrade). The
 explicit recovery is `a2a inbox reset-seen-by --confirm`: it starts a new

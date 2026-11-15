@@ -160,6 +160,12 @@ func LoadReadReceipts(p Paths, name string) (*ReadReceipts, error) {
 			return nil, errors.New("read receipts: malformed room entry")
 		}
 	}
+	// Every ledger a2a writes has noted a batch or been reset (Noted). An
+	// existing file without it (an earlier revision, or a hand edit) has no
+	// trustworthy baseline: it is broken, never a new baseline.
+	if !r.Noted {
+		r.Broken = true
+	}
 	return r, nil
 }
 

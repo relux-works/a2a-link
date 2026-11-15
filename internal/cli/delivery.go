@@ -874,10 +874,17 @@ func cmdAck(ctx context.Context, a *App, args []string) error {
 		}
 		asked = len(ids)
 		// An ack receives without printing: the entries never reached the
-		// session in full, so they hold back the room's read receipt.
-		s.noteDelivered(mb, mb.InOrder(ids), nil)
+		// session in full, so they hold back the room's read receipt. They are
+		// received in timeline order, the order the ledger's checkpoint is
+		// derived from, whatever order the arguments name them in.
+		live := mb.InOrder(ids)
+		ordered := make([]string, 0, len(live))
+		for _, e := range live {
+			ordered = append(ordered, e.ID)
+		}
+		s.noteDelivered(mb, live, nil)
 		var err error
-		n, err = mb.Receive(ids)
+		n, err = mb.Receive(ordered)
 		return nil, err
 	}); err != nil {
 		return err

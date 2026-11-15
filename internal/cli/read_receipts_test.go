@@ -465,3 +465,27 @@ func TestSeenByFirstInitFailureNeverBecomesBaseline(t *testing.T) {
 	e.as("alice", "inbox").ok(t)
 	e.wantReceipts(d)
 }
+
+// Proves a multi-id ack in reverse argument order ("ack B A") keeps the
+// ledger sound: no false identity-wide Broken, and once both are completed by
+// full reads a later delivery is receipted. Beside the single-id ack in
+// TestSeenByAckDoorbellAndJSONTruncation.
+func TestSeenByAckArgumentOrderKeepsLedgerSound(t *testing.T) {
+	e, room := seenWorld(t)
+	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "B"))
+	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	e.as("alice", "inbox", "--limit", "1").ok(t) // delivers A; B and C stay pending
+	e.wantReceipts(a)
+	e.as("alice", "ack", c, b).ok(t) // reverse timeline order
+	if r, err := config.LoadReadReceipts(e.paths(), "alice"); err != nil || r.Broken {
+		t.Fatalf("ack in argument order broke the ledger: %v %+v", err, r)
+	}
+	e.as("alice", "read", "proj", "--event", b).ok(t)
+	e.wantReceipts(a, b)
+	e.as("alice", "read", "proj", "--event", c).ok(t)
+	e.wantReceipts(a, b, c)
+	d := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a, b, c, d)
+}
