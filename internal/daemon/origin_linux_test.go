@@ -817,3 +817,46 @@ func TestSourceOriginConstruction(t *testing.T) {
 		t.Fatal("code drift")
 	}
 }
+
+// TestSourceOriginErrorBudget proves error output honors the call's remaining budget even under real Unix-socket backpressure.
+func TestSourceOriginErrorBudget(t *testing.T) {
+	t.Run("valid", validOriginControl)
+	t.Run("backpressure", func(t *testing.T) {
+		dir := shortOriginDir(t)
+		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, "e.sock"), Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		client, err := net.DialUnix("unix", nil, listener.Addr().(*net.UnixAddr))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.Close()
+		server, err := listener.AcceptUnix()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer server.Close()
+		if err := server.SetWriteBuffer(1024); err != nil {
+			t.Fatal(err)
+		}
+		_ = server.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
+		_, err = server.Write(bytes.Repeat([]byte("x"), 1<<20))
+		var ne net.Error
+		if !errors.As(err, &ne) || !ne.Timeout() {
+			t.Fatalf("control did not fill socket: %v", err)
+		}
+		generation := &originAuthority{}
+		generation.generation.Store(11)
+		service, err := NewOriginService(OriginConfig{Launcher: runorigin.Principal{UID: uint32(os.Geteuid()), Generation: 11}, Generations: generation, Producer: fakeOriginProducer()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		service.originErrorUntil(server, runorigin.ErrUnavailable, start.Add(80*time.Millisecond))
+		if elapsed := time.Since(start); elapsed < 50*time.Millisecond || elapsed > 300*time.Millisecond {
+			t.Fatalf("terminal response widened call budget: %s", elapsed)
+		}
+	})
+}

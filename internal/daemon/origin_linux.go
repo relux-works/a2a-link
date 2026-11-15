@@ -23,6 +23,9 @@ import (
 
 const OriginBudget = 5 * time.Second
 
+// Reserve response time INSIDE the five-second call budget, never after it.
+const originResponseReserve = 100 * time.Millisecond
+
 // OriginConfig is supplied only by protected service configuration. This API is
 // deliberately not wired to daemon station flags, credentials or registries.
 // ControlDir must already exist under operator-qualified protected ancestors.
@@ -209,8 +212,15 @@ func originCode(err error) string {
 }
 
 func (s *OriginService) originError(c *net.UnixConn, err error) {
+	s.originErrorUntil(c, err, time.Now().Add(time.Second))
+}
+
+func (s *OriginService) originErrorUntil(c *net.UnixConn, err error, deadline time.Time) {
 	// Only named codes and incarnation, never producer text or caller fields.
-	_ = c.SetWriteDeadline(time.Now().Add(time.Second))
+	if cap := time.Now().Add(time.Second); cap.Before(deadline) {
+		deadline = cap
+	}
+	_ = c.SetWriteDeadline(deadline)
 	_ = originWrite(c, struct {
 		Code              string `json:"code"`
 		SourceIncarnation string `json:"source_incarnation"`
@@ -290,17 +300,18 @@ func (s *OriginService) boundedOrigin(ctx context.Context, owned *originRecord, 
 
 func (s *OriginService) handleOrigin(ctx context.Context, c *net.UnixConn, endpoint *originEndpoint) {
 	defer c.Close()
-	call, cancel := context.WithTimeout(ctx, s.budget)
+	deadline := time.Now().Add(s.budget)
+	call, cancel := context.WithDeadline(ctx, deadline.Add(-originResponseReserve))
 	auth := s.boundedOrigin(call, nil, func() originWork { return originWork{err: s.authenticateOrigin(call, c)} })
 	cancel()
 	if auth.err != nil || !endpoint.valid() {
 		if auth.err == nil {
 			auth.err = runorigin.ErrRefused
 		}
-		s.originError(c, auth.err)
+		s.originErrorUntil(c, auth.err, deadline)
 		return
 	}
-	_ = c.SetWriteDeadline(time.Now().Add(s.budget))
+	_ = c.SetWriteDeadline(deadline)
 	capabilities := []string{}
 	if s.cfg.Producer != nil {
 		capabilities = []string{originPrepare, originValidate}
@@ -315,17 +326,19 @@ func (s *OriginService) handleOrigin(ctx context.Context, c *net.UnixConn, endpo
 	defer func() { record.close() }()
 	for {
 		// The read and all protected work share this operation's independent budget.
-		call, cancel = context.WithTimeout(ctx, s.budget)
-		_ = c.SetDeadline(time.Now().Add(s.budget))
+		deadline = time.Now().Add(s.budget)
+		call, cancel = context.WithDeadline(ctx, deadline.Add(-originResponseReserve))
+		_ = c.SetWriteDeadline(deadline)
+		_ = c.SetReadDeadline(deadline.Add(-originResponseReserve))
 		b, err := readFrame(c)
 		if err != nil {
 			cancel()
 			if err != io.EOF {
 				var ne net.Error
 				if errors.As(err, &ne) && ne.Timeout() {
-					s.originError(c, runorigin.ErrUnavailable)
+					s.originErrorUntil(c, runorigin.ErrUnavailable, deadline)
 				} else {
-					s.originError(c, runorigin.ErrRefused)
+					s.originErrorUntil(c, runorigin.ErrRefused, deadline)
 				}
 			}
 			return
@@ -333,7 +346,7 @@ func (s *OriginService) handleOrigin(ctx context.Context, c *net.UnixConn, endpo
 		r, err := decodeOriginRequest(b)
 		if err != nil {
 			cancel()
-			s.originError(c, err)
+			s.originErrorUntil(c, err, deadline)
 			return
 		}
 		old := record
@@ -364,7 +377,7 @@ func (s *OriginService) handleOrigin(ctx context.Context, c *net.UnixConn, endpo
 		})
 		cancel()
 		if work.err != nil {
-			s.originError(c, work.err)
+			s.originErrorUntil(c, work.err, deadline)
 			return
 		}
 		record = work.record

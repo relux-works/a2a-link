@@ -135,11 +135,13 @@ idle expiry or service shutdown closes an unconsumed session. Nothing restores
 records after process restart.
 
 Each prepare and validate has an independent five-second budget, including its
-frame read and dependency work. Late results are discarded and late sessions
+frame read, dependency work and response write. The final 100 ms is reserved
+inside that budget for error delivery; no terminal write extends it. Late results are discarded and late sessions
 closed. Worker slots remain occupied until the dependency actually returns,
 bounding even a broken cancellation-ignoring dependency to 64 outstanding
 workers. There are at most 64 live client connections, no unbounded prepared
-map, and a bounded one-second error write. A disconnected/timeout operation
+map. Error writes are capped at one second and at the current call deadline,
+whichever is sooner. A disconnected/timeout operation
 never becomes an accepted preparation later. Network delivery can still be
 lost: the client must restart from H1, compare every successful binding to its
 current authenticated hello and never reuse an old prepared ID/response.
