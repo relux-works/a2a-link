@@ -23,7 +23,7 @@ func TestSavedInboxSummaryShowAndReceiptBoundary(t *testing.T) {
 	tuitestkit.ContainsStr(t, r.stdout, "count sender=@bob:test.local n=1\n")
 	tuitestkit.ContainsStr(t, r.stdout, "count kind=\"question\" n=1\n")
 	tuitestkit.ContainsStr(t, r.stdout, "count room=\"#proj\" n=1\n")
-	tuitestkit.ContainsStr(t, r.stdout, "id="+fmt.Sprintf("%q", id)+" 界\n")
+	tuitestkit.ContainsStr(t, r.stdout, "id="+fmt.Sprintf("%q", id)+" verification=\"unsigned (no envelope)\" 界\n")
 	tuitestkit.NotContainsStr(t, r.stdout, "TAIL")
 	if !e.received("alice", id) || e.received("alice", later) {
 		t.Fatal("saved summary receipted a different batch")
