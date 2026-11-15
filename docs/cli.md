@@ -1825,8 +1825,14 @@ The ledger records the newest mailbox receipt it noted; if the mailbox later
 shows entries received without a ledger mark (a failed ledger write, an older
 binary on the same identity), the ledger is marked broken and sends no
 receipt again. Removing `state/<name>.read-receipts.json` starts a new
-baseline explicitly. A room with more than 512 undelivered entries stops
-sending receipts.
+baseline explicitly, together with its marker
+`state/<name>.read-receipts.init`. A ledger file lost while its marker remains
+is broken, not a new baseline. A room with more than 512 undelivered entries,
+or an entry received ahead of more than 512 earlier pending ones, stops
+sending receipts. The ledger keeps each room's entries in timeline (mailbox)
+order whatever order they were received in, so the receipt names the latest
+fully delivered event. Rooms are attempted least recently tried first, so a
+room whose endpoint hangs cannot starve the others.
 
 ### Environment delivery: the Claude Code and Codex hook doorbell (`a2a hook`)
 Notifications reach the agent's session (protocol rule 4) through the public hook mechanism of its runtime: commands that Claude Code or the Codex

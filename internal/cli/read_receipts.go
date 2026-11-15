@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
@@ -94,6 +93,7 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, readReceiptBudget)
 	defer cancel()
 	var want map[string]string
+	var rooms []string
 	now := s.app.Now()
 	// The claim outlives this command's attempts, so a competing command never
 	// sends an older target for the same room meanwhile.
@@ -101,15 +101,11 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 	if err := config.UpdateReadReceipts(ctx, s.paths, s.name, func(r *config.ReadReceipts, mb *config.Mailbox) (bool, error) {
 		wasBroken := r.Broken
 		want = r.Claim(mb, now.UnixMilli(), until)
+		rooms = r.Order(want)
 		return len(want) > 0 || r.Broken != wasBroken, nil
 	}); err != nil || len(want) == 0 {
 		return
 	}
-	rooms := make([]string, 0, len(want))
-	for room := range want {
-		rooms = append(rooms, room)
-	}
-	sort.Strings(rooms)
 	accepted, definite := map[string]bool{}, map[string]bool{}
 	tried := []string{}
 	for _, room := range rooms {
@@ -134,6 +130,7 @@ func (s *session) sendReadReceipts(ctx context.Context) {
 			}
 		}
 		for _, room := range tried {
+			r.Attempted(room, now.UnixMilli())
 			switch {
 			case accepted[room]:
 				r.Accepted(room, want[room])

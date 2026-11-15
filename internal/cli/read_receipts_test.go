@@ -359,3 +359,73 @@ func TestSeenByLedgerWriteFailureNeverWidens(t *testing.T) {
 		t.Fatalf("ledger not marked broken: %v %+v", err, r)
 	}
 }
+
+// Proves fair progression across runs: two rooms whose endpoint hangs use up
+// one run's whole budget, yet the next run serves the healthy room first
+// (least recently tried), instead of starving it behind the same two rooms
+// forever. The quarantine is off, so only the ordering is exercised.
+func TestSeenByHangingRoomsDoNotStarveOthers(t *testing.T) {
+	oldBudget, oldCall, oldQ := readReceiptBudget, readReceiptCallMax, readReceiptQuarantine
+	readReceiptBudget, readReceiptCallMax, readReceiptQuarantine = 300*time.Millisecond, 150*time.Millisecond, 0
+	t.Cleanup(func() { readReceiptBudget, readReceiptCallMax, readReceiptQuarantine = oldBudget, oldCall, oldQ })
+	e, room := seenWorld(t)
+	lobby := e.hs.aliases["#lobby:test.local"]
+	healthy := e.hs.addRoom("zzz", "@alice:test.local", "@bob:test.local") // sorts after both hanging rooms
+	hang := make(chan struct{})
+	t.Cleanup(func() { close(hang) })
+	e.hs.mu.Lock()
+	e.hs.receiptHang, e.hs.receiptHangRooms = hang, map[string]bool{room: true, lobby: true}
+	e.hs.mu.Unlock()
+	e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "proj"))
+	e.hs.inject(lobby, "@bob:test.local", toMsg("bob", "notice", "lobby"))
+	id := e.hs.inject(healthy, "@bob:test.local", toMsg("bob", "notice", "healthy"))
+	e.as("alice", "inbox").ok(t)
+	if len(e.hs.readReceipts()) != 0 || e.ledgerRoom("alice", healthy).Tried != 0 {
+		t.Fatalf("first run: receipts %v, healthy tried %d (the budget should be spent on the hanging rooms)", e.receiptEvents(), e.ledgerRoom("alice", healthy).Tried)
+	}
+	e.as("alice", "inbox").ok(t)
+	got := e.hs.readReceipts()
+	if len(got) != 1 || got[0].room != healthy || got[0].event != id {
+		t.Fatalf("second run starved the healthy room: %+v", got)
+	}
+}
+
+// Proves unreadable-ledger neighbours fail closed while mail still flows:
+// a corrupt ledger sends nothing and is left as found; a ledger removed after
+// creation (its marker left) is broken, not a new baseline; removing both
+// files is the explicit reset, after which receipts resume.
+func TestSeenByUnreadableLedgerFailsClosed(t *testing.T) {
+	e, room := seenWorld(t)
+	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	path := e.paths().ReadReceiptsFile("alice")
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "B"))
+	e.as("alice", "inbox").ok(t)
+	if !e.received("alice", b) || readFile(t, path) != "{not json" {
+		t.Fatal("corrupt ledger: mail not received or ledger rewritten")
+	}
+	e.wantReceipts(a)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a)
+	if r, err := config.LoadReadReceipts(e.paths(), "alice"); err != nil || !r.Broken {
+		t.Fatalf("lost ledger not broken: %v %+v", err, r)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(e.paths().ReadReceiptsMarkerFile("alice")); err != nil {
+		t.Fatal(err)
+	}
+	d := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D"))
+	e.as("alice", "inbox").ok(t)
+	e.wantReceipts(a, d)
+	_ = c
+}

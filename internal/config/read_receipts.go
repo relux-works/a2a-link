@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 )
 
@@ -33,8 +34,9 @@ import (
 // ReadReceiptLogMax bounds the marks kept per room.
 const ReadReceiptLogMax = 512
 
-// readReceiptWaitsMax bounds the earlier pending ids recorded for one mark.
-const readReceiptWaitsMax = 64
+// readReceiptWaitsMax bounds the earlier pending ids recorded for one mark;
+// more freezes the room, since the mark's timeline position is then unknown.
+const readReceiptWaitsMax = ReadReceiptLogMax
 
 // ReadReceiptMark is one received mailbox entry of a room.
 type ReadReceiptMark struct {
@@ -43,26 +45,30 @@ type ReadReceiptMark struct {
 	Done bool `json:"done,omitempty"`
 	// Gap: a gap record; the events it stands for were never delivered.
 	Gap bool `json:"gap,omitempty"`
-	// Waits are same-room entries that were still pending (or not shown to this
-	// view) when this entry was received; the mark is a target only once each
-	// has been received and is not an undelivered mark.
+	// Waits are same-room entries appended to the mailbox before this one that
+	// were still pending (or hidden from this view) when it was received. They
+	// are earlier in the room's timeline: a later mark of any of them goes
+	// before this mark, and nothing at or past this mark is a target while any
+	// of them is still pending.
 	Waits []string `json:"waits,omitempty"`
-	// WaitsCut: more earlier entries were pending than Waits holds; such a mark
-	// is never a target (later marks still can be).
-	WaitsCut bool `json:"waits_cut,omitempty"`
 }
 
 // ReadReceiptRoom is the ledger of one room.
 type ReadReceiptRoom struct {
 	// Sent is the last event the homeserver accepted a receipt for.
 	Sent string `json:"sent,omitempty"`
-	// Log holds the marks after Sent, in receipt order.
+	// Log holds the marks after Sent in the room's mailbox (timeline) order,
+	// whatever order they were received in.
 	Log []ReadReceiptMark `json:"log,omitempty"`
 	// Frozen: the log overflowed with undelivered marks only; no further
 	// receipt is sent in this room.
 	Frozen bool `json:"frozen,omitempty"`
 	// Failed counts consecutive failed receipt attempts.
 	Failed int `json:"failed,omitempty"`
+	// Tried is when a receipt was last attempted in this room (Unix ms); the
+	// least recently tried room goes first, so a hanging room cannot starve
+	// the others.
+	Tried int64 `json:"tried,omitempty"`
 	// Claim is the event one command is sending until ClaimUntil (Unix ms);
 	// a competing command skips the room meanwhile, so two senders never race
 	// an older receipt past a newer one.
@@ -115,8 +121,16 @@ func (p Paths) ReadReceiptsFile(name string) string {
 	return filepath.Join(p.Base, "state", name+".read-receipts.json")
 }
 
-// LoadReadReceipts reads the ledger; a missing file is an empty ledger.
-// Anything but a regular 0600 file with a valid ledger is refused.
+// ReadReceiptsMarkerFile records that the ledger of name was created. A ledger
+// that is missing while its marker exists was lost after it began judging
+// deliveries, so it is broken, never a new baseline.
+func (p Paths) ReadReceiptsMarkerFile(name string) string {
+	return filepath.Join(p.Base, "state", name+".read-receipts.init")
+}
+
+// LoadReadReceipts reads the ledger; a missing file is an empty ledger, unless
+// its marker shows it existed (then it is broken). Anything but a regular 0600
+// file with a valid ledger is refused.
 func LoadReadReceipts(p Paths, name string) (*ReadReceipts, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
@@ -125,6 +139,9 @@ func LoadReadReceipts(p Paths, name string) (*ReadReceipts, error) {
 	r := &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{}}
 	if err := checkSecretFile(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
+			if _, merr := os.Lstat(p.ReadReceiptsMarkerFile(name)); !errors.Is(merr, fs.ErrNotExist) {
+				r.Broken, r.Noted = true, true
+			}
 			return r, nil
 		}
 		return nil, fmt.Errorf("read receipts: %w", err)
@@ -166,6 +183,19 @@ func SaveReadReceipts(p Paths, name string, r *ReadReceipts) error {
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err
+	}
+	// The marker exists before the first ledger does, and is never removed by a2a.
+	marker := p.ReadReceiptsMarkerFile(name)
+	if f, err := os.OpenFile(marker, os.O_WRONLY|os.O_CREATE|os.O_EXCL|openNoFollow, SecretFileMode); err == nil {
+		if err := f.Sync(); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("read receipts: %w", err)
 	}
 	return writeSecretAtomic(path, name+".read-receipts", append(data, '\n'))
 }
@@ -245,23 +275,28 @@ func (r *ReadReceipts) NoteReceived(mb *Mailbox, entries []MailEntry, done func(
 		}
 		mark := ReadReceiptMark{ID: e.ID, Gap: e.Kind == MailGap}
 		mark.Done = e.Kind == MailEvent && done(e)
-		for _, w := range mb.earlierLive(e.Room, e.ID) {
-			// Earlier entries of this same batch get their own marks first.
-			if batch[w] {
-				continue
-			}
-			if len(mark.Waits) == readReceiptWaitsMax {
-				mark.WaitsCut = true
-				break
-			}
-			mark.Waits = append(mark.Waits, w)
-		}
 		if i := rr.index(e.ID); i >= 0 {
 			// Printed again (an interrupted earlier receipt): keep the stronger fact.
 			rr.Log[i].Done = rr.Log[i].Done || mark.Done
 			continue
 		}
-		rr.Log = append(rr.Log, mark)
+		cut := false
+		for _, w := range mb.earlierLive(e.Room, e.ID) {
+			// Earlier entries of this same batch are marked first, in order.
+			if batch[w] {
+				continue
+			}
+			if len(mark.Waits) == readReceiptWaitsMax {
+				cut = true
+				break
+			}
+			mark.Waits = append(mark.Waits, w)
+		}
+		if cut {
+			rr.Frozen, rr.Log = true, nil
+			continue
+		}
+		rr.insert(mark)
 		rr.bound()
 	}
 }
@@ -282,6 +317,21 @@ func (r *ReadReceipts) NoteFullPrint(room string, ids []string) bool {
 		}
 	}
 	return changed
+}
+
+// insert places mark in timeline order. The log is kept sorted: a mark that
+// is already in the log and comes later in the room's timeline was received
+// while this entry was still pending, so it lists this entry in its Waits;
+// marks earlier in the timeline never do. So the new mark goes just before
+// the first mark that waits on it, or last.
+func (rr *ReadReceiptRoom) insert(mark ReadReceiptMark) {
+	for i, m := range rr.Log {
+		if slices.Contains(m.Waits, mark.ID) {
+			rr.Log = slices.Insert(rr.Log, i, mark)
+			return
+		}
+	}
+	rr.Log = append(rr.Log, mark)
 }
 
 func (rr *ReadReceiptRoom) index(id string) int {
@@ -329,23 +379,18 @@ func (r *ReadReceipts) Target(mb *Mailbox, room string) string {
 		}
 	}
 	target := ""
+walk:
 	for _, m := range rr.Log {
 		if !m.Done {
 			break
 		}
-		if m.WaitsCut {
-			continue
-		}
-		ok := true
 		for _, w := range m.Waits {
+			// A pending earlier entry precedes this mark and everything after it.
 			if mb.Live(w) || undelivered[w] {
-				ok = false
-				break
+				break walk
 			}
 		}
-		if ok {
-			target = m.ID
-		}
+		target = m.ID
 	}
 	if target == rr.Sent {
 		return ""
@@ -376,6 +421,30 @@ func (r *ReadReceipts) Claim(mb *Mailbox, now, until int64) map[string]string {
 		}
 	}
 	return out
+}
+
+// Order returns the claimed rooms least recently tried first (then by id),
+// so every room is eventually attempted even when others keep hanging.
+func (r *ReadReceipts) Order(claimed map[string]string) []string {
+	rooms := make([]string, 0, len(claimed))
+	for room := range claimed {
+		rooms = append(rooms, room)
+	}
+	sort.Slice(rooms, func(i, j int) bool {
+		a, b := r.Rooms[rooms[i]], r.Rooms[rooms[j]]
+		if a.Tried != b.Tried {
+			return a.Tried < b.Tried
+		}
+		return rooms[i] < rooms[j]
+	})
+	return rooms
+}
+
+// Attempted records that a receipt was attempted in room at now (Unix ms).
+func (r *ReadReceipts) Attempted(room string, now int64) {
+	if rr := r.Rooms[room]; rr != nil {
+		rr.Tried = now
+	}
 }
 
 // Release ends this command's claim on room for event (a later claim stays).

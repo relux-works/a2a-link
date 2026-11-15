@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -114,9 +115,105 @@ func TestReadReceiptOutOfOrderWaits(t *testing.T) {
 		t.Fatalf("$2 truncated: target %q, want $1 (never $3, which waits on $2)", got)
 	}
 	r.NoteFullPrint("!r", []string{"$2"})
-	if got := r.Target(mb, "!r"); got != "$2" {
-		// Receipt order is $3, $1, $2: $2 is the last mark and its waits are met.
-		t.Fatalf("all delivered: target %q, want $2", got)
+	if got := r.Target(mb, "!r"); got != "$3" {
+		// Receipt order was $3, $1, $2; the target is the LATEST delivered
+		// event of the room's timeline, never an older one.
+		t.Fatalf("all delivered: target %q, want $3", got)
+	}
+	if ids := markIDs(r.Rooms["!r"]); ids != "$1,$2,$3" {
+		t.Fatalf("log order %s, want timeline order", ids)
+	}
+}
+
+func markIDs(rr *ReadReceiptRoom) string {
+	var ids []string
+	for _, m := range rr.Log {
+		ids = append(ids, m.ID)
+	}
+	return strings.Join(ids, ",")
+}
+
+// Proves marks are kept and pruned in timeline order: a later event acked
+// before an earlier one stays in the log when the earlier one becomes the
+// target and is accepted, and becomes the target itself once completed.
+func TestReadReceiptTimelineOrderPrune(t *testing.T) {
+	_, mb, r := receiptWorld(t, "$1", "$2", "$3")
+	deliver(t, mb, r, []string{"$2"}) // acked ahead of $1, undelivered
+	deliver(t, mb, r, []string{"$1"}, "$1")
+	if got := r.Target(mb, "!r"); got != "$1" {
+		t.Fatalf("target %q, want $1", got)
+	}
+	r.Accepted("!r", "$1")
+	if ids := markIDs(r.Rooms["!r"]); ids != "$2" {
+		t.Fatalf("after accepting $1 the log is %q; the undelivered later $2 was dropped", ids)
+	}
+	deliver(t, mb, r, []string{"$3"}, "$3")
+	if got := r.Target(mb, "!r"); got != "" {
+		t.Fatalf("target %q past undelivered $2", got)
+	}
+	r.NoteFullPrint("!r", []string{"$2"})
+	if got := r.Target(mb, "!r"); got != "$3" {
+		t.Fatalf("target %q, want $3", got)
+	}
+}
+
+// Proves a mark whose earlier pending entries exceed the bound freezes its
+// room (its timeline position would be unknown), while a neighbour room and
+// a mark within the bound are unaffected.
+func TestReadReceiptWaitsOverflowFreezes(t *testing.T) {
+	var ids []string
+	for i := 0; i <= ReadReceiptLogMax; i++ {
+		ids = append(ids, "$"+strconv.Itoa(i))
+	}
+	ids = append(ids, "$last", "$s1")
+	_, mb, r := receiptWorld(t, ids...)
+	deliver(t, mb, r, []string{"$last"}) // ReadReceiptLogMax+1 earlier entries pending
+	if !r.Rooms["!r"].Frozen {
+		t.Fatal("overflowing waits did not freeze the room")
+	}
+	deliver(t, mb, r, []string{"$s1"}, "$s1")
+	if got := r.Target(mb, "!s"); got != "$s1" {
+		t.Fatalf("neighbour room: %q", got)
+	}
+	_, mb2, r2 := receiptWorld(t, "$a", "$b")
+	deliver(t, mb2, r2, []string{"$b"}) // one earlier entry: within the bound
+	if r2.Rooms["!r"].Frozen {
+		t.Fatal("a bounded wait froze the room")
+	}
+}
+
+// Proves fair ordering: claimed rooms go least recently tried first, so a
+// room that was never reached is tried before rooms that just hung.
+func TestReadReceiptOrderLeastRecentlyTried(t *testing.T) {
+	r := &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{"!a": {Tried: 50}, "!b": {Tried: 50}, "!c": {}}}
+	if got := strings.Join(r.Order(map[string]string{"!a": "$1", "!b": "$2", "!c": "$3"}), ","); got != "!c,!a,!b" {
+		t.Fatalf("order %s", got)
+	}
+	r.Attempted("!c", 60)
+	if got := strings.Join(r.Order(map[string]string{"!a": "$1", "!b": "$2", "!c": "$3"}), ","); got != "!a,!b,!c" {
+		t.Fatalf("order after attempt %s", got)
+	}
+}
+
+// Proves a ledger lost after creation is broken, not a new baseline: with its
+// marker left, a missing file loads as Broken; with both removed (the explicit
+// reset) it loads empty and usable.
+func TestReadReceiptsLostLedgerIsBroken(t *testing.T) {
+	p, _, _ := receiptWorld(t, "$1")
+	if err := SaveReadReceipts(p, "a", &ReadReceipts{Rooms: map[string]*ReadReceiptRoom{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p.ReadReceiptsFile("a")); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := LoadReadReceipts(p, "a"); err != nil || !r.Broken {
+		t.Fatalf("lost ledger: %v %+v", err, r)
+	}
+	if err := os.Remove(p.ReadReceiptsMarkerFile("a")); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := LoadReadReceipts(p, "a"); err != nil || r.Broken {
+		t.Fatalf("explicit reset: %v %+v", err, r)
 	}
 }
 

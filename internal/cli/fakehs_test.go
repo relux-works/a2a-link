@@ -83,6 +83,8 @@ type fakeHS struct {
 	// receiptHang, when set, holds receipt requests until it is closed or the
 	// request is cancelled (a hanging endpoint).
 	receiptHang chan struct{}
+	// receiptHangRooms, when set, limits receiptHang to these room ids.
+	receiptHangRooms map[string]bool
 }
 
 // fakeReceipt is one accepted POST /rooms/{room}/receipt/{type}/{event}.
@@ -100,6 +102,9 @@ func (hs *fakeHS) readReceipts() []fakeReceipt {
 func (hs *fakeHS) receipt(w http.ResponseWriter, r *http.Request, u string) {
 	hs.mu.Lock()
 	hang := hs.receiptHang
+	if hs.receiptHangRooms != nil && !hs.receiptHangRooms[r.PathValue("room")] {
+		hang = nil
+	}
 	hs.mu.Unlock()
 	if hang != nil {
 		// A held request never succeeds, even when released after the client
