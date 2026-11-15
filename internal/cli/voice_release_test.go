@@ -202,9 +202,11 @@ func TestPostVoiceSharedBinaryNativeFree(t *testing.T) {
 					t.Fatal(stderr.String())
 				}
 			} else {
-				want := "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed or timed out; check the local engine and installed model; text retained\n"
+				want := "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed: executable resolution or spawn refused; text retained\n"
 				if variant == "disabled" {
-					want = "a2a: warning [VOICE_TEXT_ONLY]: missing voice config; run a2a voice config --enable; text retained\n"
+					want = "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed: model/config validation refused; text retained\n"
+				} else if variant == "model-missing" {
+					want = "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed: model/config validation refused; text retained\n"
 				}
 				if stderr.String() != want {
 					t.Fatalf("warning=%q want=%q", stderr.String(), want)

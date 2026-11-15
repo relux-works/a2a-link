@@ -269,13 +269,14 @@ func TestPostVoiceExecutableIntegrity(t *testing.T) {
 			}
 			refused := expectedCalls == 0 || strings.HasPrefix(variant, "second-")
 			if refused {
-				warning = "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed or timed out; check the local engine and installed model; text retained\n"
+				warning = "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed: executable resolution or spawn refused; text retained\n"
 				if variant == "dotdot-link" {
-					// Strict config rejects the ambiguous spelling even before rendering.
+					// Strict config rejects the ambiguous spelling before rendering;
+					// public output preserves the closed parent-observed category.
 					if !strings.HasPrefix(stderr.String(), "a2a: warning [VOICE_TEXT_ONLY]: ") {
 						t.Fatalf("missing warning: %q", stderr.String())
 					}
-					warning = "a2a: warning [VOICE_TEXT_ONLY]: voice helper requires an absolute a2a-voice-worker path and lowercase SHA256 pins for worker and manifest; text retained\n"
+					warning = "a2a: warning [VOICE_TEXT_ONLY]: voice synthesis failed: model/config validation refused; text retained\n"
 				}
 				if e.hs.CallCount(uploadRoute) != 0 {
 					t.Fatal("failed voice uploaded")

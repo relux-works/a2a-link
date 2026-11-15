@@ -114,7 +114,7 @@ func TestRenderNoticeFailureWarning(t *testing.T) {
 			if err != nil || !a.Truncated || len(r.inputs) != 2 || r.inputs[1] != TruncationNotice {
 				t.Fatalf("positive: %+v %v", a, err)
 			}
-		} else if err == nil || err.Error() != "voice synthesis failed or timed out; check the local engine and installed model" {
+		} else if err == nil || err.Error() != "voice synthesis failed: unclassified failure" {
 			t.Fatalf("notice warning: %v", err)
 		}
 	}

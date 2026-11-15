@@ -148,6 +148,8 @@ func TestRenderRejectsLibraryBeforeExec(t *testing.T) {
 				}
 			} else if err == nil || r.calls != 0 {
 				t.Fatalf("damaged payload reached exec: calls=%d err=%v", r.calls, err)
+			} else {
+				assertSynthesis(t, err, SynthesisExecutable, -1, "voice synthesis failed: executable resolution or spawn refused")
 			}
 		})
 	}

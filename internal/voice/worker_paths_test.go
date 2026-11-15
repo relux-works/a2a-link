@@ -461,7 +461,7 @@ func TestRenderWorkerPaths(t *testing.T) {
 		t.Run(string(rune('0'+failAt)), func(t *testing.T) {
 			base := filepath.Join(t.TempDir(), strings.Repeat("a", 100), "connections", "relux", "identities", "agents", strings.Repeat("b", 64))
 			r := &workerPathRunner{renderRunner: &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, sampleRate)}, pin: workerModelFixture(t, ModelDir(base)), failAt: failAt}
-			a, err := (LocalRenderer{Runner: r}).Render(context.Background(), base, Config{true, 180}, strings.Repeat("я", 6001))
+			a, err := (LocalRenderer{Runner: r}).Render(context.Background(), base, Config{Enabled: true, MaxSeconds: 180}, strings.Repeat("я", 6001))
 			if failAt == 0 {
 				if err != nil || !a.Truncated || len(r.inputs) != 2 || r.inputs[1] != TruncationNotice {
 					t.Fatalf("ordinary/notice worker result: truncated=%v error=%v calls=%d", a.Truncated, err, len(r.inputs))

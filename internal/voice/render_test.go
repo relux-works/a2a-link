@@ -67,6 +67,45 @@ func (r *renderRunner) Run(ctx context.Context, name string, args []string, inpu
 	return os.WriteFile(out, pcm, 0600)
 }
 
+type preparedWorkerRunner struct {
+	*renderRunner
+	path        string
+	prepareCall int
+	closeCall   int
+	workerName  string
+	workerArgs  []string
+}
+
+func (r *preparedWorkerRunner) PrepareWorker(context.Context, Config) (PreparedWorker, error) {
+	r.prepareCall++
+	return PreparedWorker{Path: r.path, cleanup: func() { r.closeCall++ }}, nil
+}
+
+func (r *preparedWorkerRunner) Run(ctx context.Context, name string, args []string, input io.Reader) error {
+	if input != nil {
+		r.workerName = name
+		r.workerArgs = append([]string(nil), args...)
+	}
+	return r.renderRunner.Run(ctx, name, args, input)
+}
+
+// Synthesis executes the authenticated snapshot path, passes only model/output
+// arguments, and removes the snapshot after the child has exited.
+func TestRenderUsesPreparedWorkerSnapshot(t *testing.T) {
+	base := t.TempDir()
+	worker := filepath.Join(t.TempDir(), WorkerName)
+	runner := &preparedWorkerRunner{
+		renderRunner: &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, sampleRate)},
+		path:         worker,
+	}
+	if _, err := (LocalRenderer{Runner: runner}).Render(context.Background(), base, Config{Enabled: true, MaxSeconds: MaxSeconds}, "prepared worker control"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.prepareCall != 1 || runner.closeCall != 1 || runner.workerName != worker || len(runner.workerArgs) != 2 || runner.workerArgs[0] != ModelDir(base) || filepath.Base(runner.workerArgs[1]) != "source.wav" {
+		t.Fatalf("prepared worker boundary mismatch: prepare=%d close=%d name=%q args=%q", runner.prepareCall, runner.closeCall, runner.workerName, runner.workerArgs)
+	}
+}
+
 // A controlled long source really appends the synthesized notice, stays below
 // 180s after decode, uses bounded processes and deletes every private output.
 // This tests the cap algorithm, not a real engine's pronunciation or encoding.

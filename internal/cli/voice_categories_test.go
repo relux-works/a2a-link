@@ -27,6 +27,9 @@ type postCategoryRunner struct {
 }
 
 func (r *postCategoryRunner) ValidateModel(context.Context, string) error { return r.validation }
+func (r *postCategoryRunner) PrepareWorker(context.Context, voice.Config) (voice.PreparedWorker, error) {
+	return voice.PreparedWorker{Path: voice.WorkerName}, nil
+}
 func (r *postCategoryRunner) Run(_ context.Context, _ string, args []string, input io.Reader) error {
 	r.calls++
 	out := args[len(args)-1]
