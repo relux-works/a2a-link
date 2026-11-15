@@ -1773,12 +1773,42 @@ frames have no expiry contract: even an old frame can be suggested. Selection
 does not test whether that frame contains the requested event; an explicit
 `--from` read still requires event membership before printing a body. It never repairs State or automatically displays a different batch.
 Malformed, non-0600, symlinked and other identities' frames are excluded.
-This is a local read: it never syncs, fetches an event, or receipts mail.
+This is a local read: it never syncs, fetches an event, or receipts mail; it may complete a Seen by ledger mark (below), whose receipt the next inbox sends.
 Unknown events, missing frames, malformed/incomplete frames, duplicate event
 ids, files over 16 MiB, non-regular files, symlinks and modes other than `0600`
 are refused without printing a body. File opening requires Unix no-follow
 support. If a saved path was moved or the last-path state update failed after
 a durable receipt, supply its current path explicitly with `--from`.
+
+#### Seen by: public read receipts after full delivery
+
+After `a2a inbox` the agent's account sends a public, unthreaded Matrix
+`m.read` receipt in a room (other clients show it as "Seen by"). The receipt
+goes on the latest event up to which every earlier mailbox entry of that room
+reached the session **in full**:
+
+- delivered: an untruncated frame or `--json` body; a `--summary` excerpt
+  that holds the whole body (not cut by `--width`); a `--brief` inline body;
+  and, completing an entry that was cut, a later full print of that event by
+  `a2a read <room> --event <$event>` (the path the truncation marker names),
+  any other `a2a read` that prints it, or `a2a inbox show`;
+- not delivered: a truncated print, a cut excerpt, `a2a ack`, a `wait` or
+  `watch` line, a hook doorbell, a sync, and a gap record (a gap holds the
+  room's receipt where it is).
+
+An undelivered entry holds the receipt of its room just before it until it is
+completed; an entry received out of mailbox order is no target until every
+earlier entry of its room is received and delivered. Rooms are independent.
+Receipts never move backwards. Entries received before the ledger existed are
+the baseline and are not judged.
+
+The ledger (`state/<name>.read-receipts.json`, mode 0600) is written under the
+delivery lock before the mailbox receipt. The receipt itself is posted after
+the lock is released, one bounded attempt per room per command (3 s per
+request, 5 s in total), prints nothing and never changes the exit code; a
+failure is counted in the ledger and retried by the next inbox. A ledger that
+cannot be read or written only withholds receipts: mail is never affected. A
+room with more than 512 undelivered entries stops sending receipts.
 
 ### Environment delivery: the Claude Code and Codex hook doorbell (`a2a hook`)
 Notifications reach the agent's session (protocol rule 4) through the public hook mechanism of its runtime: commands that Claude Code or the Codex

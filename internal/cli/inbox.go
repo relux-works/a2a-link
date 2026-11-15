@@ -119,7 +119,8 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 		if len(pending) == 0 && !save {
 			return nil, nil
 		}
-		shown := itemsOf(pending[:min(*limit, len(pending))], s.server)
+		entries := pending[:min(*limit, len(pending))]
+		shown := itemsOf(entries, s.server)
 		more := len(pending) - len(shown)
 		var out string
 		if *asJSON {
@@ -135,6 +136,7 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 			if err != nil {
 				return nil, fmt.Errorf("save inbox: %w%s", err, lost)
 			}
+			done := map[string]bool{}
 			if *summary || *brief {
 				var inline []bool
 				if *brief {
@@ -144,9 +146,15 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 				if err != nil {
 					return nil, fmt.Errorf("%w%s", err, lost)
 				}
+				for i, it := range shown {
+					done[it.id] = summaryDelivered(it, records[i], *width, i < len(inline) && inline[i])
+				}
 			} else if len(shown) == 0 {
 				out = "no new peer events\n"
 			} else {
+				for _, it := range shown {
+					done[it.id] = fullyPrinted(it, s.server)
+				}
 				out = a.secrets.Scrub(out)
 			}
 			if *brief {
@@ -165,6 +173,7 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 				}
 			}
 			cur.LastInbox = *outPath
+			s.noteDelivered(mb, entries, done)
 			_, err = mb.Receive(itemIDs(shown))
 			return nil, err
 		}
@@ -187,6 +196,11 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 			}
 		}
 		// Only now, after a successful write, are exactly the shown entries received.
+		done := map[string]bool{}
+		for _, it := range shown {
+			done[it.id] = fullyPrinted(it, s.server)
+		}
+		s.noteDelivered(mb, entries, done)
 		_, err := mb.Receive(itemIDs(shown))
 		return nil, err
 	})
@@ -196,6 +210,8 @@ func cmdInbox(ctx context.Context, a *App, args []string) error {
 	if !printed && !*asJSON {
 		a.printf("no new peer events\n")
 	}
+	// Mail is delivered and received; receipts follow, outside the lock.
+	s.sendReadReceipts(ctx)
 	return nil
 }
 

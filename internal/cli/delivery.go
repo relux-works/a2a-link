@@ -873,6 +873,9 @@ func cmdAck(ctx context.Context, a *App, args []string) error {
 			}
 		}
 		asked = len(ids)
+		// An ack receives without printing: the entries never reached the
+		// session in full, so they hold back the room's read receipt.
+		s.noteDelivered(mb, mb.InOrder(ids), nil)
 		var err error
 		n, err = mb.Receive(ids)
 		return nil, err

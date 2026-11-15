@@ -522,6 +522,12 @@ func (c *Client) Join(ctx context.Context, roomIDOrAlias string) (string, error)
 	return out.RoomID, err
 }
 
+// SendReadReceipt posts a public, unthreaded m.read receipt for eventID in
+// roomID: "read up to here". Callers bound the attempt with ctx; nothing is retried.
+func (c *Client) SendReadReceipt(ctx context.Context, roomID, eventID string) error {
+	return c.call(ctx, http.MethodPost, v3+"/rooms/"+seg(roomID)+"/receipt/m.read/"+seg(eventID), nil, map[string]any{}, nil)
+}
+
 // Leave leaves a room.
 func (c *Client) Leave(ctx context.Context, roomID string) error {
 	return c.call(ctx, http.MethodPost, v3+"/rooms/"+seg(roomID)+"/leave", nil, map[string]any{}, nil)

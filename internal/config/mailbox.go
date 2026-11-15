@@ -245,6 +245,44 @@ func (m *Mailbox) Has(id string) bool {
 	return ok || m.recv[id]
 }
 
+// Live reports whether id is an unreceipted entry, whatever the pending filter.
+func (m *Mailbox) Live(id string) bool {
+	_, ok := m.live[id]
+	return ok
+}
+
+// InOrder returns the unreceipted entries among ids, in append order,
+// whatever the pending filter.
+func (m *Mailbox) InOrder(ids []string) []MailEntry {
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []MailEntry
+	for _, id := range m.order {
+		if e, ok := m.live[id]; ok && want[id] {
+			out = append(out, *e)
+			delete(want, id)
+		}
+	}
+	return out
+}
+
+// earlierLive returns the unreceipted entries of room appended before id,
+// including those the pending filter hides. Invites are not room events.
+func (m *Mailbox) earlierLive(room, id string) []string {
+	var out []string
+	for _, x := range m.order {
+		if x == id {
+			return out
+		}
+		if e, ok := m.live[x]; ok && e.Room == room && e.Kind != MailInvite {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 // Received reports whether id was received (it is in the receipt index).
 func (m *Mailbox) Received(id string) bool { return m.recv[id] }
 
