@@ -255,14 +255,12 @@ remain unimplemented. The legacy publisher is held under the combined policy.
 No real release or tap delivery is claimed. v0.1.2 remains a proposal requiring a
 fresh unused-ref check and reviewed VERSION successor when integration is ready.
 
-## P17-A: Source/client wire pinning and downstream qualification
+## P17-A: downstream qualification
 
-The accepted r2/r1.2 inputs leave the envelope, hello/error shape, scalar
-encodings/widths, registration domain and validate request-ID correlation
-unspecified. `docs/source-origin.md` states the explicit minimal candidate
-implemented here; Source and curator-run must pin these choices before claiming
-interoperability. No new refusal codes are introduced; specific parse/path/
-nonce/timeout subcodes are not named in the inputs and remain unspecified.
+The Source-control envelope, hello/error shapes, scalar encodings and original
+request-ID correlation are pinned in `docs/source-origin.md`. Request ID and
+launch nonce are exactly 32 lowercase hex; zero input UID and zero/shared
+launcher UID refuse. No finer refusal subcodes are introduced.
 
 A reviewed downstream rich producer must supply protected identity/connection/
 Matrix-user/policy/registration mapping, its own checker/private scope, signed
@@ -270,12 +268,11 @@ inner-request/profile verification and fresh admission/pin rechecks. Upstream
 checks typed shape and immutable equality, not authenticity of a malicious
 linked producer's well-shaped claims. Generic Live, `none` and Matrix-ID origin
 substitution remain unsupported. Image/ABI alignment and authoritative account
-pins are separate prerequisites.
+pins remain deployment prerequisites. Registration is an opaque bounded string;
+its canonical domain belongs to the registration authority.
 
-Operator-approved numeric L/A/H/S/R_i placement, generation authority,
-SourceControlDir with protected ancestors/ACL policy, and real distinct-UID/FD/
-final-release qualification remain outside this producer. Same-UID fake tests
-and synthetic wrong-owner metadata do not establish those gates. Source owns
-review; no deployment or enforcing approval follows from this source candidate.
-Launcher H6 v1 never rebinds; hosted managers and Werkstaetten refuse enforcing
-under the co-lead's ruling, with no implementation of either route in P17-A.
+Real distinct-UID placement, authoritative generations, protected control paths
+and ancestors/ACL policy, descriptor exclusion and final input release remain
+unqualified by unit fixtures. The launcher (`curator run`) never rebinds in this
+version; hosted session managers refuse enforcing. Neither lifecycle route is
+implemented by this Source library.

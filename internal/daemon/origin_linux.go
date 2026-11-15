@@ -47,7 +47,13 @@ type OriginService struct {
 }
 
 func NewOriginService(cfg OriginConfig) (*OriginService, error) {
-	if cfg.Generations == nil || cfg.Launcher.Generation == 0 {
+	return newOriginService(cfg, uint32(os.Geteuid()))
+}
+
+// The private constructor accepts the observed service UID for isolated unit
+// fixtures; the public entry always supplies the kernel's effective UID.
+func newOriginService(cfg OriginConfig, serviceUID uint32) (*OriginService, error) {
+	if cfg.Generations == nil || cfg.Launcher.Generation == 0 || cfg.Launcher.UID == 0 || cfg.Launcher.UID == serviceUID {
 		return nil, runorigin.ErrRefused
 	}
 	incarnation, err := originRandomID()
@@ -71,39 +77,76 @@ func originRandomID() (string, error) {
 
 // originDirectory never creates, chmods, follows links or repairs existing
 // paths. The held descriptor pins the final A-owned 0711 directory.
+type originPathStamp struct {
+	device uint64
+	inode  uint64
+}
+
 func originDirectory(path string) (*os.File, error) {
+	dir, _, err := originDirectoryChain(path)
+	return dir, err
+}
+
+// Every component is opened relative to its already pinned parent, never
+// following links. Stamps let live checks reject replacement of any ancestor.
+func originDirectoryChain(path string) (*os.File, []originPathStamp, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
-		return nil, runorigin.ErrRefused
+		return nil, nil, runorigin.ErrRefused
 	}
 	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, runorigin.ErrRefused
+		return nil, nil, runorigin.ErrRefused
 	}
+	var chain []originPathStamp
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil {
+		unix.Close(fd)
+		return nil, nil, runorigin.ErrRefused
+	}
+	chain = append(chain, originPathStamp{uint64(st.Dev), st.Ino})
 	for _, part := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		unix.Close(fd)
 		if e != nil {
-			return nil, runorigin.ErrRefused
+			return nil, nil, runorigin.ErrRefused
 		}
 		fd = next
+		if unix.Fstat(fd, &st) != nil {
+			unix.Close(fd)
+			return nil, nil, runorigin.ErrRefused
+		}
+		chain = append(chain, originPathStamp{uint64(st.Dev), st.Ino})
 	}
-	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || !originDirectoryMetadata(&st, uint32(os.Geteuid())) {
+	if !originDirectoryMetadata(&st, uint32(os.Geteuid())) {
 		unix.Close(fd)
-		return nil, runorigin.ErrRefused
+		return nil, nil, runorigin.ErrRefused
 	}
-	return os.NewFile(uintptr(fd), path), nil
+	return os.NewFile(uintptr(fd), path), chain, nil
 }
 
 type originEndpoint struct {
 	dir                   *os.File
+	chain                 []originPathStamp
 	path                  string
 	dirStamp, socketStamp unix.Stat_t
 }
 
 func (e *originEndpoint) valid() bool {
+	dir, chain, err := originDirectoryChain(filepath.Dir(e.path))
+	if err != nil {
+		return false
+	}
+	defer dir.Close()
+	if len(chain) != len(e.chain) {
+		return false
+	} // live ancestor gate
+	for i, stamp := range chain {
+		if stamp != e.chain[i] {
+			return false
+		}
+	}
 	var d, s unix.Stat_t
-	if unix.Lstat(filepath.Dir(e.path), &d) != nil || unix.Fstatat(int(e.dir.Fd()), "origin.sock", &s, unix.AT_SYMLINK_NOFOLLOW) != nil {
+	if unix.Fstat(int(dir.Fd()), &d) != nil || unix.Fstatat(int(dir.Fd()), "origin.sock", &s, unix.AT_SYMLINK_NOFOLLOW) != nil {
 		return false
 	}
 	return d.Dev == e.dirStamp.Dev && d.Ino == e.dirStamp.Ino && originDirectoryMetadata(&d, uint32(os.Geteuid())) &&
@@ -121,12 +164,12 @@ func (s *OriginService) serve(ctx context.Context, ready func()) error {
 	if !s.started.CompareAndSwap(false, true) {
 		return runorigin.ErrRefused
 	}
-	dir, err := originDirectory(s.cfg.ControlDir)
+	dir, chain, err := originDirectoryChain(s.cfg.ControlDir)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	e := &originEndpoint{dir: dir, path: filepath.Join(s.cfg.ControlDir, "origin.sock")}
+	e := &originEndpoint{dir: dir, chain: chain, path: filepath.Join(s.cfg.ControlDir, "origin.sock")}
 	if unix.Fstat(int(dir.Fd()), &e.dirStamp) != nil {
 		return runorigin.ErrRefused
 	}
@@ -358,6 +401,9 @@ func (s *OriginService) handleOrigin(ctx context.Context, c *net.UnixConn, endpo
 			if err := s.authenticateOrigin(call, c); err != nil {
 				return originWork{err: err}
 			}
+			if !endpoint.valid() {
+				return originWork{err: runorigin.ErrRefused}
+			} // post-authority endpoint gate
 			if r.op == originPrepare {
 				return s.prepareOrigin(call, r)
 			}
@@ -411,7 +457,7 @@ func (s *OriginService) prepareOrigin(ctx context.Context, r originRequest) orig
 	if err != nil {
 		return originWork{err: err}
 	}
-	if !result.Origin.Valid() || len(result.IdentityRegistrationNumber) == 0 || len(result.IdentityRegistrationNumber) > 4096 {
+	if !result.Origin.Valid() || len(result.IdentityRegistrationNumber) == 0 || len(result.IdentityRegistrationNumber) > 4096 || strings.ContainsAny(result.IdentityRegistrationNumber, "\x00\r\n") {
 		return originWork{err: runorigin.ErrRefused}
 	}
 	id, err := originRandomID()

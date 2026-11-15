@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -133,7 +134,9 @@ func startOrigin(t *testing.T, producer *originProducer, change func(*OriginConf
 	if change != nil {
 		change(&cfg)
 	}
-	s, err := NewOriginService(cfg)
+	// Unit wire fixtures retain real kernel peer credentials while injecting a
+	// distinct Source identity at construction; real UID placement is unqualified.
+	s, err := newOriginService(cfg, uint32(os.Geteuid())+1000000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +222,7 @@ func sendOrigin(t *testing.T, c *net.UnixConn, op string, params any) {
 	}
 }
 func prepareParams() map[string]any {
-	return map[string]any{"request_id": "req-1", "launch_nonce": "nonce-1", "event_ref": runorigin.EventRef{RoomID: "!room:example", EventID: "$matrix"}, "input_principal": runorigin.Principal{UID: 4242, Generation: 19}}
+	return map[string]any{"request_id": "11111111111111111111111111111111", "launch_nonce": "22222222222222222222222222222222", "event_ref": runorigin.EventRef{RoomID: "!room:example", EventID: "$matrix"}, "input_principal": runorigin.Principal{UID: 4242, Generation: 19}}
 }
 func validateParams(p runorigin.PreparedOrigin) map[string]any {
 	return map[string]any{"request_id": p.RequestID, "launch_nonce": p.LaunchNonce, "prepared_id": p.PreparedID, "source_incarnation": p.SourceIncarnation}
@@ -229,7 +232,7 @@ func prepareOn(t *testing.T, c *net.UnixConn) runorigin.PreparedOrigin {
 	sendOrigin(t, c, originPrepare, prepareParams())
 	b := originRead(t, c)
 	var p runorigin.PreparedOrigin
-	if err := json.Unmarshal(b, &p); err != nil || !p.Origin.Valid() || p.RequestID != "req-1" || p.LaunchNonce != "nonce-1" || p.InputPrincipal != (runorigin.Principal{UID: 4242, Generation: 19}) || p.IdentityRegistrationNumber != "registration-7" || !runorigin.LowerHex(p.PreparedID, 32) {
+	if err := json.Unmarshal(b, &p); err != nil || !p.Origin.Valid() || p.RequestID != "11111111111111111111111111111111" || p.LaunchNonce != "22222222222222222222222222222222" || p.InputPrincipal != (runorigin.Principal{UID: 4242, Generation: 19}) || p.IdentityRegistrationNumber != "registration-7" || !runorigin.LowerHex(p.PreparedID, 32) {
 		t.Fatalf("prepare: %s, %v", b, err)
 	}
 	var members map[string]json.RawMessage
@@ -403,9 +406,9 @@ func TestSourceOriginConsumeAndCorrelation(t *testing.T) {
 			case "other-connection":
 				c = f.client(t)
 			case "nonce":
-				params["launch_nonce"] = "different"
+				params["launch_nonce"] = strings.Repeat("3", 32)
 			case "request":
-				params["request_id"] = "different"
+				params["request_id"] = strings.Repeat("4", 32)
 			case "prepared-id":
 				params["prepared_id"] = strings.Repeat("0", 32)
 			case "superseded":
@@ -489,7 +492,7 @@ func TestSourceOriginClosedWire(t *testing.T) {
 		"zero-generation":       strings.Replace(string(good), `"generation":19`, `"generation":0`, 1),
 		"negative-uid":          strings.Replace(string(good), `"uid":4242`, `"uid":-1`, 1),
 		"fractional-generation": strings.Replace(string(good), `"generation":19`, `"generation":1.5`, 1),
-		"missing":               strings.Replace(string(good), `,"request_id":"req-1"`, "", 1),
+		"missing":               strings.Replace(string(good), `,"request_id":"11111111111111111111111111111111"`, "", 1),
 		"case":                  strings.Replace(string(good), `"request_id"`, `"Request_id"`, 1),
 		"unknown-op":            strings.Replace(string(good), originPrepare, "j7_run_bind", 1),
 		"scalar":                `null`,
@@ -498,7 +501,7 @@ func TestSourceOriginClosedWire(t *testing.T) {
 		"uid-overflow":          strings.Replace(string(good), `"uid":4242`, `"uid":4294967296`, 1),
 		"generation-overflow":   strings.Replace(string(good), `"generation":19`, `"generation":18446744073709551616`, 1),
 		"uid-string":            strings.Replace(string(good), `"uid":4242`, `"uid":"4242"`, 1),
-		"empty-nonce":           strings.Replace(string(good), `"launch_nonce":"nonce-1"`, `"launch_nonce":""`, 1),
+		"empty-nonce":           strings.Replace(string(good), `"launch_nonce":"22222222222222222222222222222222"`, `"launch_nonce":""`, 1),
 		"trailing":              string(good) + `{}`,
 		"oversize":              "oversize",
 		"zero-frame":            "zero-frame",
@@ -543,9 +546,9 @@ func TestSourceOriginValidateWire(t *testing.T) {
 			case "duplicate":
 				b = bytes.Replace(b, []byte(`"prepared_id":`), []byte(`"prepared_id":"bad","prepared_id":`), 1)
 			case "missing":
-				b = bytes.Replace(b, []byte(`"request_id":"req-1",`), nil, 1)
+				b = bytes.Replace(b, []byte(`"request_id":"11111111111111111111111111111111",`), nil, 1)
 			case "type":
-				b = bytes.Replace(b, []byte(`"launch_nonce":"nonce-1"`), []byte(`"launch_nonce":null`), 1)
+				b = bytes.Replace(b, []byte(`"launch_nonce":"22222222222222222222222222222222"`), []byte(`"launch_nonce":null`), 1)
 			}
 			if err := writeFrame(c, b); err != nil {
 				t.Fatal(err)
@@ -705,7 +708,7 @@ func TestSourceOriginSocketPath(t *testing.T) {
 			p := fakeOriginProducer()
 			g := &originAuthority{}
 			g.generation.Store(11)
-			s, err := NewOriginService(OriginConfig{ControlDir: dir, Launcher: runorigin.Principal{Generation: 11}, Generations: g, Producer: p})
+			s, err := newOriginService(OriginConfig{ControlDir: dir, Launcher: runorigin.Principal{UID: uint32(os.Geteuid()), Generation: 11}, Generations: g, Producer: p}, uint32(os.Geteuid())+1000000)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -777,12 +780,12 @@ func TestSourceOriginSocketPath(t *testing.T) {
 		if err := os.Chmod(filepath.Join(dir, "origin.sock"), 0666); err != nil {
 			t.Fatal(err)
 		}
-		d, err := originDirectory(dir)
+		d, chain, err := originDirectoryChain(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer d.Close()
-		e := &originEndpoint{dir: d, path: filepath.Join(dir, "origin.sock")}
+		e := &originEndpoint{dir: d, chain: chain, path: filepath.Join(dir, "origin.sock")}
 		if unix.Fstat(int(d.Fd()), &e.dirStamp) != nil || unix.Lstat(e.path, &e.socketStamp) != nil || !e.valid() {
 			t.Fatal("valid metadata control")
 		}
@@ -849,7 +852,7 @@ func TestSourceOriginErrorBudget(t *testing.T) {
 		}
 		generation := &originAuthority{}
 		generation.generation.Store(11)
-		service, err := NewOriginService(OriginConfig{Launcher: runorigin.Principal{UID: uint32(os.Geteuid()), Generation: 11}, Generations: generation, Producer: fakeOriginProducer()})
+		service, err := newOriginService(OriginConfig{Launcher: runorigin.Principal{UID: uint32(os.Geteuid()), Generation: 11}, Generations: generation, Producer: fakeOriginProducer()}, uint32(os.Geteuid())+1000000)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -857,6 +860,121 @@ func TestSourceOriginErrorBudget(t *testing.T) {
 		service.originErrorUntil(server, runorigin.ErrUnavailable, start.Add(80*time.Millisecond))
 		if elapsed := time.Since(start); elapsed < 50*time.Millisecond || elapsed > 300*time.Millisecond {
 			t.Fatalf("terminal response widened call budget: %s", elapsed)
+		}
+	})
+}
+
+// TestSourceOriginCorrelationPins proves only 32 lowercase hex correlations reach prepare or consume a record; invalid fields never reach protected work.
+func TestSourceOriginCorrelationPins(t *testing.T) {
+	t.Run("valid", validOriginControl)
+	for _, op := range []string{originPrepare, originValidate} {
+		for _, field := range []string{"request_id", "launch_nonce"} {
+			for name, value := range map[string]string{"empty": "", "31": strings.Repeat("a", 31), "33": strings.Repeat("a", 33), "uppercase": strings.Repeat("A", 32), "non-hex": strings.Repeat("g", 32)} {
+				t.Run(op+"/"+field+"/"+name, func(t *testing.T) {
+					p := fakeOriginProducer()
+					f := startOrigin(t, p, nil)
+					c := f.client(t)
+					params := prepareParams()
+					if op == originValidate {
+						params = validateParams(prepareOn(t, c))
+					}
+					params[field] = value
+					before := p.opens.Load()
+					sendOrigin(t, c, op, params)
+					wantOriginCode(t, c, runorigin.Refused, f.s.incarnation)
+					if p.opens.Load() != before || p.validates.Load() != 0 {
+						t.Fatal("invalid correlation reached protected work")
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestSourceOriginUIDPins proves public construction rejects zero/shared launcher UIDs and wire decoding rejects zero input beside valid separate-UID policy controls.
+func TestSourceOriginUIDPins(t *testing.T) {
+	g := &originAuthority{}
+	g.generation.Store(11)
+	cfg := OriginConfig{Launcher: runorigin.Principal{UID: uint32(os.Geteuid()) + 1, Generation: 11}, Generations: g, Producer: fakeOriginProducer()}
+	t.Run("distinct-launcher", func(t *testing.T) {
+		if _, err := NewOriginService(cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, uid := range []uint32{0, uint32(os.Geteuid())} {
+		t.Run(fmt.Sprintf("launcher-%d", uid), func(t *testing.T) {
+			bad := cfg
+			bad.Launcher.UID = uid
+			if _, err := NewOriginService(bad); !errors.Is(err, runorigin.ErrRefused) {
+				t.Fatalf("invalid launcher accepted: %v", err)
+			}
+		})
+	}
+	t.Run("valid-wire", validOriginControl)
+	t.Run("zero-input", func(t *testing.T) {
+		p := fakeOriginProducer()
+		f := startOrigin(t, p, nil)
+		c := f.client(t)
+		params := prepareParams()
+		params["input_principal"] = runorigin.Principal{UID: 0, Generation: 19}
+		sendOrigin(t, c, originPrepare, params)
+		wantOriginCode(t, c, runorigin.Refused, f.s.incarnation)
+		if p.opens.Load() != 0 {
+			t.Fatal("zero input reached producer")
+		}
+	})
+}
+
+// TestSourceOriginRegistrationPin proves opaque maximum-length registrations remain framed while forbidden control bytes refuse before a record is retained.
+func TestSourceOriginRegistrationPin(t *testing.T) {
+	for _, registration := range []string{"registration-7", strings.Repeat("<", 4096)} {
+		t.Run(fmt.Sprintf("valid-%d", len(registration)), func(t *testing.T) {
+			p := fakeOriginProducer()
+			p.result.IdentityRegistrationNumber = registration
+			f := startOrigin(t, p, nil)
+			c := f.client(t)
+			sendOrigin(t, c, originPrepare, prepareParams())
+			var got runorigin.PreparedOrigin
+			if err := json.Unmarshal(originRead(t, c), &got); err != nil || got.IdentityRegistrationNumber != registration || !got.Origin.Valid() {
+				t.Fatal("opaque registration lost framed result")
+			}
+		})
+	}
+	for _, ch := range []byte{0, '\r', '\n'} {
+		t.Run(fmt.Sprintf("control-%d", ch), func(t *testing.T) {
+			p := fakeOriginProducer()
+			p.result.IdentityRegistrationNumber = "bad" + string(ch)
+			f := startOrigin(t, p, nil)
+			c := f.client(t)
+			sendOrigin(t, c, originPrepare, prepareParams())
+			wantOriginCode(t, c, runorigin.Refused, f.s.incarnation)
+			p.awaitClose(t)
+		})
+	}
+}
+
+// TestSourceOriginIdleRestart proves an idle preparation expires within one read budget and only fresh H1 preparation restores authority.
+func TestSourceOriginIdleRestart(t *testing.T) {
+	t.Run("prompt-valid", validOriginControl)
+	t.Run("idle-restart", func(t *testing.T) {
+		p := fakeOriginProducer()
+		f := startOrigin(t, p, nil)
+		c := f.client(t)
+		old := prepareOn(t, c)
+		wantOriginCode(t, c, runorigin.Unavailable, f.s.incarnation)
+		p.awaitClose(t)
+		if p.validates.Load() != 0 {
+			t.Fatal("idle connection validated")
+		}
+		c = f.client(t)
+		fresh := prepareOn(t, c)
+		if fresh.PreparedID == old.PreparedID {
+			t.Fatal("idle preparation reused")
+		}
+		sendOrigin(t, c, originValidate, validateParams(fresh))
+		var got runorigin.PreparedOrigin
+		if json.Unmarshal(originRead(t, c), &got) != nil || got != fresh {
+			t.Fatal("H1 restart failed")
 		}
 	})
 }

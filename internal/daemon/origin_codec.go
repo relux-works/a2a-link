@@ -86,10 +86,10 @@ func decodeOriginRequest(b []byte) (originRequest, error) {
 		return r, err
 	}
 	var ok bool
-	if r.id, ok = originString(f["request_id"]); !ok {
+	if r.id, ok = originString(f["request_id"]); !ok || !runorigin.LowerHex(r.id, 32) {
 		return r, runorigin.ErrRefused
 	}
-	if r.nonce, ok = originString(f["launch_nonce"]); !ok {
+	if r.nonce, ok = originString(f["launch_nonce"]); !ok || !runorigin.LowerHex(r.nonce, 32) {
 		return r, runorigin.ErrRefused
 	}
 	if r.op == originValidate {
@@ -117,7 +117,7 @@ func decodeOriginRequest(b []byte) (originRequest, error) {
 	// Unmarshal into integers rejects fractions, signs, strings and overflow;
 	// explicit null must be rejected separately (encoding/json accepts it as zero).
 	if bytes.Equal(bytes.TrimSpace(p["uid"]), []byte("null")) || bytes.Equal(bytes.TrimSpace(p["generation"]), []byte("null")) ||
-		json.Unmarshal(p["uid"], &r.input.UID) != nil || json.Unmarshal(p["generation"], &r.input.Generation) != nil || r.input.Generation == 0 {
+		json.Unmarshal(p["uid"], &r.input.UID) != nil || json.Unmarshal(p["generation"], &r.input.Generation) != nil || r.input.Generation == 0 || r.input.UID == 0 {
 		return r, runorigin.ErrRefused
 	}
 	return r, nil

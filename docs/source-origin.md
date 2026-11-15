@@ -4,8 +4,7 @@ This implements the upstream part of Source proposal r2
 (SHA-256 `3687f08991c035232b1348b4c40715f3e650ca1e62b97df6790cbb2525cc3a89`)
 and Curator hooks r1.2
 (`15e7e393b4254f9f6ef2ef211667d203204d095e8b83f71e696dc03673b4f021`).
-The start authorization is co-lead event `$RgZz8SfH` (P17-A: keeper staffs,
-Source owns and reviews). This source candidate does not activate a service.
+This source library does not activate a service.
 
 ## Build boundary
 
@@ -43,11 +42,10 @@ particular, a syntactically valid forged signed-inner-request claim is a
 caller-injected origin, malformed producer origin, Matrix `$` ID and changed
 recheck facts; they do not implement or simulate a rich cryptographic checker.
 
-## Candidate wire details requiring Source/client pinning
+## Pinned wire contract
 
-The accepted inputs name payload/result fields but do not define envelope,
-hello/error encoding or all scalar types. The following minimal choices are
-explicit review candidates, not previously accepted interoperability claims.
+The envelope, hello, errors, scalar encodings and validation correlation below
+are pinned for the launcher (`curator run`) and downstream service clients.
 
 Framing is the existing 4-byte big-endian length, `1..65536` UTF-8 JSON bytes.
 Only framing is shared with station traffic; this protocol has its own closed
@@ -67,27 +65,30 @@ and the connection closes, before any event read or checker/prepared work.
 Each request envelope contains exactly `op` and `params`:
 
 ```json
-{"op":"source.origin.prepare/1","params":{"request_id":"request-1","launch_nonce":"nonce-1","event_ref":{"room_id":"!room:example","event_id":"$matrix-event"},"input_principal":{"uid":4242,"generation":19}}}
+{"op":"source.origin.prepare/1","params":{"request_id":"11111111111111111111111111111111","launch_nonce":"22222222222222222222222222222222","event_ref":{"room_id":"!room:example","event_id":"$matrix-event"},"input_principal":{"uid":4242,"generation":19}}}
 ```
 
 ```json
-{"op":"source.origin.validate/1","params":{"request_id":"request-1","launch_nonce":"nonce-1","prepared_id":"0123456789abcdef0123456789abcdef","source_incarnation":"fedcba9876543210fedcba9876543210"}}
+{"op":"source.origin.validate/1","params":{"request_id":"11111111111111111111111111111111","launch_nonce":"22222222222222222222222222222222","prepared_id":"0123456789abcdef0123456789abcdef","source_incarnation":"fedcba9876543210fedcba9876543210"}}
 ```
 
 Both successful operations return exactly `runorigin.PreparedOrigin`'s seven
 fields. Validate repeats the original request ID and every preparation binding:
 
 ```json
-{"request_id":"request-1","launch_nonce":"nonce-1","input_principal":{"uid":4242,"generation":19},"identity_registration_number":"protected-registration","source_incarnation":"fedcba9876543210fedcba9876543210","prepared_id":"0123456789abcdef0123456789abcdef","origin":{"kind":"admission","event_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","grant_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tip_hash":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","mode":"enforcing","command_id":""}}
+{"request_id":"11111111111111111111111111111111","launch_nonce":"22222222222222222222222222222222","input_principal":{"uid":4242,"generation":19},"identity_registration_number":"protected-registration","source_incarnation":"fedcba9876543210fedcba9876543210","prepared_id":"0123456789abcdef0123456789abcdef","origin":{"kind":"admission","event_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","grant_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tip_hash":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","mode":"enforcing","command_id":""}}
 ```
 
-Candidate scalar rules: UID is a JSON uint32; generation is a nonzero JSON
-uint64. Request ID, nonce and event references are nonempty strings of at most
-4096 UTF-8 bytes with no NUL/CR/LF. Registration is a nonempty bounded string
-from the producer; its canonical domain is still a downstream/client pinning
-question. Incarnation and prepared ID are independently random nonzero 128-bit
-values encoded as 32 lowercase hex characters. The three Origin IDs are exactly
-64 lowercase hex characters. The event reference may contain a Matrix ID;
+Scalar rules: UID is a JSON uint32; generation is a nonzero JSON uint64.
+Input UID zero is refused. The configured launcher UID must be nonzero and
+must differ from the service's effective UID. Request ID and launch nonce are
+exactly 32 lowercase hex characters; the launcher draws each launch nonce from
+a CSPRNG. Event references are nonempty strings of at most 4096 UTF-8 bytes
+with no NUL/CR/LF. Registration is an opaque producer string of 1..4096 bytes
+without NUL/CR/LF; its canonical domain belongs to the registration authority.
+Incarnation and prepared ID are independently random nonzero 128-bit values
+encoded as 32 lowercase hex characters. The three Origin IDs are exactly 64
+lowercase hex characters. The event reference may contain a Matrix ID;
 Origin.event_id must describe the verified inner request and cannot contain one.
 
 Every object is closed, including the envelope and both nested prepare objects.
@@ -120,8 +121,10 @@ this library checks no-follow traversal, not host ACL/group membership policy.
 The newly created socket is A-owned exactly 0666, a single-link socket. Existing
 paths, including stale sockets, are refused without repair/removal. Only a new
 socket is chmodded; cleanup compares the held directory and created inode.
-Directory/socket identity, owner, type, links and modes are rechecked before
-protected operations. Path changes refuse. No account/group/ACL is created.
+The complete ancestor chain is reopened without following links and compared
+by device/inode on every endpoint check. Directory/socket identity, owner,
+type, links and modes are rechecked after current-generation lookup and
+immediately before protected operations. Path changes refuse. No account/group/ACL is created.
 
 A fresh incarnation is generated with crypto/rand at service construction and
 is immutable. Serve is single-use. Records are connection-local memory only,
@@ -133,6 +136,11 @@ live connection consumes it before recheck; a failure cannot reuse it. Another
 connection or service instance has no authority to adopt the ID. Disconnect,
 idle expiry or service shutdown closes an unconsumed session. Nothing restores
 records after process restart.
+
+The idle gap after prepare is at most one work/read budget (about 4.9 seconds).
+The client must send validate promptly on the same connection. After idle
+timeout, the connection closes and the preparation is destroyed: restart H1
+with a fresh preparation, never reuse its old prepared ID or response.
 
 Each prepare and validate has an independent five-second budget, including its
 frame read, dependency work and response write. The final 100 ms is reserved
@@ -148,9 +156,8 @@ current authenticated hello and never reuse an old prepared ID/response.
 
 Source incarnation fences H1–H2 only. There is no Source-driven ending or
 revalidation after Keymaker bind. H3–H6, durable launcher records, isolation,
-FD/input-release gates and all Keymaker operations are outside P17-A. Per the
-co-lead's ruling, H6 v1 never rebinds and hosted/Werkstatt enforcing refuses;
-this source candidate adds no alternative route.
+FD/input-release gates and all Keymaker operations are outside P17-A. The launcher (`curator run`) never rebinds in this version, and hosted session
+managers refuse enforcing. This library adds no alternative route.
 
 ## Tools and verification
 
@@ -159,7 +166,7 @@ telemetry command or persistent Go environment change is needed. Ordinary
 entry points (logs under `.temp/P17-A/`, fixtures in test temp dirs):
 
 ```sh
-go test ./internal/daemon -run '^TestSourceOrigin' -race -count=1 -v
+go test ./internal/daemon -run '^Test(SourceOrigin|Rev365)' -race -count=1 -v
 A2A_RUN_ORIGIN_PLANTS=1 go test ./internal/daemon -run '^TestSourceOriginNarrowingPlants$' -count=1 -v
 go test ./... -race
 go vet ./...
@@ -171,36 +178,16 @@ exit 1 (rejecting compile errors/panics as evidence), then reruns unchanged
 source at exit 0. `A2A_ORIGIN_GO_ENV=/absolute/env.sh` optionally requires the
 subprocesses to source the same admitted environment explicitly.
 
-For this producer's write-confined run, each command is prefixed with
-`. /home/agent/Werkstatt/keeper-p17a-dev/.goenv/env.sh && umask 022 &&` and runs
-inside this wrapper before its `go ...` arguments:
+For confined validation, use a write-confined sandbox with a private temporary
+directory and PID namespace; keep compiler and test scratch in the authorized
+writable root. Configure the toolchain environment outside public repository
+content. Record exact commands, versions, timeouts and real exit codes in the
+private task evidence. Compare any whole-suite failure with the unchanged base
+under the same invocation before attributing it to code or the environment.
 
-```sh
-bwrap --unshare-pid --die-with-parent --tmpfs / \
-  --ro-bind /usr /usr --ro-bind /etc /etc \
-  --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
-  --ro-bind /bin /bin --ro-bind /sbin /sbin --proc /proc --dev /dev \
-  --dir /home/agent/Werkstatt \
-  --bind /home/agent/Werkstatt/keeper-p17a-dev /home/agent/Werkstatt/keeper-p17a-dev \
-  --bind /home/agent/Werkstatt/keeper-p17a-dev/.goenv/tmp /tmp \
-  --chdir /home/agent/Werkstatt/keeper-p17a-dev/a2a-swarm \
-  --setenv TMPDIR /tmp --setenv GOTMPDIR /tmp --setenv GOMAXPROCS 4 -- \
-  go test ./... -race -timeout 60m -exec 'env -u GOTMPDIR'
-```
-
-This keeps existing absolute `/tmp` fixtures physically within the authorized
-task root while preserving short Unix socket paths. The virtual root/ancestors
-are owned by the test user (a read-only bind of the host root would map UID 0
-to nobody and fail ownership controls). The private PID namespace keeps process
-scanners within this run. The task root and `.goenv` are made 0755; no host
-ancestor outside the task root is chmodded. Go 1.26's testing.TempDir gives
-GOTMPDIR priority over TMPDIR; `-exec 'env -u GOTMPDIR'` removes it only for test
-binaries, restoring the fixtures' ability to choose their own TMPDIR and
-avoiding cross-mount rename failures. Compiler scratch stays in the mapped
-private temp directory. The 60-minute budget matches repository CI. A bounded
-control run first confirmed the existing ownership, process-image, telemetry
-and clean-source archive tests pass in this environment. No shared service is
-activated. Same-UID fixtures with synthetic wrong-owner metadata and a fake
-generation authority do not qualify distinct-UID deployment, protected pins,
-FD theft exclusion, actual Matrix/rich-checker signatures, Keymaker final
-release, client response-replay comparison or production startup.
+Wire fixtures use real kernel peer credentials with an injected construction-
+time service identity. Public-constructor tests exercise the actual service
+EUID rejection policy. These unit fixtures, synthetic wrong-owner metadata and
+fake generation authority do not qualify real distinct-UID deployment, protected
+pins, FD theft exclusion, signed inner-request verification, final response
+release, client replay comparison or production startup.

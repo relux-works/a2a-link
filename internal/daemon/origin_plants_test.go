@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// TestSourceOriginNarrowingPlants proves the named tests detect three removed gates; overlays leave the source untouched and restored controls must pass.
+// TestSourceOriginNarrowingPlants proves the named tests detect the original gates and both reviewed path gates; overlays leave the source untouched and restored controls must pass.
 func TestSourceOriginNarrowingPlants(t *testing.T) {
 	if os.Getenv("A2A_RUN_ORIGIN_PLANTS") != "1" {
 		t.Skip("opt-in Source gate-removal plants")
@@ -36,6 +36,8 @@ func TestSourceOriginNarrowingPlants(t *testing.T) {
 			"", "^TestSourceOriginIncarnationBinding$", "TestSourceOriginIncarnationBinding/stale-on-live-record"},
 		{"capability", "return originWork{err: runorigin.ErrNotSupported}", "return originWork{}", "^TestSourceOriginCapability$", "TestSourceOriginCapability/stock-refusal"},
 		{"peer", "err != nil || uid != s.cfg.Launcher.UID", "err != nil", "^TestSourceOriginPeerGate$", "TestSourceOriginPeerGate/uid"},
+		{"live-ancestor", "\tdir, chain, err := originDirectoryChain(filepath.Dir(e.path))\n\tif err != nil {\n\t\treturn false\n\t}\n\tdefer dir.Close()\n\tif len(chain) != len(e.chain) {\n\t\treturn false\n\t} // live ancestor gate\n\tfor i, stamp := range chain {\n\t\tif stamp != e.chain[i] {\n\t\t\treturn false\n\t\t}\n\t}", "\tdir, err := os.Open(filepath.Dir(e.path))\n\tif err != nil { return false }; defer dir.Close()", "^TestRev365LiveAncestorSymlink$", "TestRev365LiveAncestorSymlink"},
+		{"post-authority", "\t\t\tif !endpoint.valid() {\n\t\t\t\treturn originWork{err: runorigin.ErrRefused}\n\t\t\t} // post-authority endpoint gate", "", "^TestRev365PathChangeDuringAuthentication$", "TestRev365PathChangeDuringAuthentication/mode-changed-during-authority"},
 	}
 	for _, plant := range plants {
 		t.Run(plant.name, func(t *testing.T) {
