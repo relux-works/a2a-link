@@ -87,7 +87,8 @@ func TestReleaseMissingDependency(t *testing.T) {
 }
 
 // Claim: missing, unissued, foreign, zero or rejected service attestations yield
-// no invocation/consumer bytes; an unmodified neighbor succeeds.
+// no preparation/invocation/consumer bytes; an unmodified neighbor succeeds.
+// Regression: driver-side proof rejection must not mask a missing client gate.
 func TestReleaseVerificationIsMandatory(t *testing.T) {
 	for _, mode := range []string{"zero", "unissued", "foreign", "peer_missing", "policy_missing", "error", "panic"} {
 		t.Run(mode, func(t *testing.T) {
@@ -105,8 +106,8 @@ func TestReleaseVerificationIsMandatory(t *testing.T) {
 			if mode == "panic" {
 				want = vaultEInternal
 			}
-			if r.Failure == nil || r.Failure.Outcome != vaultNotSubmitted || r.Failure.Code != want || called || f.invocations != 0 || f.effects != 0 || f.closes != 1 {
-				t.Fatalf("mandatory verifier: %+v", r)
+			if r.Failure == nil || r.Failure.Outcome != vaultNotSubmitted || r.Failure.Code != want || called || f.preparations != 0 || f.invocations != 0 || f.effects != 0 || f.closes != 1 {
+				t.Fatalf("mandatory verifier before prepare: report=%+v preparations=%d invocations=%d effects=%d", r, f.preparations, f.invocations, f.effects)
 			}
 			if bytes.Contains([]byte(r.diagnostic().Error()), f.token) {
 				t.Fatal("raw error leaked")

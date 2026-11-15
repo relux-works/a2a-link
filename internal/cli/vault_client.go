@@ -35,7 +35,7 @@ type vaultServiceVerifier interface {
 }
 
 // All authority/evidence issuance is absent in production; fixtures instantiate
-// private witnesses only in vault_fixtures_test.go, never through a constructor.
+// private witnesses only in same-package *_test.go files, never a constructor.
 type vaultVerificationIssuer struct{ marker byte }
 type vaultPeerWitness struct{ marker byte }
 type vaultPolicyWitness struct{ marker byte }
@@ -75,6 +75,9 @@ func (r vaultSubmissionReceipt) matches(c vaultConn, req vaultRequest) bool {
 	return r.issuer != nil && vaultSameConn(r.conn, c) && r.requestID == req.id && r.op == req.op && (r.phase == vaultNoInvocation || r.phase == vaultInvoked)
 }
 
+// The driver transfers ownership of reply buffers on return. The client wipes
+// them on all outcomes; public Reply views are detached copies. Prepare must
+// never invoke an operation, and its request is already a detached snapshot.
 type vaultExchange struct {
 	receipt  vaultSubmissionReceipt
 	reply    vaultValue

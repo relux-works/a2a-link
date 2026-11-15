@@ -427,7 +427,7 @@ func TestVaultV1NoLegacyFallback(t *testing.T) {
 			t.Fatalf("%s: raw dependency error leaked", tc.label)
 		}
 		if reads != 0 || f.legacy != 0 || f.keychain != 0 || f.httpCalls.Load() != 0 || a.profile != "vault" || f.snapshot(t) != before {
-			t.Fatalf("%s: fallback or effect: reads=%d keychain=%d http=%d profile=%s", tc.label, reads, f.keychain, f.httpCalls.Load(), a.profile)
+			t.Fatalf("%s: fallback or effect: reads=%d legacy=%d keychain=%d http=%d profile=%s", tc.label, reads, f.legacy, f.keychain, f.httpCalls.Load(), a.profile)
 		}
 	}
 }
