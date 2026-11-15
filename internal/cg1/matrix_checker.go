@@ -38,6 +38,10 @@ func matrixUnavailable() admission.Decision {
 	return admission.Decision{Verdict: admission.Refused, Reason: "dependency_unavailable", Retryable: true}
 }
 func matrixDecision(v grantcheck.Verdict, inbound bool) admission.Decision {
+	switch v.Code {
+	case grantcheck.CodeCapacityExceeded, grantcheck.CodeExecutorMismatch, grantcheck.CodeTermsInvalid, grantcheck.CodeTipFuture, grantcheck.CodeIssuanceMismatch, grantcheck.CodeNodeNotSynced, grantcheck.CodeTipStale, grantcheck.CodeTipBelowFloor:
+		return decision(v, inbound)
+	}
 	verdict, reason, retry := v.A2ADecision()
 	d := admission.Decision{Verdict: admission.Refused, Reason: reason, Retryable: retry}
 	switch verdict {

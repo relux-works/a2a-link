@@ -157,6 +157,7 @@ type command struct {
 
 func commands() []command {
 	return []command{
+		{"cg1", "cg1 provision --proof FILE   protected local grant proof provisioning", cmdCG1},
 		{"daemon", "daemon serve|register-station|unregister-station|enroll|status | migrate <identity> --to <daemon-base> [--resume|--rollback]   local a2a daemon (a2ad), station enrollment and file-backed identity migration (Keychain deferred; #460)", cmdDaemon},
 		{"connection", "connection list|show NAME|add NAME --file FILE|use NAME|register NAME --via-admin-room [--into /fresh/member-root]   named Matrix routing", cmdConnection},
 		{"voice", "voice status [--json] | voice config --enable | voice install   optional local voice replies (180s cap)", cmdVoice},

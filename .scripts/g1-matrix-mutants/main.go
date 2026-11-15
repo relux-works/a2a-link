@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,8 @@ type result struct {
 	Name, Gate, Test, Result, Bound string
 	Exit, PID                       int
 }
+
+var controlModfile string
 
 const checker = "internal/cg1/matrix_checker.go"
 const crypto = "internal/cg1cosign/cosign.go"
@@ -82,6 +85,7 @@ func main() {
 }
 func run() error {
 	rootFlag := flag.String("root", ".", "repository root")
+	corePolicy := flag.Bool("core-policy", false, "genuine Core executor/freshness/provisioning controls (requires explicit Core environment)")
 	outFlag := flag.String("out", ".temp/g1-matrix-mutants", "fresh evidence directory under .temp")
 	flag.Parse()
 	root, e := filepath.Abs(*rootFlag)
@@ -106,8 +110,59 @@ func run() error {
 	if e = os.MkdirAll(out, 0700); e != nil {
 		return e
 	}
+	selected := plants()
+	if *corePolicy {
+		if os.Getenv("CG1_REGTEST") != "1" || os.Getenv("CG1_A2A_BINARY") == "" {
+			return errors.New("core-policy requires explicit Core opt-in and a freshly built CG1_A2A_BINARY")
+		}
+		cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/relux-works/swarma-chain-lab/experiments/grantcheck")
+		cmd.Dir = root
+		module, err := cmd.Output()
+		if err != nil {
+			return errors.New("selected grantcheck module unavailable")
+		}
+		// Go forbids overlays beneath GOMODCACHE. Mirror the exact selected
+		// module into this fresh fixture, then replace it only in an alternate
+		// modfile. Product go.mod and the downloaded module remain untouched.
+		source := strings.TrimSpace(string(module))
+		mirror := filepath.Join(out, "grantcheck-source")
+		if err = os.CopyFS(mirror, os.DirFS(source)); err != nil {
+			return err
+		}
+		for _, name := range []string{"checker.go", "freshness.go", "provision.go"} {
+			original, err := os.ReadFile(filepath.Join(source, name))
+			if err != nil {
+				return err
+			}
+			copied, err := os.ReadFile(filepath.Join(mirror, name))
+			if err != nil || sha256.Sum256(original) != sha256.Sum256(copied) {
+				return errors.New("module mirror differs from selected source")
+			}
+		}
+		mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+		if err != nil {
+			return err
+		}
+		controlModfile = filepath.Join(out, "policy.mod")
+		mod = append(mod, []byte("\nreplace github.com/relux-works/swarma-chain-lab/experiments/grantcheck => "+strconv.Quote(filepath.ToSlash(mirror))+"\n")...)
+		if err = os.WriteFile(controlModfile, mod, 0600); err != nil {
+			return err
+		}
+		sum, err := os.ReadFile(filepath.Join(root, "go.sum"))
+		if err != nil {
+			return err
+		}
+		if err = os.WriteFile(filepath.Join(out, "policy.sum"), sum, 0600); err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, mirror)
+		if err != nil {
+			return err
+		}
+		selected = policyPlants(relative)
+	}
 	before := map[string][32]byte{}
-	for _, p := range plants() {
+	for _, p := range selected {
 		for _, ed := range p.Edits {
 			path := filepath.Join(root, ed.File)
 			b, e := os.ReadFile(path)
@@ -118,12 +173,15 @@ func run() error {
 		}
 	}
 	baselineArgs := []string{"test", "-p", "1", "-parallel", "2", "-count=1", "-json", "-timeout=2m", "./internal/cg1", "./internal/cg1cosign", "./internal/cli", "./internal/daemon", "-run", "^(TestMatrix|TestCoSignature|TestFixture|TestCG1Matrix|TestCG1Cosignature)"}
+	if *corePolicy {
+		baselineArgs = []string{"test", "-p", "1", "-parallel", "2", "-count=1", "-json", "-timeout=2m", "./internal/cg1", "-run", "^TestCoreMatrixPolicy$"}
+	}
 	code, _, e := child(root, out, "baseline", baselineArgs)
 	if e != nil || code != 0 {
 		return fmt.Errorf("baseline failed exit=%d: %v", code, e)
 	}
 	results := []result{}
-	for _, p := range plants() {
+	for _, p := range selected {
 		dir := filepath.Join(out, p.Name)
 		if e = os.Mkdir(dir, 0700); e != nil {
 			return e
@@ -206,6 +264,9 @@ func run() error {
 	return nil
 }
 func child(root, out, name string, args []string) (int, int, error) {
+	if controlModfile != "" {
+		args = append([]string{args[0], "-modfile=" + controlModfile}, args[1:]...)
+	}
 	stdout, e := os.Create(filepath.Join(out, name+".jsonl"))
 	if e != nil {
 		return -1, 0, e
@@ -221,6 +282,9 @@ func child(root, out, name string, args []string) (int, int, error) {
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOMAXPROCS=2")
+	if os.Getenv("CG1_REGTEST") == "1" {
+		cmd.Env = append(cmd.Env, "CG1_RUN_ROOT="+filepath.Join(out, name+"-core"))
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if e = cmd.Start(); e != nil {

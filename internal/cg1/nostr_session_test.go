@@ -47,7 +47,7 @@ func TestCoreNostrSession(t *testing.T) {
 		return fx.Carrier(t, id, proof)
 	}
 	root := fx.Provision(t, base, "station", r.URL, "cg1", agent, nil)
-	fx.Write(t, filepath.Join(root, "admission", "cg1.json"), jsonBytes(t, settings{Version: 1, AgentName: e2eAgentName, LandlordName: e2eLandlordName, IssuerPubkey: l.issuerPub, TimeoutMS: 5000, RPC: l.route}))
+	fx.Write(t, filepath.Join(root, "admission", "cg1.json"), jsonBytes(t, settings{grantPolicy: testGrantPolicy(t), Version: 1, AgentName: e2eAgentName, LandlordName: e2eLandlordName, IssuerPubkey: l.issuerPub, TimeoutMS: 5000, RPC: l.route}))
 	s, e := nostrsession.Open(ctx, base, "station")
 	if e != nil {
 		t.Fatal(e)

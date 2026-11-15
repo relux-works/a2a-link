@@ -15,7 +15,7 @@ import (
 func configFixture(t *testing.T) (admission.Config, settings) {
 	t.Helper()
 	c := admission.Config{Identity: "alice", StateDir: stateDir(t), Nostr: true, NostrPubkey: xonly(3)}
-	s := settings{Version: 1, AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), TimeoutMS: 100, RPC: su.Route{Host: "127.0.0.1", Port: 1, Username: "w3-observer", Password: strings.Repeat("fixture-only-", 2)}}
+	s := settings{grantPolicy: testGrantPolicy(t), Version: 1, AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), TimeoutMS: 100, RPC: su.Route{Host: "127.0.0.1", Port: 1, Username: "w3-observer", Password: strings.Repeat("fixture-only-", 2)}}
 	return c, s
 }
 func provision(t *testing.T, c admission.Config, s settings) {

@@ -30,6 +30,7 @@ type matrixPeer struct {
 	Author string `json:"author"`
 }
 type matrixSettings struct {
+	grantPolicy
 	Version             int                   `json:"version"`
 	Identity            string                `json:"identity"`
 	UserID              string                `json:"user_id"`
@@ -106,6 +107,9 @@ func loadMatrixSettings(dir string) (matrixSettings, error) {
 	if _, ok := cfg.Pins[cfg.UserID]; !ok {
 		return cfg, errConfig
 	}
+	if _, _, e := cfg.grantPolicy.resolve(); e != nil {
+		return cfg, errConfig
+	}
 	return cfg, nil
 }
 
@@ -124,7 +128,7 @@ func matrixConfigShape(value any) bool {
 		}
 		return true
 	}
-	if !exact(value, "version identity user_id audience construction_profile agent_name landlord_name issuer_pubkey timeout_ms rpc pins envelope_evidence initial_watermark") {
+	if !exact(value, "version identity user_id audience construction_profile agent_name landlord_name issuer_pubkey timeout_ms rpc pins envelope_evidence initial_watermark executor_key max_tip_age_seconds max_future_skew_seconds minimum_height terms") {
 		return false
 	}
 	obj := value.(map[string]any)
@@ -226,7 +230,11 @@ func openMatrix(c admission.Config) (admission.Checker, error) {
 			}
 		}()
 	}
-	core, e := grantcheck.NewForTransport(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
+	freshness, terms, e := cfg.grantPolicy.resolve()
+	if e != nil {
+		return nil, errConfig
+	}
+	core, e := grantcheck.NewForTransport(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, ExecutorKey: cfg.ExecutorKey, Freshness: freshness, Terms: terms, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
 	if e != nil {
 		return nil, errConfig
 	}

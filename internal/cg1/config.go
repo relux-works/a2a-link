@@ -25,6 +25,7 @@ var errConfig = errors.New("cg1: configuration")
 // Provisioned by the host inside the engine-derived private identity namespace.
 // RPC credentials are read-only and never reported. No ambient config fallback.
 type settings struct {
+	grantPolicy
 	Version      int      `json:"version"`
 	AgentName    string   `json:"agent_name"`
 	LandlordName string   `json:"landlord_name"`
@@ -67,13 +68,23 @@ func open(c admission.Config) (admission.Checker, error) {
 	if d.Decode(&cfg) != nil || d.Decode(new(any)) != io.EOF || cfg.Version != 1 || cfg.TimeoutMS < 1 || cfg.TimeoutMS > 5000 {
 		return nil, errConfig
 	}
-	if !uniqueJSON(raw) {
+	if !uniqueJSON(raw) || !grantPolicyNames(raw) {
+		return nil, errConfig
+	}
+	freshness, terms, err := cfg.grantPolicy.resolve()
+	if err != nil {
 		return nil, errConfig
 	}
 	node, err := newReadNode(cfg.RPC)
 	if err != nil {
 		return nil, errConfig
 	}
+	success := false
+	defer func() {
+		if !success {
+			node.Close()
+		}
+	}()
 	if err = root.Mkdir("cg1-state", 0700); err != nil && !os.IsExist(err) {
 		return nil, errConfig
 	}
@@ -83,10 +94,11 @@ func open(c admission.Config) (admission.Checker, error) {
 		return nil, errConfig
 	}
 	sr.Close()
-	core, err := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: state, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond})
+	core, err := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, ExecutorKey: cfg.ExecutorKey, Freshness: freshness, Terms: terms, StateDir: state, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond})
 	if err != nil {
 		return nil, errConfig
 	}
+	success = true
 	life, cancel := context.WithCancel(context.Background())
 	return &checker{core: core, own: c.NostrPubkey, identity: c.Identity, timeout: time.Duration(cfg.TimeoutMS) * time.Millisecond, life: life, cancel: cancel, node: node}, nil
 }

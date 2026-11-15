@@ -96,15 +96,19 @@ func evidenceJSON(t *testing.T, v any) json.RawMessage {
 	return b
 }
 func newMatrixFixture(t *testing.T) *matrixFixture {
+	return newMatrixFixtureAt(t, time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC))
+}
+
+func newMatrixFixtureAt(t *testing.T, now time.Time) *matrixFixture {
 	t.Helper()
 	dir := stateDir(t)
 	state := filepath.Join(dir, "matrix-cg1-state")
 	if e := os.Mkdir(state, 0700); e != nil {
 		t.Fatal(e)
 	}
-	f := &matrixFixture{alice: testEd(10), bob: testEd(11), now: time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC), att: map[string]string{}}
+	f := &matrixFixture{alice: testEd(10), bob: testEd(11), now: now, att: map[string]string{}}
 	root, revoker := testEd(20), testEd(21)
-	f.cfg = matrixSettings{Version: 1, Identity: "alice", UserID: matrixAlice, Audience: "a2a-link.cg1.regtest", ConstructionProfile: "W", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(5), TimeoutMS: 1000, RPC: su.Route{Host: "127.0.0.1", Port: 18443, Username: "w3-observer", Password: "public-fixture-rpc-password"}, Pins: map[string]matrixPeer{matrixAlice: {Key: xonly(1), Author: edID(f.alice)}, matrixBob: {Key: xonly(2), Author: edID(f.bob)}}, Evidence: map[string]json.RawMessage{}, InitialWatermark: f.now.Format("2006-01-02T15:04:05Z")}
+	f.cfg = matrixSettings{grantPolicy: testGrantPolicy(t), Version: 1, Identity: "alice", UserID: matrixAlice, Audience: "a2a-link.cg1.regtest", ConstructionProfile: "W", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(5), TimeoutMS: 1000, RPC: su.Route{Host: "127.0.0.1", Port: 18443, Username: "w3-observer", Password: "public-fixture-rpc-password"}, Pins: map[string]matrixPeer{matrixAlice: {Key: xonly(1), Author: edID(f.alice)}, matrixBob: {Key: xonly(2), Author: edID(f.bob)}}, Evidence: map[string]json.RawMessage{}, InitialWatermark: f.now.Format("2006-01-02T15:04:05Z")}
 	attestations, generations := map[string]any{}, map[string]any{}
 	for i, k := range []ed25519.PrivateKey{f.alice, f.bob} {
 		binding := map[string]any{"owner": "fixture-owner", "path": "fixture/message", "generation": "g1", "registration_number": int64(i + 1), "master_epoch": "epoch-1", "uid": int64(1000 + i)}

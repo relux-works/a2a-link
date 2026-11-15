@@ -128,9 +128,9 @@ func decision(v grantcheck.Verdict, inbound bool) admission.Decision {
 		if inbound {
 			want = grantcheck.Exchange
 		}
-	case grantcheck.CodeVerifierUnavailable, grantcheck.CodeStateUnavailable, grantcheck.CodeBusy, grantcheck.CodeCancelled, grantcheck.CodeClockInvalid, grantcheck.CodeGrantPending, grantcheck.CodeIdentityPending:
+	case grantcheck.CodeVerifierUnavailable, grantcheck.CodeStateUnavailable, grantcheck.CodeBusy, grantcheck.CodeCancelled, grantcheck.CodeClockInvalid, grantcheck.CodeGrantPending, grantcheck.CodeIdentityPending, grantcheck.CodeNodeNotSynced, grantcheck.CodeTipStale, grantcheck.CodeTipBelowFloor:
 		retry = true
-	case grantcheck.CodeBindingMismatch, grantcheck.CodeInvalidPresentation, grantcheck.CodeOversize, grantcheck.CodeInvalidPeer, grantcheck.CodeCheckFailed:
+	case grantcheck.CodeBindingMismatch, grantcheck.CodeInvalidPresentation, grantcheck.CodeOversize, grantcheck.CodeInvalidPeer, grantcheck.CodeCheckFailed, grantcheck.CodeCapacityExceeded, grantcheck.CodeExecutorMismatch, grantcheck.CodeTermsInvalid, grantcheck.CodeTipFuture, grantcheck.CodeIssuanceMismatch:
 	default:
 		return deny("check_failed")
 	}

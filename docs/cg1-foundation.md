@@ -14,8 +14,9 @@ startup before policy configuration, sends or uploads. The separate
 transport boundary. The module path remains the upstream a2a-swarm path so
 that the published transport's import refers to one transport registry.
 
-The fork uses Go 1.26 and directly requires published grantcheck v0.1.0 and
-rental-gateway/kernelbind v0.1.0; it has no local replaces. LICENSE and NOTICE are
+The fork uses Go 1.26 and selects grantcheck and rental-gateway/kernelbind
+from the same landed snapshot named in [the current pins](g1-gate-1.md#source-pins-and-scope);
+it has no local replaces. LICENSE and NOTICE are
 byte-identical to upstream PR251 commit 5880b68929d3f83c64fb13719707e894ea1dec16.
 That PR was open when this work was prepared; copying its proposed files is not
 a claim that upstream licensing/public-release authorization has completed.
@@ -65,6 +66,11 @@ Provision `<StateDir>/cg1.json` mode 0600, a regular single-link owned file:
 - version:1;
 - agent_name and landlord_name: distinct approved id/ names;
 - issuer_pubkey: approved lowercase x-only grant-signing public key;
+- executor_key: this consumer's required lowercase x-only executor pin;
+- max_tip_age_seconds: required integer A > 0;
+- max_future_skew_seconds: required integer F in [0, 600], a bench ceiling;
+- minimum_height: required integer FLOOR in [0, 2147483647];
+- terms: required contract-hash to canonical unpadded-base64url terms-v2 map;
 - timeout_ms: an integer from 1 through 5000;
 - rpc: host, port, username, password for the verifier's own read-only node.
 
@@ -147,3 +153,12 @@ that path. Matrix identity mapping, S1 resolver, owner bypass, media authorizati
 deployment and mainnet acceptance remain outside this unit.
 
 Remaining integration work is recorded in [UNRESOLVED_QUESTIONS.md](../UNRESOLVED_QUESTIONS.md).
+
+The required grant configuration now also includes `executor_key`,
+`max_tip_age_seconds` (A), `max_future_skew_seconds` (F), `minimum_height`
+(FLOOR), and canonical `terms` indexed by contract hash. None defaults;
+explicit zero F/FLOOR is permitted. The interim bench freshness rule's hidden
+age bound is A + F and is superseded by LIP-0022 once accepted. See the
+[required fields and provisioning contract](g1-gate-1.md#per-identity-protected-configuration).
+The Nostr constructor also requires these fields; older protected configuration
+and differently bound durable state refuse rather than being migrated silently.

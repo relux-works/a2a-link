@@ -281,3 +281,13 @@ PR #101 bench integration, two-consumer acceptance, J7 enforcing custody,
 native/deployment qualification, independent review and keeper landing remain
 outstanding. The host must provision authentic/current envelope snapshots and
 refresh their private evidence; the adapter neither fetches nor invents them.
+
+
+## CG1 interim freshness production parameters
+
+The v3 bench now requires explicit executor, A, F (bench ceiling 600 seconds),
+and FLOOR. Its hidden age bound is A + F; LIP-0022 supersedes the interim rule
+once accepted. Production A/F remain undecided until a real-node runtime probe:
+a tight F can reject consensus-valid tips. This does not block the explicit
+regtest bench policy or protected proof provisioning. See
+[the configuration contract](docs/g1-gate-1.md#per-identity-protected-configuration).

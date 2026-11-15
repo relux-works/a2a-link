@@ -31,7 +31,7 @@ func TestCoreAdmission(t *testing.T) {
 		t.Fatal(e)
 	}
 	seal := l.seal()
-	raw := l.grant(renter, "adapter", seal, true)
+	raw := l.grantAt(renter, "adapter", seal, true, time.Now().Unix())
 	id, e := kernel.PresentationID(raw)
 	if e != nil {
 		t.Fatal(e)
@@ -46,7 +46,7 @@ func TestCoreAdmission(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	kr, e := k.Check(context.Background(), raw, e2eAgentName, renter.PubKeyHex(), 500)
+	kr, e := k.Check(context.Background(), raw, e2eAgentName, renter.PubKeyHex(), time.Now().Unix())
 	if e != nil || kr.Verdict != kernel.Live || kr.Reason != "LIVE" {
 		t.Fatal("live kernel control", kr, e)
 	}
@@ -55,13 +55,13 @@ func TestCoreAdmission(t *testing.T) {
 		if e = os.Mkdir(dir, 0700); e != nil {
 			t.Fatal(e)
 		}
-		core, e := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: label, AgentName: e2eAgentName, LandlordName: e2eLandlordName, IssuerPubkey: l.issuerPub, StateDir: dir, Node: l.observer, Now: func() time.Time { return time.Unix(now, 0) }})
+		core, e := grantcheck.New(grantcheck.Config{ExecutorKey: xonly(9), Terms: unitTermsLookup, Freshness: testFreshness(600*time.Second, 120*time.Second, 0), ConstructionProfile: "W", Identity: label, AgentName: e2eAgentName, LandlordName: e2eLandlordName, IssuerPubkey: l.issuerPub, StateDir: dir, Node: l.observer, Now: func() time.Time { return time.Unix(now, 0) }})
 		if e != nil {
 			t.Fatal(e)
 		}
 		return &checker{core: core, identity: label, own: agent.PubKeyHex(), timeout: 5 * time.Second}
 	}
-	c := newAt("live", 500)
+	c := newAt("live", time.Now().Unix())
 	in := incoming(c)
 	in.Nostr.Sender = renter.PubKeyHex()
 	out := admission.Outbound{Identity: c.identity, Nostr: &admission.TrustedNostrOutbound{Recipient: renter.PubKeyHex()}}
@@ -78,7 +78,7 @@ func TestCoreAdmission(t *testing.T) {
 	wrong.Sender = xonly(9)
 	d, e = c.Inbound(context.Background(), admission.Inbound{Nostr: &wrong})
 	want(t, d, e, admission.Refused, "binding_mismatch", false)
-	expired := newAt("expired", 1000)
+	expired := newAt("expired", time.Now().Unix()+500)
 	d, e = expired.Inbound(context.Background(), in)
 	want(t, d, e, admission.Exchange, "expired", false)
 	l.revoke(seal)

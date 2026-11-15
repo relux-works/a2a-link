@@ -21,7 +21,7 @@ func (f nodeFunc) Call(c context.Context, m string, a ...any) (json.RawMessage, 
 }
 func testChecker(t *testing.T, node nodeFunc) *checker {
 	t.Helper()
-	core, e := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: "alice", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), StateDir: stateDir(t), Node: node, Now: func() time.Time { return time.Unix(500, 0) }})
+	core, e := grantcheck.New(grantcheck.Config{ExecutorKey: xonly(9), Terms: unitTermsLookup, Freshness: testFreshness(600*time.Second, 120*time.Second, 0), ConstructionProfile: "W", Identity: "alice", AgentName: "id/test-agent", LandlordName: "id/test-landlord", IssuerPubkey: xonly(1), StateDir: stateDir(t), Node: node, Now: func() time.Time { return time.Unix(500, 0) }})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -53,14 +53,14 @@ func TestReasonMapping(t *testing.T) {
 		{grantcheck.CodeLandlordRotated, admission.Exchange, admission.Refused, false, true},
 		{grantcheck.CodeLandlordChanged, admission.Exchange, admission.Refused, false, true},
 	}
-	for _, code := range []grantcheck.Code{grantcheck.CodeIdentityPending, grantcheck.CodeGrantPending, grantcheck.CodeVerifierUnavailable, grantcheck.CodeStateUnavailable, grantcheck.CodeClockInvalid, grantcheck.CodeCancelled, grantcheck.CodeBusy} {
+	for _, code := range []grantcheck.Code{grantcheck.CodeIdentityPending, grantcheck.CodeGrantPending, grantcheck.CodeVerifierUnavailable, grantcheck.CodeStateUnavailable, grantcheck.CodeClockInvalid, grantcheck.CodeCancelled, grantcheck.CodeBusy, grantcheck.CodeNodeNotSynced, grantcheck.CodeTipStale, grantcheck.CodeTipBelowFloor} {
 		rows = append(rows, struct {
 			code          grantcheck.Code
 			in, out       admission.Verdict
 			retry, closed bool
 		}{code, admission.Refused, admission.Refused, true, false})
 	}
-	for _, code := range []grantcheck.Code{grantcheck.CodeBindingMismatch, grantcheck.CodeInvalidPresentation, grantcheck.CodeOversize, grantcheck.CodeInvalidPeer, grantcheck.CodeCheckFailed} {
+	for _, code := range []grantcheck.Code{grantcheck.CodeBindingMismatch, grantcheck.CodeInvalidPresentation, grantcheck.CodeOversize, grantcheck.CodeInvalidPeer, grantcheck.CodeCheckFailed, grantcheck.CodeExecutorMismatch, grantcheck.CodeTermsInvalid, grantcheck.CodeTipFuture, grantcheck.CodeIssuanceMismatch, grantcheck.CodeCapacityExceeded} {
 		rows = append(rows, struct {
 			code          grantcheck.Code
 			in, out       admission.Verdict

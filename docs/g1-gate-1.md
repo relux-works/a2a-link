@@ -14,9 +14,17 @@ shared envelope format are unchanged. PR #4 remains independent.
 
 ## Source pins and scope
 
-- Grantcheck PR #100: `f2a20c40a817b650585c568104fd331d6c6348db`, pinned as
-  `v0.1.2-0.20261114114327-f2a20c40a817`. This is an under-review dependency,
-  not a main adoption claim; re-pin through review after its main landing.
+- Grantcheck #111 and strict-parser commit `e70a35a41dec5948d5452f1f898f4d26977372d7`
+  are contained by the selected snapshot `d01e38f1c9665eccf1164b21680565d339b6f365`.
+  Grantcheck is pinned as `v0.1.2-0.20261115014216-d01e38f1c966`.
+  Every selected chain-lab module uses that same commit. Selection is checked
+  with `git merge-base --is-ancestor`, never pseudo-version ordering.
+  The executable dependency check rejects the former `3baa201bafb6` selection.
+  Five graph-only indirect constraints intentionally keep grant-store,
+  model-proxy, signer-service, station-lifecycle and its gatewaybind at this
+  same ancestry floor. `go mod tidy` removes those currently unused graph
+  constraints; preserve/reapply them when refreshing dependencies, then run
+  the ancestry check against the complete selected graph.
 - Existing envelope library: `e38510c503d266d36a275a5976f933e10fae4060`, pinned as
   `v0.0.0-20261108162913-e38510c503d2`. Its complete `VerifyMessage` pipeline
   checks the existing schema, every Ed25519/approved approver signature,
@@ -125,7 +133,8 @@ exact authenticated configuration row, never room membership. That row's one
 BIP-340 key goes to `OutboundFrom(RecipientProof{SwarmEnvelopeV2, [key]})`.
 The envelope author/co-signer must be the local pinned identity. Missing or
 mismatched pins refuse definitely. The counterpart's proof must already have
-been admitted on this identity's inbound path; there is no bootstrap bypass.
+been admitted on this identity's inbound path or through protected provisioning
+below. Both routes verify the full admission rules before caching proof bytes.
 A future LIP-0015 section 6 certificate-statement resolver may replace the pin
 once implemented/reviewed (grant-key signature, highest seq, open window).
 
@@ -148,11 +157,75 @@ Closed top-level fields:
 | `audience` | Exact consuming-installation audience |
 | `construction_profile` | Exactly `W` |
 | `agent_name`, `landlord_name`, `issuer_pubkey` | Grantcheck's protected names and lowercase BIP-340 issuer key |
+| `executor_key` | REQUIRED consumer x-only BIP-340 key, lowercase hex; compared to canonical terms' `ExecutorKey`, not a sender key |
+| `max_tip_age_seconds` | REQUIRED integer A > 0, at most 9223372036 seconds (duration representation limit) |
+| `max_future_skew_seconds` | REQUIRED integer F from 0 through 600 seconds; 600 is a BENCH ceiling |
+| `minimum_height` | REQUIRED integer FLOOR from 0 through 2147483647 |
+| `terms` | REQUIRED nonempty map (at most 64 entries) from contract SHA256 to canonical unpadded-base64url terms-v2 bytes |
 | `timeout_ms` | 1..5000, shared per-check budget |
 | `rpc` | Existing Route shape: loopback IP, port, exact `w3-observer` username, read-only node password |
 | `pins` | Exact carrier id to `{key, author}`; key is lowercase BIP-340 x-only hex, author is canonical Ed25519 key id; includes the local identity |
 | `envelope_evidence` | Host-authenticated snapshots described below |
 | `initial_watermark` | Exact UTC seconds timestamp for a newly provisioned state namespace |
+
+The executor, A, F and FLOOR have **no defaults**. Missing, null, aliases,
+wrong types and out-of-range values refuse startup before checker state exists.
+Explicit zero F and FLOOR are valid. Canonical terms are hash-checked and
+re-encoded for byte equality at startup, then looked up without I/O by the
+signed grant's contract hash. The grantcheck admission path compares their
+executor against `executor_key` and returns `executor_mismatch` by name.
+The terms map is part of this Matrix namespace's immutable configuration binding.
+Provision all needed counterpart terms before opening a fresh namespace.
+
+The **interim v3 bench rule, superseded by LIP-0022 once accepted**, is:
+
+```text
+headers == blocks
+height >= FLOOR
+trusted_now - tip_header_time <= A
+tip_header_time <= trusted_now + F
+```
+
+The hidden age bound is **A + F**, not A. Headers ahead/behind refuse as
+retryable `node_not_synced`; below-floor and old tips refuse as retryable
+`tip_below_floor` and `tip_stale`. A future tip outside F refuses as `tip_future`.
+The boundary exactly A is admitted; A + 1 second is refused. The underlying
+checker also checks the last trusted-clock sample before committing admission.
+A tight bench F can refuse consensus-valid tips: production A/F values remain
+unset pending a real-node runtime probe. These settings are operator inputs,
+not production recommendations or values inferred from a received message.
+
+The retained Nostr `cg1.json` requires these same five fields and passes them
+into the sole constructor too; it retains its existing mode-0600 and 8192-byte
+configuration limits. New trust/freshness pins are bound by grantcheck's durable
+identity. Old state cannot reopen under changed pins; there is no automatic
+migration and no instruction here to discard established state.
+
+### Protected first-message provisioning
+
+```sh
+a2a --as IDENTITY cg1 provision --proof counterpart-presentation.json
+```
+
+This local operator command requires the selected identity's protected
+`cg1-matrix` configuration. It reads one bounded regular proof file, derives
+its signed-grant ID, and calls grantcheck's `Provision(ctx, Presentation)`.
+There is no pin/clock/policy override flag, daemon-dispatch route or Matrix send.
+It verifies canonical signed-grant and terms hashes, the **on-chain issuance
+commitment**, signatures, executor, names, unspent seal, windows and fresh own-node
+observations before accepting any cache bytes. A well-signed uncommitted hash
+refuses as `issuance_mismatch`; no caller-provided hash establishes commitment.
+
+Every admitted/refused provisioning attempt reaching an available checker is
+recorded in its bounded durable `provisioning` audit ring (newest 64 attempts)
+inside `matrix-grantcheck-state/grantcheck.json`, with grant ID, SHA256 of proof
+bytes, timestamp and result. Busy/unavailable state or cancellation cannot promise
+a durable record. Proof-file/open/startup failures are reported on stderr before
+Provision and do not create a provisioning audit. Successful checker output is
+JSON `{grant_id,result,retryable}`; exit 0 means admitted, exit 1 means refusal.
+On refusal the **proof cache** is unchanged; a refusal audit and clock high-water
+may change. A subsequent send still rechecks the on-chain grant from scratch.
+The protected owner DM bypass retains its existing independent audience checks.
 
 `envelope_evidence` supports only `service_root`, `agent_revocation_root`,
 `attestations`, `active_generations`, `revocations`, `time`, and optional
@@ -290,7 +363,7 @@ go run -p 1 ./.scripts/g1-matrix-mutants --root . --out .temp/g1-matrix-mutants
 go build -p 1 ./...
 go vet -p 1 ./...
 go mod verify
-go mod tidy -diff
+go run -p 1 ./.scripts/check-g1-dependencies --repo CHAIN_LAB_CHECKOUT
 ```
 
 Use a fresh mutation output directory; its baseline, mutant and restored logs
@@ -299,8 +372,62 @@ The scalar-format regression was added after an initial plant survived because
 signature math still refused its test input; later controls target the encoding
 gate directly. An unrelated compile error does not count as a killed mutant.
 
-Real opensource PR #101 bench end-to-end acceptance is omitted in this PR.
-No always-skipping integration placeholder is added. Existing genuine-Core,
-full terminal/native daemon qualification, independent review, hosted checks,
+Two-consumer Phase A acceptance is separate from these adapter regressions.
+Full terminal/native daemon qualification, independent review, hosted checks,
 deployment and two-consumer live acceptance remain separate gates. The brief
 has no surface table; that gap does not claim coverage outside the listed tests.
+
+## Executor, freshness and provisioning validation
+
+```sh
+go run -p 1 ./.scripts/check-g1-dependencies --repo CHAIN_LAB_CHECKOUT
+go test -p 1 -parallel 2 -count=1 ./.scripts/check-g1-dependencies
+go test -p 1 -parallel 2 -race -count=1 -timeout 5m ./internal/cg1 ./internal/cg1cosign ./internal/cli -run '^(TestMatrix|TestCoSignature|TestFixture|TestCG1|TestRequiredGrantPolicy|TestGrantPolicy|TestReasonMapping)'
+go build -p 1 -o .temp/g1/a2a ./cmd/a2a
+CG1_REGTEST=1 CG1_RUN_ROOT=NEW_ABSOLUTE_SCRATCH CG1_CORE_DAEMON=PINNED_NAMECOIND CG1_CORE_CLI=PINNED_NAMECOIN_CLI CG1_A2A_BINARY=ABSOLUTE_BUILT_A2A go test -p 1 -parallel 2 -count=1 -timeout 5m -run '^TestCoreMatrixPolicy$' -v ./internal/cg1
+```
+
+Use a fresh `CG1_RUN_ROOT` for each of `TestCoreMatrixPolicy`,
+`TestCoreAdmission` and `TestCoreNostrSession`. The harness refuses unknown or
+mixed Core binary pairs. It accepts the retained macOS pair and the official
+Core 28 Linux pair, pinned by SHA256 in `core_helpers_test.go`. Each isolated
+node is started, signaled and joined by its exact owned PID. Only generated
+fixture custody is used; private Core directories must not be published.
+
+`TestCoreMatrixPolicy` uses the real `admission.Open("cg1-matrix")` factory,
+Ed25519 envelopes and BIP-340 co-signatures against genuine Core grants. The
+headers test alters only the RPC header-count observation. The frozen-floor
+test records public answers, mines a newer real block and replays that old
+consistent view; its trusted floor distinguishes the new view from the old.
+The age equality test uses a controlled trusted-clock sample with recorded
+real Core RPCs, live at A and refused at A+1 second after a newer block is mined;
+that clock seam is not a wall-clock runtime qualification. Provisioning tests
+use the factory's wall clock and both populated and cold cache controls; the
+uncommitted witness is re-signed by the genuine fixture issuer but retains an
+issuance locator committing to another hash. The command test invokes the
+fresh production binary, never a stub. With no binary variable it explicitly
+skips that subtest; with no `CG1_REGTEST=1` the entire Core suite explicitly skips.
+The owner-DM test remains `TestCG1MatrixOwnerDMBypass`.
+
+The full terminal/daemon suite is separate: some inherited fixtures invoke
+terminal multiplexers or hard-code scratch outside a selected root. These
+focused commands do not qualify installed adoption, a live Matrix exchange,
+terminal delivery, mainnet, production A/F, or the later Phase A rerun.
+
+The genuine-Core policy controls use the selected grantcheck module via Go source
+overlays, never edits to its cache:
+
+```sh
+CG1_REGTEST=1 CG1_CORE_DAEMON=PINNED_NAMECOIND CG1_CORE_CLI=PINNED_NAMECOIN_CLI CG1_A2A_BINARY=ABSOLUTE_BUILT_A2A go run -p 1 ./.scripts/g1-matrix-mutants --root . --out .temp/g1-policy-mutants --core-policy
+```
+
+Go forbids module-cache overlays, so this mode copies the exact selected module
+into its private fixture, compares the planted files with their originals, and
+uses a replacement only in an alternate test modfile. Product `go.mod` and the
+module cache stay untouched. The runner allocates a fresh `CG1_RUN_ROOT` for each baseline, mutant and restored
+child, records exact PIDs/exits and named failure diagnostics, and verifies all
+original source hashes. It refuses a missing opt-in/binary environment. The
+seven fixed plants cover executor, header equality, trusted floor, frozen-view
+age A+1, a genuine two-hour-future Core tip, cache preservation on a refused spent
+proof, and durable provisioning audit. An unrelated build/setup failure or a
+skip is never a successful control. The original mode retains its 76 controls.
