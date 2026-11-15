@@ -114,7 +114,7 @@ func TestLinuxSBOMBinding(t *testing.T) {
 	n := "a2a_0.1.2_linux_arm64.tar.gz"
 	sha := strings.Repeat("a", 64)
 	good := sbomFixture(n, sha)
-	if e := verifySBOM(good, n, sha); e != nil {
+	if e := verifySBOM(good, n, sha, "0.1.2", "arm64"); e != nil {
 		t.Fatal(e)
 	}
 	for name, tc := range map[string]struct{ from, to, want string }{
@@ -125,10 +125,38 @@ func TestLinuxSBOMBinding(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			bad := []byte(strings.Replace(string(good), tc.from, tc.to, 1))
-			if e := verifySBOM(bad, n, sha); e == nil || e.Error() != tc.want {
+			if e := verifySBOM(bad, n, sha, "0.1.2", "arm64"); e == nil || e.Error() != tc.want {
 				t.Fatalf("wanted %s, got %v", tc.want, e)
 			}
 		})
+	}
+}
+
+// Package SBOMs describe deb/rpm subjects, while archive SBOMs inventory Go
+// modules. A package must match its own version/architecture and digest; a
+// module-only archive SBOM cannot stand in for a package SBOM.
+func TestLinuxPackageSBOMBinding(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	for _, n := range LinuxArtifacts("0.1.2")[2:] {
+		arch := "amd64"
+		if strings.Contains(n, "arm64") || strings.Contains(n, "aarch64") {
+			arch = "arm64"
+		}
+		good := sbomFixture(n, sha)
+		if e := verifySBOM(good, n, sha, "0.1.2", arch); e != nil {
+			t.Fatal("matching package SBOM", n, e)
+		}
+		for label, bad := range map[string][]byte{
+			"wrong package version":  []byte(strings.ReplaceAll(string(good), `"version":"0.1.2`, `"version":"0.1.3`)),
+			"wrong architecture":     []byte(strings.ReplaceAll(string(good), `"architecture":"`, `"architecture":"wrong-`)),
+			"module inventory alone": []byte(strings.ReplaceAll(string(sbomFixture("a2a_0.1.2_linux_amd64.tar.gz", sha)), "a2a_0.1.2_linux_amd64.tar.gz", n)),
+		} {
+			t.Run(n+"/"+label, func(t *testing.T) {
+				if e := verifySBOM(bad, n, sha, "0.1.2", arch); e == nil || e.Error() != "linux-sbom-package-binding" {
+					t.Fatal("invalid package SBOM admitted", e)
+				}
+			})
+		}
 	}
 }
 

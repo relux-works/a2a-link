@@ -96,7 +96,21 @@ func writePlatformChecksums(t *testing.T, dir, name string, names []string) {
 	put(t, dir, name+".pem", []byte("certificate fixture"))
 }
 func sbomFixture(n, sum string) []byte {
-	return []byte(`{"descriptor":{"name":"syft","version":"1.38.0"},"source":{"type":"file","metadata":{"path":"` + n + `","digests":[{"algorithm":"sha256","value":"` + sum + `"}]}},"artifacts":[{"name":"github.com/relux-works/a2a-swarm","type":"go-module"}]}`)
+	artifacts := `[{"name":"github.com/relux-works/a2a-swarm","type":"go-module"}]`
+	if strings.HasSuffix(n, ".deb") || strings.HasSuffix(n, ".rpm") {
+		kind, version, arch, release := "deb", "0.1.2", "amd64", ""
+		if strings.Contains(n, "arm64") {
+			arch = "arm64"
+		}
+		if strings.HasSuffix(n, ".rpm") {
+			kind, version, arch, release = "rpm", "0.1.2-1", "x86_64", "1"
+			if strings.Contains(n, "aarch64") {
+				arch = "aarch64"
+			}
+		}
+		artifacts = `[{"name":"a2a","type":"` + kind + `","version":"` + version + `","metadata":{"architecture":"` + arch + `","version":"0.1.2","release":"` + release + `"}}]`
+	}
+	return []byte(`{"descriptor":{"name":"syft","version":"1.38.0"},"source":{"type":"file","metadata":{"path":"` + n + `","digests":[{"algorithm":"sha256","value":"` + sum + `"}]}},"artifacts":` + artifacts + `}`)
 }
 
 // Every production platform member is mandatory; exactly the reviewed three
@@ -217,6 +231,16 @@ func TestProductionPlatformGates(t *testing.T) {
 			put(t, d, "linux-release-evidence.json", []byte(strings.Replace(string(b), `"trust":"production"`, `"trust":"qualification"`, 1)))
 			writePlatformChecksums(t, d, "linux-checksums.txt", LinuxMembers("0.1.2"))
 		}, "production-fixture-trust-refused"},
+		"package binary association": {func(t *testing.T, d string) {
+			raw, _ := os.ReadFile(filepath.Join(d, "linux-release-evidence.json"))
+			var ev LinuxEvidence
+			if e := json.Unmarshal(raw, &ev); e != nil {
+				t.Fatal(e)
+			}
+			ev.Assets[2].BinarySHA256 = strings.Repeat("0", 64)
+			put(t, d, "linux-release-evidence.json", encode(t, ev))
+			writePlatformChecksums(t, d, "linux-checksums.txt", LinuxMembers("0.1.2"))
+		}, "linux-evidence-binary-binding"},
 		"Darwin commit mismatch": {func(t *testing.T, d string) {
 			b, _ := os.ReadFile(filepath.Join(d, "release-evidence.json"))
 			put(t, d, "release-evidence.json", []byte(strings.Replace(string(b), binding().Commit, strings.Repeat("c", 40), 1)))
@@ -262,5 +286,34 @@ func TestProductionCosignClaims(t *testing.T) {
 	}
 	if e := Cosign(context.Background(), "blob", "sig", "cert", b, ".github/workflows/fixture.yml"); e == nil || e.Error() != "signature-workflow-refused" {
 		t.Fatal(e)
+	}
+}
+
+// Platform signatures, parsed evidence and enumerated hashes use one private
+// capture. A caller changing a checksum after capture cannot make creation
+// seal a different checksum/body association; the last input binding refuses.
+func TestProductionPlatformCapture(t *testing.T) {
+	dir, _ := platformFixture(t)
+	original, e := os.ReadFile(filepath.Join(dir, "checksums.txt"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	seen := false
+	raw, e := CreateManifest(context.Background(), binding(), dir, func(_ context.Context, p, _, _ string, _ Binding, _ string) error {
+		if filepath.Base(p) == "checksums.txt" {
+			if filepath.Dir(p) == dir {
+				t.Fatal("verification reopened caller's checksum path")
+			}
+			captured, e := os.ReadFile(p)
+			if e != nil || string(captured) != string(original) {
+				t.Fatal("signature and parser saw different checksum bytes", e)
+			}
+			seen = true
+			put(t, dir, "checksums.txt", []byte("changed after capture"))
+		}
+		return nil
+	})
+	if !seen || e == nil || e.Error() != "manifest-asset-bytes-mismatch: checksums.txt" || raw != nil {
+		t.Fatal("changed caller input reached the seal", e)
 	}
 }

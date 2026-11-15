@@ -63,6 +63,14 @@ uses Go readers for ar/tar and RPM/gzip/newc, not the builder's artifact metadat
 Maintainer scripts, links, configuration, services and extra payload files are
 refused. Installation delivers only `/usr/bin/a2a` and has no startup effects.
 
+SBOM coverage is explicit: tar archive SBOMs inventory the CLI's Go modules;
+Syft's [deb archive cataloger](https://github.com/anchore/syft/blob/a033ae525f6c7ef937c6f49513e3403f07a1d6c0/syft/pkg/cataloger/debian/parse_deb_archive.go)
+and RPM cataloger describe the package identity/version/architecture and subject
+digest, rather than recursively cataloging the payload's Go modules. Independently
+verified package-to-archive binary equality links those inventories, and signed
+evidence must retain the same binary digest for every package of an architecture.
+An archive SBOM alone is refused as a package SBOM.
+
 Hosted package checks install/remove amd64 deb/rpm in disposable, offline,
 digest-pinned Debian/Fedora containers. They verify payload equality, unchanged
 throwaway HOME and `/etc`, and no scripts. A known-bad package/reference pair

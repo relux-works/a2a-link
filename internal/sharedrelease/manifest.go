@@ -18,6 +18,40 @@ import (
 // injection is for isolated gate tests, never a CLI flag or trust override.
 type BlobVerifier func(context.Context, string, string, string, Binding, string) error
 
+// Capture the complete platform input once. Signature verification, evidence
+// parsing and digest enumeration then use the same private immutable copy,
+// rather than reopening caller-controlled paths between those operations.
+func capturePlatforms(dir string, b Binding, allowManifest bool) (string, error) {
+	names := Members(b.Version())
+	allowed := append([]string{}, names...)
+	if allowManifest {
+		for _, n := range []string{"release-assets.json", "release-assets.json.sig", "release-assets.json.pem"} {
+			if _, e := os.Lstat(filepath.Join(dir, n)); e == nil {
+				allowed = append(allowed, n)
+			}
+		}
+	}
+	if e := exactDirectory(dir, allowed); e != nil {
+		return "", e
+	}
+	tmp, e := os.MkdirTemp("", "a2a-platform-input-")
+	if e != nil {
+		return "", e
+	}
+	for _, n := range names {
+		x, e := readRegular(dir, n)
+		if e != nil {
+			os.RemoveAll(tmp)
+			return "", e
+		}
+		if e = os.WriteFile(filepath.Join(tmp, n), x, 0600); e != nil {
+			os.RemoveAll(tmp)
+			return "", e
+		}
+	}
+	return tmp, nil
+}
+
 func Identity(workflow, tag string) string {
 	return "https://github.com/" + Repository + "/" + workflow + "@refs/tags/" + tag
 }
@@ -131,15 +165,17 @@ func CreateManifest(ctx context.Context, b Binding, dir string, verify BlobVerif
 	if verify == nil {
 		verify = Cosign
 	}
-	if e := exactDirectory(dir, Members(b.Version())); e != nil {
+	captured, e := capturePlatforms(dir, b, false)
+	if e != nil {
 		return nil, e
 	}
-	if e := verifyPlatforms(ctx, dir, b, verify); e != nil {
+	defer os.RemoveAll(captured)
+	if e := verifyPlatforms(ctx, captured, b, verify); e != nil {
 		return nil, e
 	}
 	m := Manifest{Schema: Schema, Binding: b, Version: b.Version(), Architectures: []string{"darwin/arm64", "linux/amd64", "linux/arm64"}, Assets: []cask.Asset{}}
 	for _, n := range Members(b.Version()) {
-		x, e := readRegular(dir, n)
+		x, e := readRegular(captured, n)
 		if e != nil {
 			return nil, e
 		}
@@ -150,7 +186,11 @@ func CreateManifest(ctx context.Context, b Binding, dir string, verify BlobVerif
 		return nil, e
 	}
 	raw = append(raw, '\n')
-	if _, e = ParseManifest(raw, b); e != nil {
+	m, e = ParseManifest(raw, b)
+	if e != nil {
+		return nil, e
+	}
+	if e = BindFiles(m, dir); e != nil {
 		return nil, e
 	}
 	return raw, nil
@@ -183,10 +223,15 @@ func VerifyProduction(ctx context.Context, raw []byte, signature, certificate, d
 	if e != nil {
 		return zero, e
 	}
-	if e = BindFiles(m, dir); e != nil {
+	captured, e := capturePlatforms(dir, b, true)
+	if e != nil {
 		return zero, e
 	}
-	if e = verifyPlatforms(ctx, dir, b, verify); e != nil {
+	defer os.RemoveAll(captured)
+	if e = BindFiles(m, captured); e != nil {
+		return zero, e
+	}
+	if e = verifyPlatforms(ctx, captured, b, verify); e != nil {
 		return zero, e
 	}
 	return m, nil

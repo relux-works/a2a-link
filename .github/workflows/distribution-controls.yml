@@ -93,6 +93,8 @@ jobs:
           echo "GOMODCACHE=$RUNNER_TEMP/modcache" >> "$GITHUB_ENV"
           echo "GOCACHE=$RUNNER_TEMP/buildcache" >> "$GITHUB_ENV"
           GOMODCACHE="$RUNNER_TEMP/modcache" go mod download
+          GOMODCACHE="$RUNNER_TEMP/modcache" GOCACHE="$RUNNER_TEMP/buildcache" go list -m -json all > "$RUNNER_TEMP/module-inputs.json"
+          GOMODCACHE="$RUNNER_TEMP/modcache" GOCACHE="$RUNNER_TEMP/buildcache" go build -p 1 -o "$RUNNER_TEMP/a2a-distribution" ./cmd/a2a-distribution
           chmod -R a-w "$RUNNER_TEMP/modcache"
           echo 'GOPROXY=off' >> "$GITHUB_ENV"
           echo 'GOSUMDB=off' >> "$GITHUB_ENV"
@@ -104,7 +106,6 @@ jobs:
         run: |
           set -euo pipefail
           T="$RUNNER_TEMP"
-          go build -p 1 -o "$T/a2a-distribution" ./cmd/a2a-distribution
           "$T/a2a-distribution" tools
           mkdir -p "$T/tool-plant"
           cp "$T/tools/goreleaser" "$T/tools/syft" "$T/tool-plant/"
@@ -156,6 +157,15 @@ jobs:
           fi
           grep -F 'differs from' "$T/package-plant.log"
           rm -r "$IN/ref-amd64" "$IN/ref-arm64"
+      - name: Preserve only selected SBOM diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sbom-diagnostics"
+          for name in a2a_0.1.2_linux_amd64.tar.gz a2a_0.1.2_linux_arm64.tar.gz a2a_0.1.2_amd64.deb a2a_0.1.2_arm64.deb a2a-0.1.2-1.x86_64.rpm a2a-0.1.2-1.aarch64.rpm; do
+            if test -f "dist/$name.sbom.json"; then cp "dist/$name.sbom.json" "$RUNNER_TEMP/sbom-diagnostics/"; fi
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -175,5 +185,6 @@ jobs:
             ${{ runner.temp }}/linux-build-02.log
             ${{ runner.temp }}/package-plant.log
             ${{ runner.temp }}/tool-plant.log
+            ${{ runner.temp }}/sbom-diagnostics
           if-no-files-found: error
           retention-days: 7

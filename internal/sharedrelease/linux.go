@@ -211,7 +211,7 @@ func VerifyELF(raw []byte, arch string) error {
 	return nil
 }
 
-func verifySBOM(raw []byte, name, sha string) error {
+func verifySBOM(raw []byte, name, sha, version, arch string) error {
 	var s struct {
 		Descriptor struct{ Name, Version string } `json:"descriptor"`
 		Source     struct {
@@ -221,7 +221,10 @@ func verifySBOM(raw []byte, name, sha string) error {
 				Digests []struct{ Algorithm, Value string }
 			}
 		} `json:"source"`
-		Artifacts []struct{ Name, Type string } `json:"artifacts"`
+		Artifacts []struct {
+			Name, Type, Version string
+			Metadata            struct{ Architecture, Version, Release string }
+		} `json:"artifacts"`
 	}
 	if json.Unmarshal(raw, &s) != nil || s.Descriptor.Name != "syft" || s.Descriptor.Version != "1.38.0" || s.Source.Type != "file" || filepath.Base(s.Source.Metadata.Path) != name {
 		return errors.New("linux-sbom-identity")
@@ -238,12 +241,39 @@ func verifySBOM(raw []byte, name, sha string) error {
 	if matched != 1 {
 		return errors.New("linux-sbom-subject-mismatch")
 	}
-	for _, a := range s.Artifacts {
-		if a.Type == "go-module" && a.Name == "github.com/relux-works/a2a-swarm" {
-			return nil
+	if strings.HasSuffix(name, ".tar.gz") {
+		for _, a := range s.Artifacts {
+			if a.Type == "go-module" && a.Name == "github.com/relux-works/a2a-swarm" {
+				return nil
+			}
+		}
+		return errors.New("linux-sbom-cli-module-missing")
+	}
+	// Syft's deb/rpm archive catalogers describe the package, not the Go
+	// modules nested inside its payload. The archive SBOM supplies that module
+	// inventory; independently verified payload byte equality links the two.
+	kind, packageArch, packageVersion := "deb", arch, version
+	if strings.HasSuffix(name, ".rpm") {
+		kind, packageVersion = "rpm", version+"-1"
+		packageArch = "x86_64"
+		if arch == "arm64" {
+			packageArch = "aarch64"
 		}
 	}
-	return errors.New("linux-sbom-cli-module-missing")
+	matchedPackage := 0
+	for _, a := range s.Artifacts {
+		if a.Name != "a2a" || a.Type != kind {
+			continue
+		}
+		if a.Version != packageVersion || a.Metadata.Architecture != packageArch || a.Metadata.Version != version || kind == "rpm" && a.Metadata.Release != "1" {
+			return errors.New("linux-sbom-package-binding")
+		}
+		matchedPackage++
+	}
+	if matchedPackage != 1 {
+		return errors.New("linux-sbom-package-binding")
+	}
+	return nil
 }
 
 // PrepareLinux copies only the reviewed public members into a fresh private
@@ -295,7 +325,7 @@ func PrepareLinux(root, dist, out, sourceArchive string, binding Binding, epoch 
 		if e != nil {
 			return e
 		}
-		if e = verifySBOM(sbom, n, sha); e != nil {
+		if e = verifySBOM(sbom, n, sha, binding.Version(), arch); e != nil {
 			return fmt.Errorf("%s: %w", n, e)
 		}
 		packageArch := arch
@@ -383,6 +413,7 @@ func VerifyLinuxEvidence(raw []byte, b Binding, dir string) error {
 	if len(ev.Assets) != 6 {
 		return errors.New("linux-evidence-members")
 	}
+	binaryDigests := map[string]string{}
 	for i, n := range LinuxArtifacts(b.Version()) {
 		a := ev.Assets[i]
 		arch := "amd64"
@@ -399,6 +430,11 @@ func VerifyLinuxEvidence(raw []byte, b Binding, dir string) error {
 		if a.Name != n || a.Architecture != "linux/"+arch || a.PackageArchitecture != pa || !digestForm.MatchString(a.BinarySHA256) {
 			return errors.New("linux-evidence-architecture")
 		}
+		if i < 2 {
+			binaryDigests[arch] = a.BinarySHA256
+		} else if a.BinarySHA256 != binaryDigests[arch] {
+			return errors.New("linux-evidence-binary-binding")
+		}
 		x, e := readRegular(dir, n)
 		if e != nil {
 			return e
@@ -410,7 +446,7 @@ func VerifyLinuxEvidence(raw []byte, b Binding, dir string) error {
 		if a.SHA256 != Hash(x) || a.SBOMSHA256 != Hash(s) {
 			return errors.New("linux-evidence-digest-binding")
 		}
-		if e = verifySBOM(s, n, a.SHA256); e != nil {
+		if e = verifySBOM(s, n, a.SHA256, b.Version(), arch); e != nil {
 			return e
 		}
 	}
