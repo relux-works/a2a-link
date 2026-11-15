@@ -1,10 +1,11 @@
-# Shared distribution preparation (PLAN r3, slices 1 and 2)
+# Shared distribution preparation (PLAN r3, slices 1–3)
 
-The two production implementation slices prepare Linux packages, deterministic
+The production implementation slices prepare Linux packages, deterministic
 archives, private Darwin input assembly, the signed platform manifest, cask
 custody controls and publisher recovery. Integration is **partial**.
-There is no combined release workflow, public upload, real release, tag creation,
-tap write or installation on a coordinating host in this change.
+The combined release workflow and ordered controller are supplied behind the
+production hold. No public upload, real release, tag creation, tap write or
+installation on a coordinating host is performed by this change.
 
 The existing six-file Darwin publisher refuses with
 `combined-release-controller-not-integrated` under the new shared policy,
@@ -220,12 +221,12 @@ artifacts and variation fields refuse; macOS Intel is excluded. Actual brew
 plants change URL, checksum, version, binary source/target and an extra artifact,
 with a valid nearby cask. No Ruby is evaluated by the Go guard.
 
-Remaining production integration: the shared tag workflow, Linux producer
-consumption/order, the whole assembly-to-publisher controller and explicit main
-lease through final publication readback. Native re-verification, mandatory
-independent compiler checks, the closed publisher and read-only recovery now
-exist as preparation boundaries, but are not one activated production route.
-The hold stays until these form one reviewed route. No tag, release or tap
+Remaining production integration: an enforceable custody main lease through
+final publication readback. The shared tag workflow, Linux producer order,
+assembly-to-publisher controller, mandatory independent compiler checks and
+read-only recovery are wired behind the hold; their fixtures do not establish
+live lease authority. The hold stays until the lease joins one reviewed route.
+No tag, release or tap
 publication is enabled by these preparation commands.
 
 ## Prepared manual tap custody (no tap write)
@@ -262,13 +263,13 @@ and native installation/adoption remain separate outcomes.
 ## Private assembly, publisher reuse and recovery
 
 The Darwin workflow is now reusable private preparation only, with no tag
-trigger or contents-write permission. The future shared controller calls it as
+trigger or contents-write permission. The held shared workflow calls it as
 `darwin-producer`; its native job is `prepare`. Only the five existing Apple
 fields enter its native step. The original native implementation, preflight,
 cleanup, full requirements and tickets remain the producer. Its reusable-workflow
-certificate identity stays the legacy Darwin identity. The future shared parent
-has one tag concurrency group with `cancel-in-progress: false`; it is not supplied
-by this partial slice, and no production trigger replaces the hold yet.
+certificate identity stays the legacy Darwin identity. The shared parent
+has one tag concurrency group with `cancel-in-progress: false`; its admission
+retains the production hold before any signing authority is entered.
 
 `a2a-distribution assemble -inputs INPUTS.json -root SOURCE -out NEW_PLATFORM_DIR
 -tag TAG -commit COMMIT -tag-object OBJECT -epoch EPOCH -source-archive SOURCE.tar`

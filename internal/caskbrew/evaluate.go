@@ -71,7 +71,7 @@ func Evaluate(ctx context.Context, prefix string, ruby []byte, m cask.Manifest) 
 		return out, nil
 	}
 	version, e := run("--version")
-	if e != nil || strings.TrimSpace(string(version)) != "Homebrew 7.0.13" {
+	if e != nil || !pinnedBrewVersion(version) {
 		return errors.New("brew-version-pin")
 	}
 	if _, e = run("tap-new", "--no-git", "relux-works/release-candidate"); e != nil {
@@ -100,4 +100,11 @@ func Evaluate(ctx context.Context, prefix string, ruby []byte, m cask.Manifest) 
 	}
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 	return Verify(info, ruby, m, prefix, platform)
+}
+
+func pinnedBrewVersion(raw []byte) bool {
+	// With API installation disabled, the public CLI also reports the absent
+	// core tap. Keep that exact consumer output closed rather than prefix-match.
+	v := strings.TrimSpace(string(raw))
+	return v == "Homebrew 7.0.13" || v == "Homebrew 7.0.13\nHomebrew/homebrew-core N/A"
 }

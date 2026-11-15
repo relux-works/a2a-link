@@ -143,7 +143,13 @@ func TestPublisherClosedTransition(t *testing.T) {
 				}
 				return nil
 			}
-			e := publishPrepared(context.Background(), g, admit, a.Tag, a.TagObject, dir, []string{"asset"}, "fixture", gate)
+			// Once created, the original draft ID survives every later failure,
+			// including an ambiguous transition; pre-draft refusals retain no ID.
+			var recordedID int64
+			e := publishPreparedCore(context.Background(), g, admit, a.Tag, a.TagObject, dir, []string{"asset"}, "fixture", gate, func(id int64) { recordedID = id })
+			if drafts == 1 && recordedID != 7 || drafts == 0 && recordedID != 0 {
+				t.Fatal("original draft identity lost", drafts, recordedID)
+			}
 			if tc.want == "" {
 				if e != nil || !public || transitions != 1 || drafts != 1 || uploads != 1 {
 					t.Fatal(e, public, transitions, drafts, uploads)

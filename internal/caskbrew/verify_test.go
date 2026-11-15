@@ -202,3 +202,21 @@ func TestRealBrewControllerEvaluation(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// Only the pinned brew version and its exact absent-core-tap report are accepted.
+func TestPinnedBrewVersionOutput(t *testing.T) {
+	for _, tc := range []struct {
+		output string
+		valid  bool
+	}{
+		{"Homebrew 7.0.13\n", true},
+		{"Homebrew 7.0.13\nHomebrew/homebrew-core N/A\n", true},
+		{"Homebrew 7.0.14\nHomebrew/homebrew-core N/A\n", false},
+		{"Homebrew 7.0.13-dirty\n", false},
+		{"Homebrew 7.0.13\nunexpected\n", false},
+	} {
+		if got := pinnedBrewVersion([]byte(tc.output)); got != tc.valid {
+			t.Fatalf("output %q: got %v, want %v", tc.output, got, tc.valid)
+		}
+	}
+}
