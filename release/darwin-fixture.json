@@ -1,0 +1,13 @@
+{
+  "tag": "v0.1.1",
+  "commit": "3c3c3d1c8c6fd8386fa4a740dbdb6f99a92bb8d1",
+  "tag_object": "ccb3786d57d59cf1b7980808c80013b4c10fc7c5",
+  "assets": {
+    "a2a_0.1.1_darwin_arm64.tar.gz": "bdbe48f46824cfb1c37b9f475099527e1b51df0988447b135b363d716185bfe7",
+    "checksums.txt": "520fd141b3e56672680347aaefc10623c95ba73685e0d45c822f1a65ff92bd23",
+    "checksums.txt.pem": "4f629f14dc96163da74f0b5d708d38e944a264e8df199db3b81f01951c89407e",
+    "checksums.txt.sig": "c58db40dbaa413551a3ad9cc440f2ea1441396a160c13093803669e49347ef5e",
+    "evidence.tar.gz": "87e29053562a545a66db1eaf757835af5a6982feb37cd95fa36ff4cc1163fe5b",
+    "release-evidence.json": "ff2ffac7f6a50727ea584ce39c07fb87ef65e672f3edb706a77b7fc437fb8f0f"
+  }
+}

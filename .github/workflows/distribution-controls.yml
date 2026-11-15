@@ -241,6 +241,25 @@ jobs:
         with:
           go-version: '1.25.12'
           cache: false
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5
+        with:
+          cosign-release: 'v2.6.1'
+      - name: Immutable notarised bundle native input verification
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          python3 - <<'PYFIXTURE'
+          import hashlib,json,os,pathlib,urllib.request
+          pin=json.load(open('release/darwin-fixture.json'))
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'native-bundle';out.mkdir()
+          for name,digest in pin['assets'].items():
+              raw=urllib.request.urlopen('https://github.com/relux-works/a2a-swarm/releases/download/'+pin['tag']+'/'+name).read()
+              assert hashlib.sha256(raw).hexdigest()==digest, name+' immutable fixture digest'
+              (out/name).write_bytes(raw)
+          PYFIXTURE
+          A2A_NATIVE_PREPARED_FIXTURE="$RUNNER_TEMP/native-bundle" go test -p 1 -parallel 2 -v -count=1 -run '^TestPreparedDarwinBundleNative$' ./internal/darwinrelease
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           artifact-ids: ${{ needs.linux-production-packages.outputs.artifact-id }}

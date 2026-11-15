@@ -20,7 +20,7 @@ jobs:
         with:
           go-version: '1.25.12'
           cache: false
-      - run: go test -race -count=1 -timeout=3m ./internal/darwinrelease
+      - run: go test -p 1 -parallel 2 -race -count=1 -timeout=3m ./internal/darwinrelease
   release-native-controls:
     runs-on: macos-15
     timeout-minutes: 10
@@ -37,7 +37,7 @@ jobs:
           cache: false
       # Compile requirements and reject self-created ad-hoc fixtures only.
       # No real Developer ID/import/notary/user-Keychain operation.
-      - run: go test -race -count=1 -timeout=3m ./internal/darwinrelease
+      - run: go test -p 1 -parallel 2 -race -count=1 -timeout=3m ./internal/darwinrelease
   signing-keychain-control:
     runs-on: macos-15
     timeout-minutes: 15
@@ -59,7 +59,7 @@ jobs:
       # A throwaway self-signed identity only; no release secret is available here.
       - run: .scripts/signing-keychain-fixture.sh "$RUNNER_TEMP/signing-keychain-fixture"
         timeout-minutes: 3
-      - run: go test -count=1 -v -timeout=6m -run '^(TestSigningKeychainAccessControl|TestSigningControlErrorClass|TestSigningControlMatrixVerdict|TestSigningControlUnrunStep|TestSearchListRestoreContract|TestRunStdoutRefusesOverflow|TestSigningControlVerdictVocabulary|TestSigningKeychainOpenRefusesBadP12First|TestReleasePathSigning)$' ./internal/darwinrelease
+      - run: go test -p 1 -parallel 2 -count=1 -v -timeout=6m -run '^(TestSigningKeychainAccessControl|TestSigningControlErrorClass|TestSigningControlMatrixVerdict|TestSigningControlUnrunStep|TestSearchListRestoreContract|TestRunStdoutRefusesOverflow|TestSigningControlVerdictVocabulary|TestSigningKeychainOpenRefusesBadP12First|TestReleasePathSigning)$' ./internal/darwinrelease
         timeout-minutes: 7
         env:
           A2A_SIGNING_KEYCHAIN_CONTROL_DIR: ${{ runner.temp }}/signing-keychain-fixture

@@ -5,7 +5,7 @@ set -euo pipefail
 T="$RUNNER_TEMP/brew-controls"
 mkdir -p "$T/fixture"
 go test -p 1 -parallel 2 -c -o "$T/caskbrew.test" ./internal/caskbrew
-A2A_BREW_FIXTURE_DIR="$T/fixture" "$T/caskbrew.test" -test.run '^TestWriteBrewEvaluationFixture$' -test.v
+(cd internal/caskbrew && A2A_BREW_FIXTURE_DIR="$T/fixture" "$T/caskbrew.test" -test.run '^TestWriteBrewEvaluationFixture$' -test.v)
 export HOME="$T/home" HOMEBREW_CACHE="$T/cache" HOMEBREW_LOGS="$T/logs" HOMEBREW_TEMP="$T/tmp"
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1
 mkdir -p "$HOME" "$HOMEBREW_CACHE" "$HOMEBREW_LOGS" "$HOMEBREW_TEMP"
