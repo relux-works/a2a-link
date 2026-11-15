@@ -625,3 +625,47 @@ func TestReadReceiptCheckpointFollowsReceiveOrder(t *testing.T) {
 		t.Fatal("a receipt committed in another order than noted was not detected")
 	}
 }
+
+// Proves every judged receipt is fenced whatever the ledger's state: with an
+// unnoted (Broken) ledger file on disk, a batch holding a truncated entry is
+// still received with the fence; when that ledger file is later lost, the
+// missing-file rule does not take a fresh baseline, and a later full event
+// gets no target. This fails if fencing is skipped on the Broken branch.
+// Beside a healthy never-initialised mailbox, which keeps the baseline.
+func TestReadReceiptsBrokenLedgerStillFences(t *testing.T) {
+	p, mb, _ := receiptWorld(t, "$B", "$C")
+	if err := os.MkdirAll(filepath.Dir(p.ReadReceiptsFile("a")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ReadReceiptsFile("a"), []byte(`{"rooms":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadReadReceipts(p, "a")
+	if err != nil || !r.Broken {
+		t.Fatalf("unnoted ledger: %v %+v", err, r)
+	}
+	deliver(t, mb, r, []string{"$B"}) // truncated, received under a Broken ledger
+	if !mb.SeenByFence() {
+		t.Fatal("receipt under a Broken ledger carried no fence")
+	}
+	if err := os.Remove(p.ReadReceiptsFile("a")); err != nil { // the ledger is lost
+		t.Fatal(err)
+	}
+	mb, err = OpenMailbox(p, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lost, err := LoadReadReceipts(p, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, mb, lost, []string{"$C"}, "$C")
+	if got := lost.Target(mb, "!r"); got != "" || !lost.Broken {
+		t.Fatalf("lost Broken ledger became a baseline: target %q broken %v", got, lost.Broken)
+	}
+	_, mb2, r2 := receiptWorld(t, "$x")
+	deliver(t, mb2, r2, []string{"$x"}, "$x")
+	if got := r2.Target(mb2, "!r"); got != "$x" || r2.Broken {
+		t.Fatalf("never-initialised control: %q %v", got, r2.Broken)
+	}
+}

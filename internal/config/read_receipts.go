@@ -269,6 +269,12 @@ func (r *ReadReceipts) room(id string) *ReadReceiptRoom {
 // entries must be in the order the caller passes their ids to mb.Receive: the
 // expected newest receipt (Last) is derived from it.
 func (r *ReadReceipts) NoteReceived(mb *Mailbox, entries []MailEntry, done func(MailEntry) bool) {
+	// Every judged receipt carries the fence, whatever state this ledger is
+	// in (unnoted, broken, healthy): a ledger lost later must never let the
+	// missing-file rule take these entries as a fresh baseline.
+	if len(entries) > 0 {
+		mb.FenceNextReceipt()
+	}
 	if !r.verify(mb) {
 		return
 	}
@@ -284,8 +290,6 @@ func (r *ReadReceipts) NoteReceived(mb *Mailbox, entries []MailEntry, done func(
 		ids = append(ids, e.ID)
 	}
 	r.Before, r.Last, r.Noted = before, last, true
-	// The fence goes into the same append as this batch's receipt.
-	mb.FenceNextReceipt()
 	for _, e := range mb.InOrder(ids) {
 		if e.Kind != MailEvent && e.Kind != MailGap {
 			continue

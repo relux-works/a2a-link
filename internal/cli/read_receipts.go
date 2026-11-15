@@ -53,11 +53,12 @@ func (s *session) noteDelivered(mb *config.Mailbox, entries []config.MailEntry, 
 	if len(entries) == 0 {
 		return
 	}
+	// Armed before any ledger check: an unreadable, unnoted or broken ledger
+	// still fences this receipt, so a later ledger never treats these entries
+	// as baseline.
+	mb.FenceNextReceipt()
 	r, err := config.LoadReadReceipts(s.paths, s.name)
 	if err != nil {
-		// No mark can be kept, but this receipt still carries the fence, so a
-		// later ledger never treats these entries as baseline.
-		mb.FenceNextReceipt()
 		return
 	}
 	r.NoteReceived(mb, entries, func(e config.MailEntry) bool { return done[e.ID] })

@@ -489,3 +489,58 @@ func TestSeenByAckArgumentOrderKeepsLedgerSound(t *testing.T) {
 	e.as("alice", "inbox").ok(t)
 	e.wantReceipts(a, b, c, d)
 }
+
+// Proves multi-id acks keep the ledger sound and the ack count unchanged:
+// timeline order "ack B C", a repeated id "ack D D" (counted per argument, as
+// before), and a list naming an already received id "ack A E" ("1 not
+// pending"); after full reads of each acked entry, receipts advance to it.
+// Beside the reverse order case in TestSeenByAckArgumentOrderKeepsLedgerSound.
+func TestSeenByAckForms(t *testing.T) {
+	e, room := seenWorld(t)
+	a := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "A"))
+	b := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "B"))
+	c := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "C"))
+	d := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "D"))
+	ev := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "E"))
+	e.as("alice", "inbox", "--limit", "1").ok(t)
+	e.wantReceipts(a)
+	sound := func(step string) {
+		t.Helper()
+		if r, err := config.LoadReadReceipts(e.paths(), "alice"); err != nil || r.Broken {
+			t.Fatalf("%s broke the ledger: %v %+v", step, err, r)
+		}
+	}
+	tuitestkit.ContainsStr(t, e.as("alice", "ack", b, c).ok(t).stdout, "acked 2 events")
+	sound("ack B C")
+	tuitestkit.ContainsStr(t, e.as("alice", "ack", d, d).ok(t).stdout, "acked 2 events")
+	sound("ack D D")
+	tuitestkit.ContainsStr(t, e.as("alice", "ack", a, ev).ok(t).stdout, "acked 1 events (1 not pending)")
+	sound("ack A E")
+	for _, id := range []string{b, c, d, ev} {
+		e.as("alice", "read", "proj", "--event", id).ok(t)
+	}
+	e.wantReceipts(a, b, c, d, ev)
+}
+
+// Proves the unnoted-ledger rule end to end (it fails if LoadReadReceipts
+// exempted an existing unnoted file): with an earlier revision's empty ledger
+// on disk, a fully delivered entry is NOT receipted; with no ledger file at
+// all (a never-initialised mailbox), the same delivery is.
+func TestSeenByUnnotedLedgerFileSendsNothing(t *testing.T) {
+	for _, legacy := range []bool{true, false} {
+		e, room := seenWorld(t)
+		if legacy {
+			path := e.paths().ReadReceiptsFile("alice")
+			if err := os.WriteFile(path, []byte(`{"rooms":{}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		id := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", "full"))
+		e.as("alice", "inbox").ok(t)
+		if legacy {
+			e.wantReceipts()
+		} else {
+			e.wantReceipts(id)
+		}
+	}
+}

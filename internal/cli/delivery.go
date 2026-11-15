@@ -882,10 +882,24 @@ func cmdAck(ctx context.Context, a *App, args []string) error {
 		for _, e := range live {
 			ordered = append(ordered, e.ID)
 		}
+		// The count keeps its meaning: every argument naming a pending entry
+		// (a repeated id counts each time, as before).
+		pending := map[string]bool{}
+		for _, id := range ordered {
+			pending[id] = true
+		}
+		named := 0
+		for _, id := range ids {
+			if pending[id] {
+				named++
+			}
+		}
 		s.noteDelivered(mb, live, nil)
-		var err error
-		n, err = mb.Receive(ordered)
-		return nil, err
+		if _, err := mb.Receive(ordered); err != nil {
+			return nil, err
+		}
+		n = named
+		return nil, nil
 	}); err != nil {
 		return err
 	}
