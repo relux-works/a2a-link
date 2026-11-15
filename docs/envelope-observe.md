@@ -112,7 +112,7 @@ pass. No key is trusted because it appears inside an envelope.
 
 Strict verification occurs **at read time**. Historical envelopes may report
 `invalid: expired`, and stale host facts may report e.g. `time_unavailable` or
-`revocation_stale`. M0 does not invent signing-time trust or downgrade failures
+`key_binding_unavailable`. M0 does not invent signing-time trust or downgrade failures
 to crypto-only success. It supports the inherited own-snapshot freshness path;
 registry-currency receipts and owner-act authority are later integration work.
 
