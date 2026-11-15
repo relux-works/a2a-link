@@ -12,6 +12,19 @@ type workerPaths struct {
 	model, tokens, data, output string
 }
 
+// WithWorkerModel validates the installed pinned model through a held
+// directory descriptor and runs inference while that directory remains the
+// process cwd. It is for the standalone native worker; shared callers must not
+// change their working directory.
+func WithWorkerModel(dir, out string, infer func(model, tokens, data, output string) int) int {
+	if infer == nil {
+		return 1
+	}
+	return withWorkerModel(dir, out, manifestSHA256, func(paths workerPaths) int {
+		return infer(paths.model, paths.tokens, paths.data, paths.output)
+	})
+}
+
 // voiceOpenModel permits deterministic directory-replacement tests in a child.
 var voiceOpenModel = os.Open
 
