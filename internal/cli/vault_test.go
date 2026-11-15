@@ -254,6 +254,8 @@ func TestVaultV1SelectionRefusals(t *testing.T) {
 	}{
 		{"valid synthetic control", syn, nil, nil, "vault", ""},
 		{"null selection", "null", nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
+		{"invalid JSON selection escape", strings.Replace(vaultSelectionJSON, "fixture-alpha", `fixture-\uZZZZ`, 1), nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
+		{"incomplete JSON selection", strings.TrimSuffix(vaultSelectionJSON, "}"), nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
 		{"missing vault_selection", "", nil, nil, "vault", "NOT_SUBMITTED E_BACKEND_CONFIG"},
 		{"unknown selection field", strings.Replace(vaultSelectionJSON, `"session_mode"`, `"trust":true,"session_mode"`, 1), nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},
 		{"wrong-type mode", strings.Replace(vaultSelectionJSON, `"registered"`, `true`, 1), nil, nil, "vault", "NOT_SUBMITTED E_FORMAT"},

@@ -127,6 +127,9 @@ func (a *App) namedMetadata(p config.Paths, name string) (config.Credentials, er
 	}
 	creds, e := config.LoadCredentialMetadata(p, name, a.human)
 	if e != nil {
+		if vault && errors.Is(e, config.ErrCredentialJSON) {
+			return config.Credentials{}, vaultRefusal(vaultEFormat)
+		}
 		return creds, vaultMetadataError(e)
 	}
 	if creds.VaultSelection.Present() {

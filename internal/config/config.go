@@ -293,6 +293,17 @@ func readCredentials(path string) (Credentials, error) {
 	return c, nil
 }
 
+// ErrCredentialJSON identifies decoding failure after the existing guarded
+// read, without exposing parser input. Legacy diagnostic text is preserved.
+var ErrCredentialJSON = errors.New("invalid credential JSON")
+
+type credentialJSONError struct{ path string }
+
+func (e *credentialJSONError) Error() string {
+	return fmt.Sprintf("%s is not valid credential JSON", e.path)
+}
+func (e *credentialJSONError) Unwrap() error { return ErrCredentialJSON }
+
 func readCredentialMetadata(path string) (Credentials, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -301,7 +312,7 @@ func readCredentialMetadata(path string) (Credentials, error) {
 	var c Credentials
 	if err := json.Unmarshal(data, &c); err != nil {
 		// Never include the file content: it holds secrets.
-		return Credentials{}, fmt.Errorf("%s is not valid credential JSON", path)
+		return Credentials{}, &credentialJSONError{path: path}
 	}
 	if c.UserID == "" {
 		return Credentials{}, fmt.Errorf("%s is missing user_id", path)

@@ -2,6 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -167,6 +170,16 @@ func TestVaultBackendValidation(t *testing.T) {
 // parsing, including escaped names, duplicates and case shadows. Unknown
 // unrelated legacy fields retain their old lenient behavior.
 func TestVaultSelectionPresence(t *testing.T) {
+	// A guarded decoder can expose a fixed class without changing legacy text
+	// or returning the raw parser input; CLI vault paths map only this cause.
+	path := filepath.Join(t.TempDir(), "invalid.json")
+	if err := os.WriteFile(path, []byte(`{"user_id":`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCredentialMetadata(path); !errors.Is(err, ErrCredentialJSON) || err.Error() != path+" is not valid credential JSON" {
+		t.Fatal("credential JSON cause/text boundary changed")
+	}
+
 	for _, key := range []string{`"vault_selection"`, `"vault_\u0073election"`, `"Vault_Selection"`} {
 		for _, value := range []string{`null`, `"vault"`, `{}`, `{"identity":null,"session_mode":"direct"}`} {
 			raw := []byte(`{"user_id":"@fixture:example.invalid","device_id":"d","homeserver":"https://example.invalid",` + key + `:` + value + `}`)
