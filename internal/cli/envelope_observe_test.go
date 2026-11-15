@@ -143,7 +143,7 @@ func TestEnvelopeObserveConsumers(t *testing.T) {
 }
 
 // Proves invalid signed text remains pending after wait and the hook doorbell,
-// then is delivered and receipted by inbox. Verification adds no HTTP requests.
+// then is delivered and receipted by inbox.
 func TestInvalidEnvelopeStillDelivered(t *testing.T) {
 	e, room, content := observeWorld(t)
 	content["body"] = "tampered"

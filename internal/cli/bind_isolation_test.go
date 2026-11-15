@@ -217,6 +217,7 @@ test "$(find "$config/go/telemetry" -mindepth 1 ! -path "$config/go/telemetry/mo
 	cmd := exec.CommandContext(ctx, self, "-test.run=^TestBindFixtureIsolation$", "-test.v")
 	cmd.Env = append(os.Environ(), "GOTELEMETRY=on", "HOME="+filepath.Join(root, "home"),
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"), "TMPDIR="+filepath.Join(root, "tmp"),
+		"GOTMPDIR="+filepath.Join(root, "tmp"), // Go 1.26 testing.TempDir follows GOTMPDIR.
 		"PATH="+filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"BIND_ISOLATION_REAL_GO="+realGo, "BIND_ISOLATION_GO_LOG="+filepath.Join(root, "go-calls"),
 		"BIND_ISOLATION_CONFIG_LOG="+filepath.Join(root, "configs"))
