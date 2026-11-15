@@ -34,6 +34,9 @@ func main() {
 	must(func() error { _, err := io.Copy(io.Discard, os.Stdin); return err }())
 	exe, err := os.Executable()
 	must(err)
+	// The model argument is <config>/voice/models/<model-hash>; the fixture's
+	// marker and rename barrier live beside the CLI config, not inside the model.
+	base := filepath.Dir(filepath.Dir(filepath.Dir(args[0])))
 	// Reading both siblings witnesses the private payload actually used at exec.
 	libraries := []string{}
 	for _, name := range []string{"libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"} {
@@ -41,7 +44,7 @@ func main() {
 		must(err)
 		libraries = append(libraries, string(b))
 	}
-	marker, err := os.OpenFile(filepath.Join(args[0], "execution-marker"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	marker, err := os.OpenFile(filepath.Join(base, "execution-marker"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	must(err)
 	must(json.NewEncoder(marker).Encode(struct {
 		Executable  string
@@ -52,11 +55,11 @@ func main() {
 	must(marker.Close())
 	// A source change after the first invocation must be rechecked for the notice.
 	var change struct{ From, To string }
-	b, err := os.ReadFile(filepath.Join(args[0], "after-first.json"))
+	b, err := os.ReadFile(filepath.Join(base, "after-first.json"))
 	if err == nil {
 		must(json.Unmarshal(b, &change))
 		must(os.Rename(change.From, change.To))
-		must(os.Remove(filepath.Join(args[0], "after-first.json")))
+		must(os.Remove(filepath.Join(base, "after-first.json")))
 	}
 	must(os.WriteFile(args[1], []byte("fixture source audio"), 0600))
 }
