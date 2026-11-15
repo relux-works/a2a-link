@@ -68,7 +68,7 @@ func assertNativeWorkerSuccess(t *testing.T, ctx context.Context, worker, modelD
 	if err != nil || deadlineErr != nil {
 		t.Fatalf("intact native worker failed: err=%v deadline=%v", err, deadlineErr)
 	}
-	st, err := os.Stat(out)
+	st, err := os.Stat(output)
 	if err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
 		t.Fatalf("intact native worker produced no audio: stat=%v err=%v", st, err)
 	}
