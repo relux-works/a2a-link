@@ -184,6 +184,9 @@ type Credentials struct {
 	DeviceID          string             `json:"device_id"`
 	Password          string             `json:"password,omitempty"`
 	Homeserver        string             `json:"homeserver"`
+	// VaultSelection is named-only vault-v1 metadata. Absent (nil) for every
+	// legacy backend, so legacy serialized metadata keeps its exact bytes.
+	VaultSelection *VaultSelection `json:"vault_selection,omitempty"`
 }
 
 // ServerName returns the server part of the user id.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
+	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 )
 
 // Private in-process seam: no environment/flag can select a fake secret store.
@@ -194,6 +195,10 @@ func (a *App) registerNamedAgentDestination(ctx context.Context, name string, ad
 			return empty, "", adminRegistrationError("destination", nil)
 		}
 		c, p, b, store = &destination.Connection, destination.Paths, destination.Binding, "file"
+	}
+	if store == config.BackendVaultV1 {
+		// The release-only vault role cannot create or enroll credentials.
+		return empty, "", vaultRefusal(vaultv1.EOperationDenied)
 	}
 	if admin == nil && store == "file" {
 		return empty, "", errors.New("file connections require connection register --via-admin-room; registration_token_ref is Keychain-only")

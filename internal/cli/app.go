@@ -17,6 +17,7 @@ import (
 	"github.com/relux-works/a2a-swarm/internal/daemon"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 	"github.com/relux-works/a2a-swarm/internal/redact"
+	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 	"github.com/relux-works/a2a-swarm/internal/voice"
 	"github.com/relux-works/a2a-swarm/internal/wakemute"
 )
@@ -127,6 +128,11 @@ type App struct {
 	postOperationLateReserve          bool
 	nativeDial                        func(context.Context, string) (nativeRuntime, error)
 	afterWakeReserve, afterWakeSubmit func() error
+
+	// vaultDependency is a private in-process seam for vault-v1. Production
+	// leaves it nil (no qualified native driver), so vault-v1 refuses
+	// E_UNAVAILABLE before submission. No environment, flag or file sets it.
+	vaultDependency func() *vaultv1.Dependency
 }
 
 // NewApp returns an App bound to the real process environment.
@@ -688,6 +694,7 @@ func (a *App) sessionAsMode(name string, metadataOnly bool) (*session, error) {
 		}
 		label := a.profile
 		root := config.Paths{Base: p.ConfigRoot()}
+		latchedVault := creds.VaultSelection
 		s.checkBinding = func() error {
 			r, e := config.LoadConnections(root)
 			if e != nil {
@@ -707,8 +714,16 @@ func (a *App) sessionAsMode(name string, metadataOnly bool) (*session, error) {
 			if fresh.Fingerprint() != binding.Fingerprint() || !sameAdminPolicy(selected.AdminRegistration, binding.Connection.AdminRegistration) || selected.CardRoom != binding.Connection.CardRoom {
 				return errors.New("selected connection changed; explicit migration required")
 			}
-			_, e = a.namedMetadata(p, name)
-			return e
+			current, e := a.namedMetadata(p, name)
+			if e != nil {
+				return e
+			}
+			// A changed vault selection needs a fresh qualified selection and
+			// registration; it never retargets a live session.
+			if !sameVaultSelection(current.VaultSelection, latchedVault) {
+				return vaultRefusal(vaultv1.EIdentityConflict)
+			}
+			return nil
 		}
 	}
 	if selected, _ := a.selectedConnection(); selected != nil && selected.AdminRegistration != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/relux-works/a2a-swarm/internal/config"
+	"github.com/relux-works/a2a-swarm/internal/vaultv1"
 )
 
 const envSecretStore = "A2A_SECRET_STORE"
@@ -77,6 +78,10 @@ func (a *App) selectedStore() (string, error) {
 			return "", fmt.Errorf("keychain secret store requires macOS")
 		}
 		return "keychain", nil
+	case config.BackendVaultV1:
+		// The legacy ambient selector lacks identity/domain/account/session
+		// binding; vault-v1 exists only as an explicit named backend.
+		return "", vaultRefusal(vaultv1.EBackendConfig)
 	default:
 		return "", fmt.Errorf("unknown A2A_SECRET_STORE; use file or keychain")
 	}
@@ -90,6 +95,10 @@ func (a *App) keychainStore(p config.Paths) *keychainStore {
 }
 
 func validateCredentialIdentity(c config.Credentials, name string) error {
+	if c.VaultSelection != nil {
+		// Legacy (unnamed) metadata never carries a vault selection.
+		return vaultRefusal(vaultv1.EBackendConfig)
+	}
 	prefix := "@" + name + ":"
 	if !strings.HasPrefix(c.UserID, prefix) || len(c.UserID) == len(prefix) || strings.ContainsAny(c.UserID, "\x00\r\n\t \"\\") {
 		return fmt.Errorf("credential user_id does not match selected identity %s", name)
@@ -111,6 +120,17 @@ func (a *App) loadCredentials(ctx context.Context, p config.Paths, name string) 
 		creds, e := a.namedMetadata(p, name)
 		if e != nil {
 			return config.Credentials{}, e
+		}
+		if store == config.BackendVaultV1 {
+			// Latch local identity/backend/connection/B1 before any native
+			// submission; the Matrix BeforeRequest guard runs only later.
+			sel, e := a.latchVaultSelection(c, name, creds)
+			if e != nil {
+				return config.Credentials{}, e
+			}
+			if creds.AccessToken, e = a.releaseVaultToken(ctx, sel); e != nil {
+				return config.Credentials{}, e
+			}
 		}
 		if store == "keychain" {
 			creds.AccessToken, e = a.readConnectionSecret(ctx, p, config.SecretReference{Service: c.Store.AccessTokenService, Account: creds.UserID})

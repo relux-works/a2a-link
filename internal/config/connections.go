@@ -129,6 +129,10 @@ func DecodeConnectionJSON(data []byte, dst any) error {
 					if _, credentials := dst.(*Credentials); credentials && depth == 0 && strings.EqualFold(s, "wait_keywords") {
 						s = "wait_keywords"
 					}
+					// The same case-fold shadowing applies to vault_selection.
+					if _, credentials := dst.(*Credentials); credentials && depth == 0 && strings.EqualFold(s, "vault_selection") {
+						s = "vault_selection"
+					}
 					if !ok || keys[s] {
 						return errors.New("duplicate or invalid JSON key")
 					}
@@ -193,6 +197,12 @@ func (c Connection) Validate() error {
 		}
 		if c.RegistrationTokenRef != nil {
 			return errors.New("file credential_store cannot use keychain registration_token_ref")
+		}
+	case BackendVaultV1:
+		// Release-only: no Keychain service fallback, registration secret or
+		// admin registration policy. Identity is per-agent metadata, never here.
+		if c.Store.AccessTokenService != "" || c.Store.PasswordService != "" || c.RegistrationTokenRef != nil || c.AdminRegistration != nil {
+			return errors.New("vault-v1 credential_store is release-only: no keychain services, registration_token_ref or admin_registration")
 		}
 	default:
 		return errors.New("invalid or unsupported credential_store")
@@ -443,6 +453,9 @@ func ValidateBoundCredentials(c Credentials, want ConnectionBinding) error {
 	}
 	if c.ConnectionBinding == nil || c.ConnectionBinding.Fingerprint() != want.Fingerprint() || c.UserID != want.UserID || c.Homeserver != want.Connection.URL {
 		return errors.New("named credential binding mismatch; explicit migration required")
+	}
+	if (c.VaultSelection != nil) != (want.Connection.Store.Backend == BackendVaultV1) {
+		return errors.New("vault_selection is required for vault-v1 and forbidden for other backends")
 	}
 	return nil
 }

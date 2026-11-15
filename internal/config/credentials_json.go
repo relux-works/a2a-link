@@ -32,6 +32,7 @@ func (c *Credentials) decodeJSON(data []byte, strict bool) error {
 	wire := struct {
 		*credentialsJSON
 		Keywords waitKeywordValues `json:"wait_keywords"`
+		Vault    json.RawMessage   `json:"vault_selection"`
 	}{credentialsJSON: &next}
 	d := json.NewDecoder(bytes.NewReader(data))
 	if strict {
@@ -39,6 +40,20 @@ func (c *Credentials) decodeJSON(data []byte, strict bool) error {
 	}
 	if err := d.Decode(&wire); err != nil {
 		return err
+	}
+	next.VaultSelection = nil
+	if raw := bytes.TrimSpace(wire.Vault); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		var sel VaultSelection
+		if err := sel.UnmarshalJSON(raw); err != nil {
+			if strict {
+				return err
+			}
+			// Lenient legacy decoding keeps only PRESENCE of a malformed value:
+			// the zero selection never validates, and every legacy path refuses
+			// any present vault_selection before a secret-store access.
+			sel = VaultSelection{}
+		}
+		next.VaultSelection = &sel
 	}
 	next.waitKeywordsRaw = wire.Keywords
 	for _, raw := range wire.Keywords {
