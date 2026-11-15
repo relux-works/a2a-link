@@ -316,6 +316,10 @@ func (c *Client) Register(ctx context.Context, username, password, regToken, dev
 		if err == nil {
 			return out, nil
 		}
+		// Retaining typed evidence must not turn a token refusal into UIA progress.
+		if errors.Is(err, ErrAuth) {
+			return out, err
+		}
 		var me *Error
 		if !errors.As(err, &me) || me.Status != http.StatusUnauthorized {
 			return out, err
@@ -360,6 +364,8 @@ func (c *Client) UserExists(ctx context.Context, username string) (bool, error) 
 	switch {
 	case err == nil:
 		return false, fmt.Errorf("register probe: the homeserver registered %s without authentication", username)
+	case errors.Is(err, ErrAuth):
+		return false, fmt.Errorf("register probe: %w", err)
 	case IsCode(err, "M_USER_IN_USE"):
 		return true, nil
 	}
@@ -438,6 +444,9 @@ func (c *Client) Deactivate(ctx context.Context, userID, password string) error 
 	}
 	if err == nil {
 		return nil // the server asked for no authentication
+	}
+	if errors.Is(err, ErrAuth) {
+		return fmt.Errorf("deactivate: %w", err)
 	}
 	var me *Error
 	if !errors.As(err, &me) || me.Status != http.StatusUnauthorized {

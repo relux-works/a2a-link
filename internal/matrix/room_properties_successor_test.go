@@ -222,3 +222,35 @@ func TestRoomPropertiesReadbackTokenRefusal(t *testing.T) {
 		}
 	}
 }
+
+// Proves ordinary token refusals cannot become UIA progress even when the same response carries otherwise valid flows.
+func TestRoomPropertiesTokenUIACompatibility(t *testing.T) {
+	for _, method := range []string{"register", "probe", "deactivate"} {
+		for _, code := range []string{"M_UNKNOWN_TOKEN", "M_MISSING_TOKEN"} {
+			t.Run(method+"/"+code, func(t *testing.T) {
+				c := New("https://fixture.invalid", "fixture-token")
+				calls := 0
+				stage := "m.login.dummy"
+				if method == "deactivate" {
+					stage = "m.login.password"
+				}
+				c.HTTP.Transport = propertyTransport(func(r *http.Request) (*http.Response, error) {
+					calls++
+					return propertyReply(r, 401, fmt.Sprintf(`{"errcode":%q,"error":"private","session":"fixture-session","flows":[{"stages":[%q]}]}`, code, stage)), nil
+				})
+				var err error
+				switch method {
+				case "register":
+					_, err = c.Register(t.Context(), "test", "fixture-password", "fixture-bootstrap", "test")
+				case "probe":
+					_, err = c.UserExists(t.Context(), "test")
+				case "deactivate":
+					err = c.Deactivate(t.Context(), "@test:fixture.invalid", "fixture-password")
+				}
+				if calls != 1 || !errors.Is(err, ErrAuth) || strings.Contains(err.Error(), "private") {
+					t.Fatalf("token refusal entered UIA: calls=%d err=%v", calls, err)
+				}
+			})
+		}
+	}
+}
