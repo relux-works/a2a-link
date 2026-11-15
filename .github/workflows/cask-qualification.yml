@@ -53,7 +53,7 @@ jobs:
           Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
           T="$RUNNER_TEMP"
           # The fixture source is the immutable v0.1.1 tag; the qualification config stays outside it.
-          git fetch --no-tags https://github.com/relux-works/a2a-swarm.git "refs/tags/$FIXTURE_TAG"
+          git fetch --no-tags https://github.com/relux-works/a2a-swarm.git "refs/tags/$FIXTURE_TAG:refs/tags/$FIXTURE_TAG"
           "$Q" gate fixture-tag-is-pinned-commit -- test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$FIXTURE_COMMIT"
           git worktree add --detach "$T/src" 'FETCH_HEAD^{commit}'
           "$Q" gate fixture-source-is-v0.1.1 -- test "$(git -C "$T/src" rev-parse HEAD)" = "$FIXTURE_COMMIT"
@@ -285,7 +285,7 @@ jobs:
           export Q0_RESULTS="$T/q0-results"
           Q="$GITHUB_WORKSPACE/.github/cask-qualification/q0.sh"
           # Independent cross-build of the Linux binaries on macOS, same source and flags.
-          git fetch --no-tags https://github.com/relux-works/a2a-swarm.git "refs/tags/$FIXTURE_TAG"
+          git fetch --no-tags https://github.com/relux-works/a2a-swarm.git "refs/tags/$FIXTURE_TAG:refs/tags/$FIXTURE_TAG"
           "$Q" gate fixture-tag-is-pinned-commit -- test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$FIXTURE_COMMIT"
           git worktree add --detach "$T/src" 'FETCH_HEAD^{commit}'
           for a in amd64 arm64; do
