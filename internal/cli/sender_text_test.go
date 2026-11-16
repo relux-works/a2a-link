@@ -118,9 +118,12 @@ func TestSenderReadConsumers(t *testing.T) {
 				}
 				text := e.as("alice", "read", room, "--event", id).ok(t).stdout
 				line := strings.SplitN(text, "\n", 2)[0]
+				// The observed label is the first token after the timestamp; the
+				// sender field follows it.
 				_, rest, ok := strings.Cut(line, "] ")
+				rest, labelled := strings.CutPrefix(rest, `verification="unsigned (no envelope)" `)
 				field, _, found := strings.Cut(rest, " "+id)
-				if !ok || !found || field != tc.text || decodedSender(t, field) != tc.raw {
+				if !ok || !labelled || !found || field != tc.text || decodedSender(t, field) != tc.raw {
 					t.Fatalf("read sender changed: %q", line)
 				}
 			}
