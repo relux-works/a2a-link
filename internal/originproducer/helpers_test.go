@@ -138,7 +138,20 @@ func newFixture(t *testing.T) *fixture {
 	privateDir(t, root)
 	f := &fixture{t: t, root: root}
 	f.mappingPath = filepath.Join(privateDir(t, filepath.Join(root, "protected")), "origin-mapping.json")
-	f.store = privateDir(t, filepath.Join(root, "store"))
+	connection := config.Connection{ID: "fixture", URL: "http://127.0.0.1", ServerName: strings.SplitN(fixtureUser, ":", 2)[1], Store: config.CredentialStore{Backend: "file"}}
+	registry := config.ConnectionRegistry{SchemaVersion: 1, Current: "fixture", Profiles: map[string]config.Connection{"fixture": connection}}
+	raw, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "connections.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := connection.Paths(config.Paths{Base: root}, fixtureIdentity, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.store = privateDir(t, paths.Base)
 	f.policy = privateDir(t, filepath.Join(root, "policy"))
 	f.scopes = privateDir(t, filepath.Join(root, "scopes"))
 	f.mapping = mappingFile{Version: 1, Launcher: fixtureLauncher, Agents: []agentEntry{{Input: fixtureInput, Identity: fixtureIdentity, Connection: "fixture", MatrixUserID: fixtureUser, Policy: cg1.MatrixPolicy, TermsProfile: "pay", Registration: fixtureRegistration, StoreBase: f.store, PolicyDir: f.policy, ScopeRoot: f.scopes}}}
@@ -210,6 +223,25 @@ func (f *fixture) retain(id, room, kind string) {
 		f.t.Fatal("fixture event was not retained", err)
 	}
 }
+
+// replaceContent rewrites the retained entry without changing its reference,
+// sender, entry kind or message type, isolating the content-digest gate.
+func (f *fixture) replaceContent(content map[string]any) {
+	f.t.Helper()
+	event, err := json.Marshal(map[string]any{"type": "m.room.message", "sender": fixtureSender, "content": content})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	entry := config.MailEntry{ID: fixtureEvent, Kind: config.MailEvent, Room: fixtureRoom, Sender: fixtureSender, TS: 1, Event: event}
+	raw, err := json.Marshal(map[string]any{"op": "add", "entry": entry})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err = os.WriteFile((config.Paths{Base: f.store}).MailboxFile(fixtureIdentity), append(raw, '\n'), 0600); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f *fixture) receive(id string) {
 	f.t.Helper()
 	n, err := f.mailbox().Receive([]string{id})

@@ -93,11 +93,11 @@ func (f *originFixture) control(t *testing.T) OriginFacts {
 }
 func refusedOrigin(t *testing.T, facts OriginFacts, code, want OriginCode) {
 	t.Helper()
-	if code != want {
-		t.Fatalf("origin code=%s want=%s", code, want)
-	}
 	if facts != (OriginFacts{}) {
 		t.Fatal("refusal carried origin facts")
+	}
+	if code != want {
+		t.Fatalf("origin code=%s want=%s", code, want)
 	}
 }
 
@@ -259,6 +259,8 @@ func TestOriginCheckGrantRefusals(t *testing.T) {
 		{"stale-tip-verdict", grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeTipStale, Retryable: true}, OriginTipStale},
 		{"verifier-unavailable", grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeVerifierUnavailable, Retryable: true}, OriginUnavailable},
 		{"inconsistent-live", grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeLive}, OriginGrantRefused},
+		{"closed-live", grantcheck.Verdict{Decision: grantcheck.Live, Code: grantcheck.CodeLive, Closed: true}, OriginGrantRefused},
+		{"retryable-live", grantcheck.Verdict{Decision: grantcheck.Live, Code: grantcheck.CodeLive, Retryable: true}, OriginGrantRefused},
 		{"unknown-code", grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.Code("future")}, OriginGrantRefused},
 	}
 	for _, tc := range cases {

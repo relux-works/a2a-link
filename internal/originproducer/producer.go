@@ -110,6 +110,9 @@ func (p *Producer) Open(ctx context.Context, sel runorigin.Selection) (runorigin
 	if !ok {
 		return nil, refuse(ReasonProfile)
 	}
+	if !entry.connectionBound(p.owner) {
+		return nil, refuse(ReasonMappingInvalid)
+	}
 	event, err := p.store.retained(ctx, entry.StoreBase, entry.Identity, sel.Event)
 	if err != nil {
 		return nil, err
@@ -123,6 +126,13 @@ func (p *Producer) Open(ctx context.Context, sel runorigin.Selection) (runorigin
 	}
 	owned := cg1.OriginScope{Identity: entry.Identity, UserID: entry.MatrixUserID, PolicyDir: entry.PolicyDir, ScopeDir: scope}
 	checker, err := p.open(owned) // owned checker gate
+	if ctx.Err() != nil {
+		if checker != nil {
+			_ = checker.Close()
+		}
+		_ = os.RemoveAll(scope)
+		return nil, unavailable(ReasonCancelled)
+	}
 	if err != nil || checker == nil {
 		if checker != nil {
 			_ = checker.Close()
@@ -152,6 +162,7 @@ type session struct {
 	cancel    context.CancelFunc
 	closed    atomic.Bool
 	closeOnce sync.Once
+	closeErr  error
 }
 
 func (s *session) callContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -170,9 +181,8 @@ func (s *session) interrupted(ctx context.Context) error {
 	return nil
 }
 
-// evaluate performs the complete admission from current facts: the protected
-// mapping, the retained event, the contract profile, the signed inner request,
-// the grant and the tip. It reads nothing from an earlier evaluation.
+// evaluate rechecks the mapping, retained event, contract profile, signed inner
+// request, grant and tip. It does not read the ingest journal or its watermark.
 func (s *session) evaluate(parent context.Context) (runorigin.Result, error) {
 	var zero runorigin.Result
 	if parent == nil {
@@ -189,6 +199,9 @@ func (s *session) evaluate(parent context.Context) (runorigin.Result, error) {
 	}
 	if entry != s.entry {
 		return zero, refuse(ReasonChanged)
+	}
+	if !entry.connectionBound(s.producer.owner) {
+		return zero, refuse(ReasonMappingInvalid)
 	}
 	event, err := s.producer.store.retained(ctx, entry.StoreBase, entry.Identity, s.selection.Event)
 	if err != nil {
@@ -251,6 +264,11 @@ func (s *session) Validate(ctx context.Context) (runorigin.Result, error) {
 		return runorigin.Result{}, err
 	}
 	if fresh != want {
+		withoutTip := fresh
+		withoutTip.Origin.TipHash = want.Origin.TipHash
+		if withoutTip == want {
+			return runorigin.Result{}, unavailable(ReasonTipMoved)
+		}
 		return runorigin.Result{}, refuse(ReasonChanged)
 	}
 	return want, nil
@@ -262,8 +280,11 @@ func (s *session) Close() error {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
 		s.cancel()
-		_ = s.checker.Close()
-		_ = os.RemoveAll(s.scope)
+		checkerErr := s.checker.Close()
+		removeErr := os.RemoveAll(s.scope)
+		if checkerErr != nil || removeErr != nil {
+			s.closeErr = refuse(ReasonClosed)
+		}
 	})
-	return nil
+	return s.closeErr
 }

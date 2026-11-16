@@ -314,7 +314,7 @@ func TestValidateRefusesChangedGrantState(t *testing.T) {
 }
 
 // Claim: Validate returns only a Result exactly equal to the prepared one. A
-// fresh Live outcome with any different origin member, a changed registration,
+// fresh Live outcome with a different non-tip member, a changed registration,
 // a rotated launcher pin, a vanished retained event or terms that stopped
 // being valid refuses; nothing is silently replaced.
 func TestValidateRefusesDifferentOrigin(t *testing.T) {
@@ -323,8 +323,11 @@ func TestValidateRefusesDifferentOrigin(t *testing.T) {
 		change func(f *fixture, c *fakeChecker)
 		want   Reason
 	}{
-		{"different-tip", func(_ *fixture, c *fakeChecker) {
-			c.set(func(c *fakeChecker) { c.facts.TipHash = strings.Repeat("d", 64) })
+		{"different-tip-and-grant", func(_ *fixture, c *fakeChecker) {
+			c.set(func(c *fakeChecker) {
+				c.facts.TipHash = strings.Repeat("d", 64)
+				c.facts.GrantID = strings.Repeat("e", 64)
+			})
 		}, ReasonChanged},
 		{"different-grant", func(_ *fixture, c *fakeChecker) {
 			c.set(func(c *fakeChecker) { c.facts.GrantID = strings.Repeat("e", 64) })

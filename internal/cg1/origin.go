@@ -234,7 +234,7 @@ func originEnvelopeCode(code string) OriginCode {
 func originGrantCode(v grantcheck.Verdict) OriginCode {
 	d := matrixDecision(v, true)
 	if v.Code == grantcheck.CodeLive {
-		if v.Decision == grantcheck.Live && d.Verdict == admission.Live {
+		if v.Decision == grantcheck.Live && !v.Retryable && !v.Closed && d.Verdict == admission.Live {
 			return OriginLive
 		}
 		return OriginGrantRefused

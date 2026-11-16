@@ -60,6 +60,11 @@ func TestErrorsCarryNoProtectedValue(t *testing.T) {
 	cancel()
 	_, err = f.producer.Open(cancelled, f.selection)
 	add(err)
+	// Cleanup failures use the same scrubbed closed vocabulary.
+	cleanup, _ := f.session()
+	restore := obstructScope(t, f)
+	add(cleanup.Close())
+	restore()
 	// Open refusals.
 	open := func(change func(sel *runorigin.Selection)) {
 		sel := f.selection
@@ -74,6 +79,14 @@ func TestErrorsCarryNoProtectedValue(t *testing.T) {
 	open(func(sel *runorigin.Selection) { sel.Launcher.Generation++ })
 	open(func(sel *runorigin.Selection) { sel.Event.EventID = "$unknown-event" })
 	open(func(sel *runorigin.Selection) { sel.Event.RoomID = "!elsewhere:fixture.invalid" })
+	registry := filepath.Join(f.root, "connections.json")
+	if err = os.Chmod(registry, 0666); err != nil {
+		t.Fatal(err)
+	}
+	open(func(*runorigin.Selection) {})
+	if err = os.Chmod(registry, 0600); err != nil {
+		t.Fatal(err)
+	}
 	f.failOpen = true
 	open(func(*runorigin.Selection) {})
 	f.failOpen = false

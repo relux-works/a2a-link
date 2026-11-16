@@ -192,6 +192,35 @@ func parseMapping(raw []byte) (mappingFile, error) {
 	return m, nil
 }
 
+// connectionBound uses only the public registry, never credential metadata.
+// Named stores have the layout returned by Connection.Paths; derive its root
+// from that layout, then require the loader's exact user and store binding.
+func (a agentEntry) connectionBound(owner uint32) bool {
+	root := a.StoreBase
+	for range 5 {
+		root = filepath.Dir(root)
+	}
+	paths := config.Paths{Base: root}
+	raw, err := readProtected(paths.ConnectionsFile(), owner)
+	if err != nil {
+		return false
+	}
+	var registry config.ConnectionRegistry
+	if config.DecodeConnectionJSON(raw, &registry) != nil || registry.Validate() != nil {
+		return false
+	}
+	connection, exists := registry.Profiles[a.Connection]
+	if !exists {
+		return false
+	}
+	binding, err := connection.Binding(a.Identity, false)
+	if err != nil || binding.UserID != a.MatrixUserID {
+		return false
+	}
+	store, err := connection.Paths(paths, a.Identity, false)
+	return err == nil && store.Base == a.StoreBase
+}
+
 func loadMapping(path string, owner uint32) (mappingFile, error) {
 	raw, err := readProtected(path, owner)
 	if err != nil {
