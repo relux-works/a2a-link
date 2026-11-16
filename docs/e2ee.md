@@ -839,8 +839,9 @@ The internal accepted-event type cannot be constructed by wire JSON unmarshal.
 It includes exact content plus authenticated local provenance; an event's alleged
 `crypto` field has no authority. U3 defines this type before U4 consumes it.
 Megolm plaintext must bind inner room/type to authenticated session provenance;
-outer sender consistency is checked under section 3's stated server assumption,
-not misrepresented as an inner sender signature. No decryption-only acceptance.
+the outer sender MXID is homeserver-asserted and is accepted only when it equals
+the MXID that the cross-signing chain binds to the originator device (section 1,
+item 2; section 3 guarantee), never misrepresented as an inner sender signature. No decryption-only acceptance.
 
 U4 adds explicit versioned `MailEntry.CryptoEvidence` storage, separate from Event:
 `v`, binding/generation, event/digest, admission ID, trust/context revisions,
