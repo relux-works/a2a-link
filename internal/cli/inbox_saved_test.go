@@ -23,6 +23,7 @@ func TestSavedInboxSummaryShowAndReceiptBoundary(t *testing.T) {
 	tuitestkit.ContainsStr(t, r.stdout, "count sender=@bob:test.local n=1\n")
 	tuitestkit.ContainsStr(t, r.stdout, "count kind=\"question\" n=1\n")
 	tuitestkit.ContainsStr(t, r.stdout, "count room=\"#proj\" n=1\n")
+	tuitestkit.ContainsStr(t, r.stdout, "event 1 verification=\"unsigned (no envelope)\" sender=")
 	tuitestkit.ContainsStr(t, r.stdout, "id="+fmt.Sprintf("%q", id)+" 界\n")
 	tuitestkit.NotContainsStr(t, r.stdout, "TAIL")
 	if !e.received("alice", id) || e.received("alice", later) {
@@ -188,12 +189,13 @@ func TestSavedInboxEmptyAndInvalidFrames(t *testing.T) {
 	e.as("alice", "inbox", "show", "$a", "--from", path).failsWith(t, ExitError, "at most")
 }
 
+// The observe label is the sole intentional addition to the legacy frame.
 func TestInboxLegacyFrameBytesUnchanged(t *testing.T) {
 	e, room := world(t)
 	e.as("alice", "inbox").ok(t)
 	id := e.hs.inject(room, "@bob:test.local", ping(7))
 	got := e.as("alice", "inbox").ok(t).stdout
-	want := inboxBegin + "\n--- event 1/1: mention from=@bob:test.local room=#proj kind=- id=" + id + "\n  | @alice:test.local ping 7\n" + inboxEnd + "\n"
+	want := inboxBegin + "\n--- event 1/1: verification=\"unsigned (no envelope)\" mention from=@bob:test.local room=#proj kind=- id=" + id + "\n  | @alice:test.local ping 7\n" + inboxEnd + "\n"
 	if got != want {
 		t.Fatalf("default frame bytes changed:\ngot %q\nwant %q", got, want)
 	}

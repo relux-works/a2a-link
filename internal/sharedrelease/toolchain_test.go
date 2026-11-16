@@ -10,7 +10,7 @@ import (
 	"github.com/relux-works/a2a-swarm/internal/darwinrelease"
 )
 
-// Claim: current producer, consumer, evidence policy and CI pins use exact Go 1.26.0, while immutable v0.1.1 reproduction retains Go 1.25.12.
+// Claim: current producer, consumer, evidence policy and CI pins, including both fixture qualification jobs, use exact Go 1.26.8.
 func TestQualifiedToolchainPins(t *testing.T) {
 	root := filepath.Join("..", "..")
 	read := func(name string) string {
@@ -49,11 +49,11 @@ func TestQualifiedToolchainPins(t *testing.T) {
 	legacy := read(".github/workflows/cask-qualification.yml")
 	matches := versions.FindAllStringSubmatch(legacy, -1)
 	if len(matches) != 2 {
-		t.Fatal("missing immutable Linux/macOS fixture compilers")
+		t.Fatal("missing Linux/macOS fixture compilers")
 	}
 	for _, m := range matches {
-		if m[1] != "1.25.12" {
-			t.Fatal("immutable fixture compiler changed")
+		if "go"+m[1] != qualifiedGoVersion {
+			t.Fatal("fixture compiler differs from strict policy")
 		}
 	}
 	if !strings.Contains(legacy, "GOTOOLCHAIN="+qualifiedGoVersion+" go build -p 1") {
@@ -61,7 +61,7 @@ func TestQualifiedToolchainPins(t *testing.T) {
 	}
 }
 
-// Claim: the new exact compiler pin accepts its valid tuple and refuses the former compiler and an unqualified patch, without widening to a minimum-version range.
+// Claim: the new exact compiler pin accepts its valid tuple and refuses the former compilers and an unqualified patch, without widening to a minimum-version range.
 func TestQualifiedToolchainRefusesOtherVersions(t *testing.T) {
 	tools, err := LoadTools(filepath.Join("..", ".."))
 	if err != nil {
@@ -70,7 +70,7 @@ func TestQualifiedToolchainRefusesOtherVersions(t *testing.T) {
 	if err = tools.Validate(); err != nil {
 		t.Fatal("qualified positive refused", err)
 	}
-	for _, version := range []string{"go1.25.12", "go1.26.1", "go1.26.8", "go1.27.0"} {
+	for _, version := range []string{"go1.25.12", "go1.26.0", "go1.26.9", "go1.27.0"} {
 		bad := tools
 		bad.Go = version
 		if err = bad.Validate(); err == nil || err.Error() != "linux-tool-policy" {

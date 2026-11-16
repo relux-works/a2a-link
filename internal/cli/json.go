@@ -44,6 +44,9 @@ type EventRecord struct {
 	Attachment *Attachment `json:"attachment,omitempty"`
 	// Media is set by inbox and files, with bounded untrusted declarations and a handle.
 	Media *inboundmedia.Metadata `json:"media,omitempty"`
+
+	// Verification is an OBSERVE label, never authority or a delivery gate.
+	Verification string `json:"verification,omitempty"`
 }
 
 // Keep opaque identifier bytes on decoding, but make format controls inert

@@ -1,5 +1,10 @@
 # Darwin release source contract
 
+The M0 envelope dependency requires Go >=1.26.0. Current release/source checks
+therefore pin Go 1.26.8; prior Go 1.25.12 native/reproducibility evidence does
+not qualify the new compiler. Native release qualification and adoption remain
+held for their existing owner-controlled gates.
+
 This is a source implementation for Darwin arm64 `a2a` and the real Swift
 `a2a-keychain-status`, compiled from one exact reviewed main commit. It does not
 record an existing Developer ID image, native success, credential provisioning,
@@ -22,7 +27,7 @@ unchanged. There is no optional unsigned tagged-release path or manual bypass.
 | `.scripts/release-cleanup.sh` | Always-step cleanup of only this runner job's ephemeral signing directory/keychain | Nonzero if keychain deletion fails |
 | `.scripts/signing-keychain-fixture.sh DIR` then `A2A_SIGNING_KEYCHAIN_CONTROL_DIR=DIR go test -run '^TestSigningKeychainAccessControl$' ./internal/darwinrelease` | CI job `signing-keychain-control`: a throwaway self-signed identity with no trust change, imported through the release import path and signed with the release codesign argv and a fixture requirement, then strictly verified. Arms vary only the fixture keychain's presence in the user search list (restored after each arm) and a widened key partition list; an informational timestamped pair runs too. `--cleanup DIR` removes the files | `SIGNING-CONTROL` lines with an identity class, exit status and a bounded error class (never raw output) and one VERDICT for H6 (search list) and H1 (partition); INCONCLUSIVE fails; says nothing about the Developer ID chain or the timestamp service |
 
-Go 1.26.0, native `CGO_ENABLED=1`, Security.framework/CoreFoundation, Xcode16.4,
+Go 1.26.8, native `CGO_ENABLED=1`, Security.framework/CoreFoundation, Xcode16.4,
 Swift6.1.2 and cosign2.6.1 are explicit release pins. GitHub-hosted `macos-15`
 provides the arm64 runner; the workflow explicitly selects Xcode16.4. The controller
 checks versions and records the actual OS/SDK/clang/notary toolchain. Hosted images

@@ -15,6 +15,8 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 	"github.com/relux-works/a2a-swarm/internal/daemon"
+	"github.com/relux-works/a2a-swarm/internal/e2ee"
+	"github.com/relux-works/a2a-swarm/internal/envelopeobserve"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 	"github.com/relux-works/a2a-swarm/internal/redact"
 	"github.com/relux-works/a2a-swarm/internal/voice"
@@ -31,6 +33,8 @@ const (
 
 // App carries the process environment so tests can run commands in-process.
 type App struct {
+	// Test-only host-file loader; production always validates protected ownership.
+	loadEnvelopeRoster       func(string) (*envelopeobserve.Observer, error)
 	wakeRequiredVersion      string                                       // Immutable process-start admission; never read from a daemon request or ambient selector.
 	wakeContext              context.Context                              // Bounded terminal dispatch copy; never changes ambient command cleanup.
 	terminalFixture          func(config.TerminalBinding) terminalEffects // Isolated tests only; production always uses the bound terminal.
@@ -127,6 +131,20 @@ type App struct {
 	postOperationLateReserve          bool
 	nativeDial                        func(context.Context, string) (nativeRuntime, error)
 	afterWakeReserve, afterWakeSubmit func() error
+
+	// The public metadata observer cannot grant credentials. Production has no
+	// context issuer/provider or native driver: E_CONTEXT precedes factory use;
+	// with admitted context but no driver, E_UNAVAILABLE. No runtime override.
+	beforeLegacyCredentialRead func()
+	lookupEnv                  func(string) (string, bool)
+	vaultContext               vaultContextProvider
+	vaultDependency            func(vaultCredentialSelection) (*vaultDependency, error)
+
+	// E2EE U2a test-only seams. nil selects the production A1 service-user gate
+	// and the platform host pin root; no flag or environment reaches either.
+	e2eeCustodyGate func() error
+	e2eePinPolicy   *e2ee.PinPolicy
+	e2eeInventory   *e2ee.Inventory // Per-invocation secret inventory for e2ee diagnostics.
 }
 
 // NewApp returns an App bound to the real process environment.
@@ -137,6 +155,7 @@ func NewApp() *App {
 		Stderr:              os.Stderr,
 		Stdin:               os.Stdin,
 		Getenv:              os.Getenv,
+		lookupEnv:           os.LookupEnv,
 		HTTP:                &http.Client{},
 		Now:                 time.Now,
 	}
@@ -205,6 +224,7 @@ func commands() []command {
 		{"project", "project --system R --source R [--source R...] [--kind k1,k2] [--once]   project allowed sources to one explicit target", cmdProject},
 		{"skill", "skill install [--force] | skill print   install the a2a agent skill into ~/.agents, ~/.claude, ~/.codex", cmdSkill},
 		{"creds", "creds migrate | reconcile | move-human <name>   migrate selected credentials to Keychain, or move HUMAN metadata into humans/", cmdCreds},
+		{"e2ee", "e2ee init [--json] | e2ee identity show [--json]   cross-signing bootstrap under a2ad custody and public identity evidence (docs/e2ee.md)", cmdE2EE},
 		{"card", "card set --file card.md | card get <name> | card room init [--room R]   configured card store", cmdCard},
 		{"status", "status init | set STATE TEXT --heartbeat DUR --runtime R --hooks H --doorbell D [--product X] | get [name] (legacy presence)", cmdStatus},
 		{"who", "who --stale-after DUR [--product X] [--json]   read self-written agent liveness", cmdWho},
@@ -695,6 +715,7 @@ func (a *App) sessionAsMode(name string, metadataOnly bool) (*session, error) {
 		}
 		label := a.profile
 		root := config.Paths{Base: p.ConfigRoot()}
+		latchedVault := creds.VaultSelection
 		s.checkBinding = func() error {
 			r, e := config.LoadConnections(root)
 			if e != nil {
@@ -714,8 +735,16 @@ func (a *App) sessionAsMode(name string, metadataOnly bool) (*session, error) {
 			if fresh.Fingerprint() != binding.Fingerprint() || !sameAdminPolicy(selected.AdminRegistration, binding.Connection.AdminRegistration) || selected.CardRoom != binding.Connection.CardRoom {
 				return errors.New("selected connection changed; explicit migration required")
 			}
-			_, e = a.namedMetadata(p, name)
-			return e
+			current, e := a.namedMetadata(p, name)
+			if e != nil {
+				return e
+			}
+			// A changed vault selection needs a fresh qualified selection and
+			// registration; it never retargets a live session.
+			if !sameVaultSelection(current.VaultSelection, latchedVault) {
+				return vaultRefusal(vaultEIdentityConflict)
+			}
+			return nil
 		}
 	}
 	if selected, _ := a.selectedConnection(); selected != nil && selected.AdminRegistration != nil {

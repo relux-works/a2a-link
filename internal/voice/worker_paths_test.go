@@ -448,7 +448,7 @@ func (r *workerPathRunner) Run(ctx context.Context, name string, args []string, 
 	r.inputs = append(r.inputs, string(b))
 	out := args[len(args)-1]
 	r.paths = append(r.paths, out)
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWorkerPathsProcess$", "--", args[1], out, r.pin)
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWorkerPathsProcess$", "--", args[0], out, r.pin)
 	cmd.Env = append(os.Environ(), "A2A_WORKER_PATH_FIXTURE=1")
 	if len(r.inputs) == r.failAt {
 		cmd.Env = append(cmd.Env, "A2A_WORKER_PATH_EXIT=1")
@@ -461,7 +461,7 @@ func TestRenderWorkerPaths(t *testing.T) {
 		t.Run(string(rune('0'+failAt)), func(t *testing.T) {
 			base := filepath.Join(t.TempDir(), strings.Repeat("a", 100), "connections", "relux", "identities", "agents", strings.Repeat("b", 64))
 			r := &workerPathRunner{renderRunner: &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, sampleRate)}, pin: workerModelFixture(t, ModelDir(base)), failAt: failAt}
-			a, err := (LocalRenderer{Runner: r}).Render(context.Background(), base, Config{true, 180}, strings.Repeat("я", 6001))
+			a, err := (LocalRenderer{Runner: r}).Render(context.Background(), base, Config{Enabled: true, MaxSeconds: 180}, strings.Repeat("я", 6001))
 			if failAt == 0 {
 				if err != nil || !a.Truncated || len(r.inputs) != 2 || r.inputs[1] != TruncationNotice {
 					t.Fatalf("ordinary/notice worker result: truncated=%v error=%v calls=%d", a.Truncated, err, len(r.inputs))

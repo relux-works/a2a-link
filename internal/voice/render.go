@@ -23,8 +23,13 @@ const MaxAudioBytes = 4 << 20
 type Runner interface {
 	Run(context.Context, string, []string, io.Reader) error
 	ValidateModel(context.Context, string) error
+	PrepareWorker(context.Context, Config) (PreparedWorker, error)
 }
 type LocalRunner struct{}
+
+func (LocalRunner) PrepareWorker(ctx context.Context, c Config) (PreparedWorker, error) {
+	return PrepareWorker(ctx, c)
+}
 
 func (LocalRunner) ValidateModel(ctx context.Context, base string) error {
 	return ValidateModel(ctx, base)
@@ -33,6 +38,11 @@ func (LocalRunner) ValidateModel(ctx context.Context, base string) error {
 func (LocalRunner) Run(ctx context.Context, name string, args []string, input io.Reader) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, io.Discard, io.Discard
+	if filepath.Base(name) == WorkerName {
+		// No inherited loader overrides may redirect the private native payload.
+		// The worker receives all model/output paths as explicit arguments.
+		cmd.Env = []string{}
+	}
 	cmd.WaitDelay = time.Second
 	if err := cmd.Start(); err != nil {
 		if failure := contextFailure(ctx, err); failure != nil {
@@ -64,8 +74,7 @@ type Renderer interface {
 	Render(context.Context, string, Config, string) (Audio, error)
 }
 type LocalRenderer struct {
-	Runner     Runner
-	Executable string
+	Runner Runner
 }
 
 func (r LocalRenderer) run(ctx context.Context, timeout time.Duration, name string, args []string, in io.Reader) error {
@@ -78,26 +87,26 @@ func (r LocalRenderer) run(ctx context.Context, timeout time.Duration, name stri
 	return runner.Run(c, name, args, in)
 }
 
-func (r LocalRenderer) synth(ctx context.Context, base, text, out string) error {
+func (r LocalRenderer) synth(ctx context.Context, base string, c Config, text, out string) error {
 	runner := r.Runner
 	if runner == nil {
 		runner = LocalRunner{}
 	}
+	worker, err := runner.PrepareWorker(ctx, c)
+	if err != nil {
+		if failure := contextFailure(ctx, err); failure != nil {
+			return failure
+		}
+		return NewSynthesisError(SynthesisExecutable, -1)
+	}
+	defer worker.Close()
 	if err := runner.ValidateModel(ctx, base); err != nil {
 		if failure := contextFailure(ctx, err); failure != nil {
 			return failure
 		}
 		return NewSynthesisError(SynthesisValidation, -1)
 	}
-	exe := r.Executable
-	if exe == "" {
-		var err error
-		exe, err = os.Executable()
-		if err != nil {
-			return NewSynthesisError(SynthesisExecutable, -1)
-		}
-	}
-	if err := r.run(ctx, 120*time.Second, exe, []string{"--voice-worker", ModelDir(base), out}, strings.NewReader(text)); err != nil {
+	if err := r.run(ctx, 120*time.Second, worker.Path, []string{ModelDir(base), out}, strings.NewReader(text)); err != nil {
 		return synthesisFailure(ctx, err)
 	}
 	return nil
@@ -188,7 +197,7 @@ func (r LocalRenderer) Render(ctx context.Context, base string, c Config, text s
 	if err := privateOutput(raw); err != nil {
 		return result, err
 	}
-	if err := r.synth(ctx, base, string(input), raw); err != nil {
+	if err := r.synth(ctx, base, c, string(input), raw); err != nil {
 		return result, err
 	}
 	pcm, err := r.pcm(ctx, raw, filepath.Join(dir, "source.pcm"))
@@ -200,7 +209,7 @@ func (r LocalRenderer) Render(ctx context.Context, base string, c Config, text s
 		if err := privateOutput(noticeFile); err != nil {
 			return result, err
 		}
-		if err := r.synth(ctx, base, TruncationNotice, noticeFile); err != nil {
+		if err := r.synth(ctx, base, c, TruncationNotice, noticeFile); err != nil {
 			return result, err
 		}
 		notice, err := r.pcm(ctx, noticeFile, filepath.Join(dir, "notice.pcm"))

@@ -17,9 +17,11 @@ full-cap saves off the hook path with a pre-mutation size/latency guard or an
 equivalent separately admitted design; this wiring remains unresolved. Hosted CI
 does not run the capacity benchmark, and this follow-up supplies no new latency
 measurements. Native and full-hook qualification remain separate gates.
-The repository declares Go 1.25.12; this bench supplies 1.25.14. Exact 1.25.12
-execution remains unverified. mautrix v0.31.0/v0.32.0 require Go 1.26 and are
-excluded without a separate toolchain decision. No E2EE activation is delivered.
+This follow-up was measured when the repository declared Go 1.25.12 on a 1.25.14
+bench. The repository now declares Go 1.26.8 for the pinned swarma-envelope
+dependency; that move does not transfer this bench evidence. mautrix
+v0.31.0/v0.32.0 remain excluded without a separate dependency decision. No E2EE
+activation is delivered.
 
 Source's U1 r2 resolution closes the server-only USK visibility assumption:
 `/keys/query` exposes USKs only for the requesting user's own keys. The host pin
@@ -301,3 +303,25 @@ manual tap custody work listed in [shared distribution](docs/shared-distribution
 remain unimplemented. The legacy publisher is held under the combined policy.
 No real release or tap delivery is claimed. v0.1.2 remains a proposal requiring a
 fresh unused-ref check and reviewed VERSION successor when integration is ready.
+
+## P17-A: downstream qualification
+
+The Source-control envelope, hello/error shapes, scalar encodings and original
+request-ID correlation are pinned in `docs/source-origin.md`. Request ID and
+launch nonce are exactly 32 lowercase hex; zero input UID and zero/shared
+launcher UID refuse. No finer refusal subcodes are introduced.
+
+A reviewed downstream rich producer must supply protected identity/connection/
+Matrix-user/policy/registration mapping, its own checker/private scope, signed
+inner-request/profile verification and fresh admission/pin rechecks. Upstream
+checks typed shape and immutable equality, not authenticity of a malicious
+linked producer's well-shaped claims. Generic Live, `none` and Matrix-ID origin
+substitution remain unsupported. Image/ABI alignment and authoritative account
+pins remain deployment prerequisites. Registration is an opaque bounded string;
+its canonical domain belongs to the registration authority.
+
+Real distinct-UID placement, authoritative generations, protected control paths
+and ancestors/ACL policy, descriptor exclusion and final input release remain
+unqualified by unit fixtures. The launcher (`curator run`) never rebinds in this
+version; hosted session managers refuse enforcing. Neither lifecycle route is
+implemented by this Source library.

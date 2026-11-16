@@ -118,9 +118,12 @@ func TestSenderReadConsumers(t *testing.T) {
 				}
 				text := e.as("alice", "read", room, "--event", id).ok(t).stdout
 				line := strings.SplitN(text, "\n", 2)[0]
+				// The observed label is the first token after the timestamp; the
+				// sender field follows it.
 				_, rest, ok := strings.Cut(line, "] ")
+				rest, labelled := strings.CutPrefix(rest, `verification="unsigned (no envelope)" `)
 				field, _, found := strings.Cut(rest, " "+id)
-				if !ok || !found || field != tc.text || decodedSender(t, field) != tc.raw {
+				if !ok || !labelled || !found || field != tc.text || decodedSender(t, field) != tc.raw {
 					t.Fatalf("read sender changed: %q", line)
 				}
 			}
@@ -175,12 +178,12 @@ func TestSenderMailboxConsumers(t *testing.T) {
 						t.Fatal("saved sender format control is not inert")
 					}
 					for i, tc := range cases {
-						if !strings.Contains(text, "\ncount sender="+tc.text+" n=1\n") || !strings.Contains(text, fmt.Sprintf("\nevent %d sender=%s kind=", i+1, tc.text)) {
+						if !strings.Contains(text, "\ncount sender="+tc.text+" n=1\n") || !strings.Contains(text, fmt.Sprintf("\nevent %d verification=\"unsigned (no envelope)\" sender=%s kind=", i+1, tc.text)) {
 							t.Fatalf("summary sender changed: %s", tc.name)
 						}
 						before := len(e.hs.urls())
 						show := e.as("alice", "inbox", "show", ids[i], "--from", path).ok(t).stdout
-						if !strings.HasPrefix(show, inboxBegin+"\n--- event 1/1: from="+tc.text+" room=") || len(e.hs.urls()) != before {
+						if !strings.HasPrefix(show, inboxBegin+"\n--- event 1/1: verification=\"unsigned (no envelope)\" from="+tc.text+" room=") || len(e.hs.urls()) != before {
 							t.Fatalf("saved show sender changed or contacted server: %s", tc.name)
 						}
 					}
@@ -196,7 +199,7 @@ func TestSenderMailboxConsumers(t *testing.T) {
 						if mode == "wait-text" {
 							fmt.Fprintf(&want, "to #proj %s from=%s kind=question topic=alpha: bounded body\n", ids[i], tc.text)
 						} else {
-							fmt.Fprintf(&want, "--- event %d/%d: to from=%s room=#proj kind=question id=%s topic=alpha\n  | bounded body\n", i+1, len(ids), tc.text, ids[i])
+							fmt.Fprintf(&want, "--- event %d/%d: verification=\"unsigned (no envelope)\" to from=%s room=#proj kind=question id=%s topic=alpha\n  | bounded body\n", i+1, len(ids), tc.text, ids[i])
 						}
 					}
 					if mode == "inbox-text" {
@@ -334,14 +337,14 @@ func TestSenderLongInboxConsumers(t *testing.T) {
 			id := e.hs.inject(room, sender, toMsg("@claimed:origin.example", "question", "body"))
 			if mode == "inbox" {
 				out := e.as("alice", "inbox").ok(t).stdout
-				if !strings.HasPrefix(out, inboxBegin+"\n--- event 1/1: to from="+sender+" room=") {
+				if !strings.HasPrefix(out, inboxBegin+"\n--- event 1/1: verification=\"unsigned (no envelope)\" to from="+sender+" room=") {
 					t.Fatal("long inbox sender changed")
 				}
 			} else {
 				path := filepath.Join(outputTestDir(t), "frame")
 				e.as("alice", "inbox", "--out", path).ok(t)
 				out := e.as("alice", "inbox", "show", id, "--from", path).ok(t).stdout
-				if !strings.HasPrefix(out, inboxBegin+"\n--- event 1/1: from="+sender+" room=") {
+				if !strings.HasPrefix(out, inboxBegin+"\n--- event 1/1: verification=\"unsigned (no envelope)\" from="+sender+" room=") {
 					t.Fatal("long saved show sender changed")
 				}
 			}

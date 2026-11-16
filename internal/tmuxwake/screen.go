@@ -32,6 +32,30 @@ func (b Box) position() ComposerPosition {
 
 func plain(s string) string { return sgr.ReplaceAllString(s, "") }
 
+// screenLines splits a capture and drops the trailing blank rows. Claude
+// redraws a short screen after an idle compaction, a clear or a fresh session
+// and leaves its composer far above the pane's last row. The bottom window
+// must start from the last drawn row, or it sees only padding and refuses
+// forever. Every kept row keeps its original index, so composer and cursor
+// positions stay exact, and blank padding carries no dialog text.
+func screenLines(screen string) []string {
+	lines := strings.Split(strings.TrimSuffix(screen, "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(plain(lines[len(lines)-1])) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// runtimeLines is the row set a runtime's classifier reads. Only Claude
+// trims trailing padding: Codex geometry treats a trailing blank row as the
+// structural separator after an owned no-hint prompt, so it keeps raw rows.
+func runtimeLines(screen, runtime string) []string {
+	if runtime == "claude" {
+		return screenLines(screen)
+	}
+	return strings.Split(strings.TrimSuffix(screen, "\n"), "\n")
+}
+
 // visible drops dim/grey placeholder runs, preserving every plain character
 // and space. SGR color payload numbers are not interpreted as separate codes.
 func visible(s string) string {
@@ -128,7 +152,7 @@ func inputWithNotice(screen, runtime, owned string) (Box, bool) {
 }
 
 func inputWithNoticeReason(screen, runtime, owned string) (Box, InputReason) {
-	lines := strings.Split(strings.TrimSuffix(screen, "\n"), "\n")
+	lines := runtimeLines(screen, runtime)
 	start := max(0, len(lines)-18)
 	bottom := strings.ToLower(plain(strings.Join(lines[start:], "\n")))
 	for _, denied := range []string{"esc to interrupt", "escape to interrupt", "do you want to", "would you like to", "implement this plan", "permission required", "permission request", "approval required", "approve this", "allow once", "bypass permissions?", "accept edits?", "enter to confirm"} {
@@ -142,7 +166,7 @@ func inputWithNoticeReason(screen, runtime, owned string) (Box, InputReason) {
 // Geometry alone can record where a typed notice was seen even while busy.
 // Callers must never use this helper to bypass readiness or dialog checks.
 func inputGeometry(screen, runtime, owned string) (Box, InputReason) {
-	lines := strings.Split(strings.TrimSuffix(screen, "\n"), "\n")
+	lines := runtimeLines(screen, runtime)
 	start := max(0, len(lines)-18)
 	if runtime == "claude" {
 		var rules []int

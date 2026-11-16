@@ -12,10 +12,23 @@ type workerPaths struct {
 	model, tokens, data, output string
 }
 
+// WithWorkerModel validates the installed pinned model through a held
+// directory descriptor and runs inference while that directory remains the
+// process cwd. It is for the standalone native worker; shared callers must not
+// change their working directory.
+func WithWorkerModel(dir, out string, infer func(model, tokens, data, output string) int) int {
+	if infer == nil {
+		return 1
+	}
+	return withWorkerModel(dir, out, manifestSHA256, func(paths workerPaths) int {
+		return infer(paths.model, paths.tokens, paths.data, paths.output)
+	})
+}
+
 // voiceOpenModel permits deterministic directory-replacement tests in a child.
 var voiceOpenModel = os.Open
 
-// withWorkerModel is only for the dedicated --voice-worker subprocess. Chdir
+// withWorkerModel is only for the dedicated a2a-voice-worker process. Chdir
 // must never run in the shared CLI/render process. A directory descriptor binds
 // cwd across source renames; revalidate through that cwd before native opens.
 // The callback includes native destruction, so cwd lasts for all native use.

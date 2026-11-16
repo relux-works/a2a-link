@@ -22,7 +22,7 @@ import (
 const LinuxSchema = "a2a-linux-release/1"
 
 // Current fork payloads and their independent verifier use one exact compiler.
-const qualifiedGoVersion = "go1.26.0"
+const qualifiedGoVersion = "go1.26.8"
 
 var BuildFlags = []string{"-mod=readonly", "-trimpath", "-buildvcs=false", "-buildmode=exe", "-compiler=gc", "-pgo=off", "-p=1", "-ldflags=-linkmode=internal -libgcc=none"}
 

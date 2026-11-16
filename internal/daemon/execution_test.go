@@ -27,6 +27,7 @@ func TestExecutionAllowlist(t *testing.T) {
 		{"--as", "identity", "hook", "prompt", "--runtime", "claude"}, {"hook", "stop", "--runtime", "codex"}, {"hook", "session-start", "--runtime", "claude"},
 		{"bind", "status", "--json"}, {"who", "--stale-after", "1m"}, {"post-operation", "status", "id", "--json"},
 		{"whoami", "--as=identity", "--profile", "alpha", "--connection-fingerprint", strings.Repeat("a", 64)},
+		{"e2ee", "init"}, {"e2ee", "init", "--json"}, {"e2ee", "identity", "show", "--json"},
 	}
 	for _, v := range valid {
 		if _, e := Authorize(v, "identity"); e != nil {
@@ -40,6 +41,9 @@ func TestExecutionAllowlist(t *testing.T) {
 		{"post", "room", "text", "--result-file", "/station/output"}, {"post", "room", "text", "--voice"}, {"post", "room", "text", "--config", "private"},
 		{"hook", "install", "--settings", "/station/settings"}, {"bind", "association"}, {"topic", "retire", "room", "topic"},
 		{"A2A_CONFIG_DIR=/private", "whoami"}, {"whoami", "--profile", ""}, {"whoami", "--as"},
+		// U2a admits only init and identity show; lifecycle verbs, pin paths and
+		// extra operands stay outside the station boundary.
+		{"e2ee"}, {"e2ee", "rotate", "--new-device"}, {"e2ee", "identity"}, {"e2ee", "init", "extra"}, {"e2ee", "init", "--pin", "/etc/pin"}, {"e2ee", "status"},
 	}
 	for _, v := range invalid {
 		if _, e := Authorize(v, "identity"); e == nil {

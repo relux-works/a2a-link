@@ -99,6 +99,11 @@ unchanged Ed25519 envelopes plus the fork-only per-message BIP-340 co-signature,
 then checks the pinned v3 regtest grant backend. The `cg1` policy remains
 Nostr-only; unsupported Nostr room/account/media commands refuse.
 
+The Linux [P17-A Source origin library](docs/source-origin.md) provides a separate
+closed control socket and optional typed producer seam. Stock upstream has no
+producer and refuses prepare with `origin_not_supported`. Service wiring, rich
+checker implementation and deployment qualification remain downstream work.
+
 The default-off [agent pair DM](docs/agent-dm.md) supports exact host-admitted
 keeper/orchestrator pairs with explicit peer join and sole-recipient delivery:
 `a2a agent-dm ensure|status|say|unset|leave FULL_PEER`.
@@ -108,9 +113,14 @@ wake admissions for explicitly enrolled roots/connections. They preserve mail
 and independent pauses and always report `quiesced=false`; installation and
 scope admission remain separate from source delivery.
 
+Receive-side signed-envelope [observation](docs/envelope-observe.md) labels
+`inbox` and `read` text/JSON as verified, unsigned, invalid or unknown-author.
+It uses an explicit protected local host roster and refuses nothing.
+
 ## Tools
 
 | Tool | Purpose | How to run | Output |
+| Signed-envelope observation (Go >=1.26.8) | Verify received envelopes locally using pinned host evidence, with delivery unchanged | `a2a inbox [--json]`; `a2a read ROOM [--json]`; [configuration and tests](docs/envelope-observe.md) | `verification` label on stdout and saved inbox frames; no network lookup or trust-store writes |
 | --- | --- | --- | --- |
 | Protected grant provisioning (Go) | Verify counterpart canonical proof against on-chain issuance and all admission rules before caching | `a2a --as IDENTITY cg1 provision --proof proof.json`; [required pins and interim A + F rule](docs/g1-gate-1.md#protected-first-message-provisioning) | JSON result; bounded durable provisioning audit in the selected identity's private grantcheck state; refusals preserve proof cache |
 | G1 dependency ancestry (Go, Git) | Check every selected chain-lab module contains the required landed commits; refuse legacy selection | `go run -p 1 ./.scripts/check-g1-dependencies --repo CHAIN_LAB_CHECKOUT`; `go test -p 1 -parallel 2 ./.scripts/check-g1-dependencies` | Module/version/commit/ancestry on stdout; nonzero refusal; logs belong in `.temp/` |
@@ -126,7 +136,7 @@ scope admission remain separate from source delivery.
 | `a2a room power` | Read current room creator and explicit/default authority without changing state | `a2a room power ROOM --json` (or escaped text without `--json`) | Minimal versioned JSON/text on stdout; refusals on stderr, no partial rows |
 | Curator build checks (Go, Make) | Verify the dedicated build branch vendor closure and compile its command | `make verify-vendor BUILD_REPOSITORY="$REPOSITORY" BUILD_COMMIT="$FULL_BUILD_OID" MAIN_COMMIT="$FULL_MAIN_OID"`; `make curator-command BUILD_REPOSITORY="$BUILD_CHECKOUT" OUTPUT="$ARTIFACT"`; [branch rule and limits](docs/curator-build.md) | Named equality/refusal output; binary at the explicit output path |
 | Registry bundle qualifier (Go) | Compare complete selected registry functions and one level of resolved callees as inert bytes, with planted controls | [Command and limits](docs/registryqualifier.md) | JSON structural comparison; nonzero on differences, refusals or failed controls |
-| Local voice (Go, macOS Sherpa, ffmpeg) | Optional spoken copy after unchanged text | `go build -tags sherpa -o .temp/voice/a2a-voice ./cmd/a2a`; `voice status [--json]`; `voice install` then `voice config --enable`; `post ROOM --topic TOPIC --voice TEXT`; [contract](docs/voice.md) | Candidate binary `.temp/voice/`; config/cache `<config>/voice/`; private temporary audio deleted; text ID stdout, optional warning stderr |
+| Local voice (Go, macOS Sherpa helper, ffmpeg) | Optional spoken copy after unchanged text | `go run ./cmd/a2a-voice-release -out .temp/voice/release`; configure helper/manifest pins and install the model; `post ROOM --topic TOPIC --voice TEXT`; [contract](docs/voice.md) | Native-free shared CLI; relocatable helper directory; private temporary audio deleted; text ID stdout, optional warning stderr |
 | `.scripts/post.sh` | Post one message block to a topic | `.scripts/post.sh <room> <topic> <body-file>` (room `_` = lobby) prints the assigned `MSG-NNNN` | appends to `rooms/<room>/topics/<topic>.md`, commits it and pushes to `origin/main`; lock `.git/a2a-post.lock` |
 | `lockf` (macOS base system) | File lock used by post.sh | used by post.sh | — |
 | Curator | Install the tracked project skill closure and check its state | `curator install .`; `curator status . --check --json`; gates below | Generated `.agents/` and runtime `skills/` paths; private migration evidence |
@@ -137,6 +147,7 @@ scope admission remain separate from source delivery.
 | `a2a daemon` | Run a2ad with an immutable root owner policy; enroll stations and migrate file-backed identities (Keychain initial/resume/rollback deferred; #460) | `a2a daemon serve --home HOME --owner-pin FILE --owner-pin-sha256 HASH --image-sha256 HASH --service-gid GID`; `daemon enroll --dir HOME/.a2a --from -`; `daemon status`; [reference](docs/cli.md#daemon-authentication-endpoint) | Private daemon home and station `.a2a/`; hook logs and listener endpoint under station `state/` |
 | a2ad service (`launchctl`, `systemctl`, Go renderer) | Explicit root install/uninstall/status with exact unit matching; independent scheduled read-only sweep | `a2a daemon service install\|uninstall\|status --plan ROOT_PLAN`; [service commands, policy, rescue and soak](docs/daemon-service.md) | `/Library/LaunchDaemons` or `/etc/systemd/system`; rendered examples `internal/daemonsvc/testdata/`; private heartbeat, sweep and soak reports under daemon home |
 | `a2a connection` | Validate and manage public named Matrix routing | `a2a connection list`; `a2a connection show NAME`; `a2a connection add NAME --file FILE`; `a2a connection use NAME` | `<config-root>/connections.json`; no network or credential lookup |
+| Source origin fixtures and gate plants (Go, bwrap) | Exercise closed P17 prepare/consume-once validate, peer/generation and path checks | `go test ./internal/daemon -run '^Test(SourceOrigin|Rev365)' -race -count=1 -v`; opt-in `A2A_RUN_ORIGIN_PLANTS=1 go test ./internal/daemon -run '^TestSourceOriginNarrowingPlants$' -count=1 -v`; [contract and confined runner](docs/source-origin.md) | Test-temp Unix sockets, overlay plants and `.temp/P17-A/` logs; no CLI or live service wiring |
 | `go test` | Unit tests against an in-memory fake homeserver; integration test against the local server | `go test ./...`; `A2A_MATRIX_IT=1 go test ./internal/cli -run Integration -v` | test output; the integration test writes only to `#a2a-swarm` and deactivates its throwaway account at the end |
 | Offline Go checks | Format, statically analyze (including test sources), and build without running tests or fetching dependencies; requires a populated local module cache | `gofmt -w <changed.go>`; `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go vet -mod=readonly ./...`; `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go build -mod=readonly ./...` | Diagnostics on stdout/stderr; task logs and writable Go caches under `.temp/` |
 | GitHub Actions `go` | Same-repository PRs run `test-linux` plus `darwin-smoke` (build/vet only); `train-*` or `full-ci` PRs instead run `test-linux`, `test` and `voice-native`, even for docs-only changes; adding `full-ci` triggers a run; main pushes run `test-linux` only | `.github/workflows/go.yml` (runs automatically) | Actions tab of relux-works/a2a-swarm |
@@ -376,6 +387,37 @@ The registry-free legacy path remains supported.
 
 ## Credential storage
 
+### Portable vault-v1 boundary (native path unavailable)
+
+Named profiles may explicitly select `credential_store.backend="vault-v1"`.
+Profiles contain no identity. Per-agent named metadata must contain the complete
+`vault_selection={identity,session_mode}` object described in
+[the named-credentials reference](docs/cli.md#portable-vault-v1-metadata-and-release-boundary).
+This is portable validation and orchestration support. Production has no admitted
+parent-context issuer or native driver: it refuses `NOT_SUBMITTED E_CONTEXT`
+before dependency construction. With an explicitly qualified logical context but
+no driver it refuses `NOT_SUBMITTED E_UNAVAILABLE`. It provides no usable vault
+service or adoption path.
+
+The private adapter in `internal/cli/vault_*.go` requires independent launch,
+trusted-install domain and enrolled account binding, mandatory live service
+signature verification, and exact operation-specific response admission.
+`metadataOnly` performs no context/provider/vault/secret calls; selected-vault
+failures never read another backend. Bootstrap, encoding, actual peer/session
+mechanics, custody, parent receiving/home integration and native qualification
+remain prerequisites owned elsewhere. No migration or daemon token move is added.
+
+The focused validation tool is the existing Go test runner. Under an authorized
+isolated environment, enumerate and run the package-cli/config test names with
+anchored selectors, for example `go test -list '^TestVaultSelectionUnicode$'
+./internal/config` followed by `go test -count=1 -run
+'^TestVaultSelectionUnicode$' ./internal/config`. The ordinary Go compiler excludes
+`vault_fixtures_test.go`; it contains explicitly invoked logical test fixtures,
+not a production issuer or native verification. Validation logs and omission
+controls belong in task-owned `.temp/` artifacts. Producer scope uses focused
+selectors; independent review owns the full suite.
+
+
 E2EE foundations for #308 live in `internal/e2ee` and are not activated by any
 CLI command. They use mautrix-go v0.30.0's pure-Go goolm primitives, explicit
 isolated checkpoints and AES-GCM snapshots. The backend takes an explicit root
@@ -390,9 +432,17 @@ See [the E2EE design](docs/e2ee.md)
 for the owner decisions, limits and U2a/U2b integration gates. Existing token
 storage below is unchanged by these library foundations.
 
+U2a adds `a2a e2ee init` and `a2a e2ee identity show` (`docs/cli.md`): custody
+opens only for the a2ad service user under the identity's a2ad home, the host
+pin reader verifies the owner MSK/USK chain, bootstrap persists roots before a
+passwordless upload with stored-password UIA fallback, and the owner's USK
+signature over the agent master is verified from the agent's own key query.
+Q4, U2b lifecycle, rooms, activation and pin writing remain out of scope; the
+live Element ceremony witness is a separate gate.
+
 ### E2EE foundation tools
 
-Go remains declared as `1.25.12`. Offline checks require the admitted module
+Go is declared as `1.26.8` for the signed-envelope dependency and aligned release compiler pins. Offline checks require the admitted module
 cache; neither libolm nor cgo is used. Logs and scratch artifacts belong in
 `.temp/`. On the authorized CI/precheck runner, the focused tests and snapshot
 latency benchmark are:

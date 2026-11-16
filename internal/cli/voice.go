@@ -124,6 +124,9 @@ func cmdVoice(ctx context.Context, a *App, args []string) error {
 	case "config":
 		fs := newFlagSet("voice config")
 		enabled := fs.Bool("enable", false, "explicitly enable local Irina voice replies")
+		worker := fs.String("worker", "", "absolute path to the released a2a-voice-worker")
+		workerSHA := fs.String("worker-sha256", "", "expected helper SHA256")
+		manifestSHA := fs.String("manifest-sha256", "", "expected release manifest SHA256")
 		rest, err := parseInterspersed(fs, args[1:])
 		if err != nil {
 			return err
@@ -131,14 +134,18 @@ func cmdVoice(ctx context.Context, a *App, args []string) error {
 		if len(rest) != 0 {
 			return usagef("voice config takes flags only")
 		}
-		c := voice.Config{Enabled: *enabled, MaxSeconds: voice.MaxSeconds}
+		c := voice.Config{Enabled: *enabled, MaxSeconds: voice.MaxSeconds, Worker: *worker, WorkerSHA256: *workerSHA, ManifestSHA256: *manifestSHA}
 		if err = c.Validate(); err != nil {
 			return usagef("%s", err)
 		}
 		if err = voice.Save(p.Base, c); err != nil {
 			return err
 		}
-		a.printf("voice config: enabled sherpa/Irina, cap=%ds\n", c.MaxSeconds)
+		helperState := "no native helper pins (text-only)"
+		if c.Worker != "" {
+			helperState = "native helper pins recorded"
+		}
+		a.printf("voice config: enabled; %s, cap=%ds\n", helperState, c.MaxSeconds)
 		return nil
 	case "install":
 		if len(args) != 1 {

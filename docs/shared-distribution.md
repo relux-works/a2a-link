@@ -1,5 +1,10 @@
 # Shared distribution preparation (PLAN r3, slices 1–3)
 
+The M0 envelope dependency requires Go >=1.26.0. Current release/source checks
+therefore pin Go 1.26.8; prior Go 1.25.12 native/reproducibility evidence does
+not qualify the new compiler. Native release qualification and adoption remain
+held for their existing owner-controlled gates.
+
 The production implementation slices prepare Linux packages, deterministic
 archives, private Darwin input assembly, the signed platform manifest, cask
 custody controls and publisher recovery. Integration is **partial**.
@@ -30,7 +35,7 @@ version injection, Swift/Darwin build, Homebrew generator or publication.
 Resolve the pinned module inputs before disabling dependency network access.
 Unlike the portable descriptor's managed vendor staging, this path uses
 `-mod=readonly`, a read-only resolved module cache, `GOPROXY=off`, `GOSUMDB=off`,
-`GOWORK=off`, `GOENV=off` and the pinned local Go 1.26.0 toolchain. The compilation
+`GOWORK=off`, `GOENV=off` and the pinned local Go 1.26.8 toolchain. The compilation
 cache remains writable; it is separate from sealed module inputs. Build tasks
 use `-p 1`, tests `-parallel 2`, and GoReleaser `--parallelism 2`.
 
@@ -166,7 +171,7 @@ GoReleaser's ignored `dist/` is staging only. No installed alias is involved.
 
 | Tool | Exact entry point | Output |
 | --- | --- | --- |
-| Go 1.26.0 | `go test -p 1 -parallel 2 -race -count=1 ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution` | Hosted control log |
+| Go 1.26.8 | `go test -p 1 -parallel 2 -race -count=1 ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution` | Hosted control log |
 | Go build/vet | `go build -p 1 ./cmd/a2a-cask ./cmd/a2a-distribution`; `go vet -p 1 ./internal/sharedrelease ./internal/cask ./cmd/a2a-cask ./cmd/a2a-distribution` | Hosted build/validation |
 | GoReleaser OSS 2.20.2 | `RELEASE_VERSION=0.1.2 goreleaser release --config release/linux.goreleaser.yml --snapshot --clean --parallelism 2 --skip=publish,announce,sign` | Private qualification `dist/` |
 | Syft 1.38.0 | GoReleaser's `syft scan file:ARTIFACT --output syft-json=DOCUMENT` | Six SBOM sidecars |
@@ -211,7 +216,7 @@ checksum signatures and production evidence again.
 -source-archive SOURCE.tar` checks the clean checkout/archive/epoch, complete
 archive metadata and documentation, ELF architecture, producer evidence digest,
 and exact independent executable bytes. Hosted macOS independently builds both
-Linux architectures using Go 1.26.0, the approved flags and offline modules.
+Linux architectures using Go 1.26.8, the approved flags and offline modules.
 Its fixture comparison cannot promote qualification evidence to production.
 
 The cask guard checks canonical renderer bytes and Homebrew 7.0.13's public
@@ -329,7 +334,7 @@ an unrelated error does not count. The valid original, field plants and complete
 Go build/vet controls remain required. Existing real RPM/deb reviewer plants and
 the FILEMODES narrowing mutant remain unchanged.
 
-Hosted pins: Go 1.26.0, cosign 2.6.1 and the existing packaging/SBOM digest lock;
+Hosted pins: Go 1.26.8, cosign 2.6.1 and the existing packaging/SBOM digest lock;
 Homebrew 7.0.13 at `bc63375ac3a4d6debb1ceb441ae6e22854f0909a`. That source locks
 portable Ruby 4.0.9: ARM64 Darwin archive SHA256
 `43ff285a82f48c84a06d0676a3800815a19d290d32e44182ddd7a6e95478e18e`,
@@ -429,15 +434,16 @@ tap delivery or installed adoption.
 ### Fork compiler integration
 
 Current fork packages, exact ELF/evidence checks, native assembly and independent
-verification use Go 1.26.0, matching the unchanged CG1/Nostr module minimum.
+verification use Go 1.26.8, the exact compiler pinned by the module and its
+release policy.
 The production hold, repository/signer/reviewer authority, action/tool hashes,
 archive/SBOM checks and pinned Darwin fixture bytes are unchanged. A different
 Go patch version still refuses; this is not an automatic toolchain range.
 
-The separate immutable v0.1.1 cask qualification reproduces its frozen source
-and Linux binaries with Go 1.25.12 on both Linux and macOS. It explicitly fetches
-that upstream tag and verifies the original commit. Only its current cask
-renderer is compiled with the exact Go 1.26.0 toolchain. The native verifier can
+The separate immutable v0.1.1 cask qualification builds its frozen source and
+Linux binaries with the same Go 1.26.8 compiler on both Linux and macOS. It
+explicitly fetches that upstream tag and verifies the original commit. Its
+current cask renderer names the exact Go 1.26.8 toolchain. The native verifier can
 check the historical Darwin payload's existing source/signature/digest binding
 without rebuilding it or changing its producer evidence. Both real qualification
 routes must remain green; fixture reproduction is not current-fork packaging.

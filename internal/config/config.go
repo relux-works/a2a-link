@@ -184,6 +184,9 @@ type Credentials struct {
 	DeviceID          string             `json:"device_id"`
 	Password          string             `json:"password,omitempty"`
 	Homeserver        string             `json:"homeserver"`
+	// VaultSelection is named-only vault-v1 metadata. Absent for every
+	// legacy backend, so legacy serialized metadata keeps its exact bytes.
+	VaultSelection VaultSelectionField `json:"vault_selection,omitzero"`
 }
 
 // ServerName returns the server part of the user id.
@@ -290,6 +293,17 @@ func readCredentials(path string) (Credentials, error) {
 	return c, nil
 }
 
+// ErrCredentialJSON identifies decoding failure after the existing guarded
+// read, without exposing parser input. Legacy diagnostic text is preserved.
+var ErrCredentialJSON = errors.New("invalid credential JSON")
+
+type credentialJSONError struct{ path string }
+
+func (e *credentialJSONError) Error() string {
+	return fmt.Sprintf("%s is not valid credential JSON", e.path)
+}
+func (e *credentialJSONError) Unwrap() error { return ErrCredentialJSON }
+
 func readCredentialMetadata(path string) (Credentials, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -298,7 +312,7 @@ func readCredentialMetadata(path string) (Credentials, error) {
 	var c Credentials
 	if err := json.Unmarshal(data, &c); err != nil {
 		// Never include the file content: it holds secrets.
-		return Credentials{}, fmt.Errorf("%s is not valid credential JSON", path)
+		return Credentials{}, &credentialJSONError{path: path}
 	}
 	if c.UserID == "" {
 		return Credentials{}, fmt.Errorf("%s is missing user_id", path)

@@ -50,6 +50,10 @@ func cmdDaemonMigrate(ctx context.Context, a *App, args []string) error {
 	if c != nil && c.Store.Backend == "keychain" || c == nil && a.Getenv(envSecretStore) == "keychain" {
 		return errDaemonKeychainMigrationDeferred
 	}
+	if c != nil && c.Store.Backend == config.BackendVaultV1 {
+		// No a2ad token custody move and no daemon path to a previous backend.
+		return vaultRefusal(vaultEOperationDenied)
+	}
 	if _, err := a.selectedStore(); err != nil {
 		return config.ErrDaemonMigration
 	}

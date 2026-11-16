@@ -23,9 +23,6 @@ type Status struct {
 // assets or establish ffmpeg codec support.
 func Inspect(base string) Status {
 	s := Status{Config: "unavailable", Native: "unavailable", Model: "unavailable", Encoder: "unavailable", Synthesis: "not_checked", LastAttempt: "not_recorded", MaxSeconds: MaxSeconds}
-	if nativeSynthesis {
-		s.Native = "compiled"
-	}
 	st, err := os.Lstat(ConfigPath(base))
 	switch {
 	case os.IsNotExist(err):

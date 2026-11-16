@@ -26,11 +26,26 @@ Encryption and device provenance grant no application authority: existing princi
 scopes and protocol rules 13/14/24 still apply.
 
 An accepted Megolm event is associated with the **session-originator device** and
-its anchored cross-signing chain, under section 3's assumptions. It is not proof
-that this device alone authored the ciphertext. Megolm keys are shared; another
-key holder can forge a message under the session. The homeserver asserts the outer
-sender MXID, which is not itself authenticated by Megolm plaintext. Two-member
-scope reduces third-party key holders; it does not remove this protocol limitation.
+its anchored cross-signing chain, under section 3's assumptions. Megolm messages
+are signed with the session's Ed25519 signing key. Only the device that created
+the outbound session holds that private key. A recipient gets the ratchet and the
+public signing key, so it can decrypt but cannot produce a valid message under the
+session. The residual risks are elsewhere:
+
+1. The session-to-device binding rests on the room key arriving over an
+   authenticated Olm channel from that device (`direct-olm`, section 3). Forwarded,
+   imported or backup-restored keys lose that binding and are refused.
+2. Megolm plaintext carries no sender. The outer sender MXID is asserted by the
+   homeserver; it is accepted only when it equals the MXID that the cross-signing
+   chain binds to the originator device.
+3. A compromised originator device, or a stolen copy of its outbound session,
+   can sign. Cross-signing cannot detect that.
+4. The signature gives integrity and origin, not freshness: replay and ordering
+   are handled by message-index windows, and a homeserver can still withhold or
+   delay events.
+
+Two-member scope limits who receives keys; the origin claim itself does not depend
+on room size.
 
 Acceptance: one real identity sends to a joined, verified human peer in that DM,
 reads a reply associated with the peer's verified session-originator device, and
@@ -81,10 +96,10 @@ and policy around these primitives. No high-level SDK sync is installed.
 
 No download is attempted here. Cached-source provenance, checksums, licenses,
 security-history limits and Go compatibility are recorded in the U1 handoff.
-The repository remains on `go 1.25.12`; v0.31.0 and v0.32.0 require Go 1.26 and
-are not candidates without a separately approved toolchain change. v0.30.0's
-`go 1.25.0` minimum is compatible; its dependency `toolchain` directive does not
-change this repository's toolchain under `GOTOOLCHAIN=local`.
+The signed-envelope dependency raises the repository minimum to `go 1.26.8`.
+Mautrix remains pinned at v0.30.0; newer versions still require a separate
+dependency review. Its `go 1.25.0` minimum remains compatible, and its dependency
+`toolchain` directive does not change the selected local toolchain.
 With admitted inputs, compile the full CLI offline using `CGO_ENABLED=0 GOPROXY=off
 GOSUMDB=off GOTOOLCHAIN=local GOENV=off`; prove no libolm/toolchain fetch. Targets
 are darwin/linux amd64/arm64, not mobile. No libolm or cgo is admitted.
@@ -296,8 +311,10 @@ For incoming session-originator eligibility require all applicable checks:
 Forwarded/imported/backup keys and another device's assertion do not prove origin.
 Fresh queries provide a recent **observation**, not cryptographic freshness: a
 malicious server can replay individually valid device keys and hide deletion.
-Guarantee assumes honest sender-MXID binding by the server, no colluding/compromised
-key holder and authentic host pins; it cannot promise detection of hidden revocation.
+The outer sender MXID matching the cross-signed originator is an enforced check
+(section 1 item 2, section 7 stage 6), not an assumption. The guarantee still
+assumes an uncompromised originator device (and outbound session store) and
+authentic host pins; it cannot promise detection of hidden revocation.
 No stronger signature over application text is invented. Device-list observation
 and timestamp appear in evidence; never label it a freshness proof.
 Changed keys are quarantined. Known deletion/block immediately prevents new
@@ -823,8 +840,9 @@ The internal accepted-event type cannot be constructed by wire JSON unmarshal.
 It includes exact content plus authenticated local provenance; an event's alleged
 `crypto` field has no authority. U3 defines this type before U4 consumes it.
 Megolm plaintext must bind inner room/type to authenticated session provenance;
-outer sender consistency is checked under section 3's stated server assumption,
-not misrepresented as an inner sender signature. No decryption-only acceptance.
+the outer sender MXID is homeserver-asserted and is accepted only when it equals
+the MXID that the cross-signing chain binds to the originator device (section 1,
+item 2; section 3 guarantee), never misrepresented as an inner sender signature. No decryption-only acceptance.
 
 U4 adds explicit versioned `MailEntry.CryptoEvidence` storage, separate from Event:
 `v`, binding/generation, event/digest, admission ID, trust/context revisions,
@@ -1034,8 +1052,8 @@ resume the failed step; a gate cannot be skipped to reach a later diagnostic.
 If a reply was finally refused, use a new event after repair rather than promoting
 it. `topic new` establishes the root required by `post`; slug lookup must decrypt
 that root through U3 before use. The peer's
-unverified reply uses a fresh session never shared by an eligible device; otherwise
-Megolm cannot prove which key holder authored it. Exact single-event diagnostic:
+unverified reply uses a fresh session that the unverified device itself created;
+otherwise the run does not exercise the unverified-originator refusal. Exact single-event diagnostic:
 `a2a --profile "$PROFILE" --as "$NAME" e2ee refusals --room "$R" --event "$E" --json`.
 Record metadata/effects and own-outbound echo evidence, never plaintext or secrets.
 Acceptance requires the final lookup visibly report the intended retained refusal and
@@ -1165,7 +1183,7 @@ cases, with comments stating exactly what each proves and its limits:
 - **U5:** Real owner verifies master in own client; retained public evidence validates
   after restart. Section 8 sends/reply/refusal with exact MXID/originator chain;
   correctly cross-signed/approved second device is the neighboring positive control.
-  State honest hidden-revocation/key-holder limitations. Preserve S1 plaintext and
+  State honest hidden-revocation and compromised-originator-device limitations. Preserve S1 plaintext and
   encrypted-room refusal, pin/watermarks/archive exclusions/mirror deadlines.
   Record build SHA, public fingerprints and exact command verdicts. Fake-only
   interoperability or a skipped control cannot satisfy acceptance.

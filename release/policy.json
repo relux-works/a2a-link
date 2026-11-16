@@ -14,7 +14,7 @@
     "brew-installer-controls (ubuntu-24.04)",
     "brew-installer-controls (macos-15)"
   ],
-  "go_version": "go1.26.0",
+  "go_version": "go1.26.8",
   "xcode_version": "16.4",
   "swift_version": "6.1.2",
   "source_signer_fingerprints": [

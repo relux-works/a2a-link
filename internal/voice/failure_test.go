@@ -140,13 +140,13 @@ func TestSynthesisRenderCategories(t *testing.T) {
 			if tc.name == "validation" {
 				runner.validation, runner.failAt = tc.err, 0
 			}
-			audio, err := (LocalRenderer{Runner: runner}).Render(context.Background(), base, Config{true, MaxSeconds}, hostileDiagnostic)
+			audio, err := (LocalRenderer{Runner: runner}).Render(context.Background(), base, Config{Enabled: true, MaxSeconds: MaxSeconds}, hostileDiagnostic)
 			assertSynthesis(t, err, tc.category, tc.status, tc.message)
 			if len(audio.OGG) != 0 || runner.seen > 1 {
 				t.Fatal("refusal retained audio or retried")
 			}
 			runner.validation, runner.failure, runner.failAt, runner.seen = nil, nil, 0, 0
-			audio, err = (LocalRenderer{Runner: runner}).Render(context.Background(), base, Config{true, MaxSeconds}, "valid synthetic input")
+			audio, err = (LocalRenderer{Runner: runner}).Render(context.Background(), base, Config{Enabled: true, MaxSeconds: MaxSeconds}, "valid synthetic input")
 			if err != nil || audio.DurationMS != 1000 || len(audio.OGG) == 0 || runner.seen != 4 {
 				t.Fatal("valid render neighbor refused or duplicated")
 			}
@@ -179,13 +179,13 @@ func TestSynthesisOtherRenderStages(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &categoryRunner{renderRunner: &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, sampleRate)}, failAt: tc.at, failure: errors.New(hostileDiagnostic), invalidPCM: tc.name == "invalid-pcm", invalidOGG: tc.name == "invalid-ogg"}
-			audio, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{true, MaxSeconds}, "synthetic input")
+			audio, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: MaxSeconds}, "synthetic input")
 			if err != tc.want || SafeRenderError(err) != tc.want || len(audio.OGG) != 0 {
 				t.Fatal("render failure stage changed or audio escaped")
 			}
 			r.failAt, r.seen, r.invalidPCM, r.invalidOGG = 0, 0, false, false
 			r.renderRunner.calls = 0
-			if _, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{true, MaxSeconds}, "valid synthetic input"); err != nil {
+			if _, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: MaxSeconds}, "valid synthetic input"); err != nil {
 				t.Fatal("valid stage neighbor refused")
 			}
 		})
@@ -223,6 +223,9 @@ func (r *deadlineRunner) ValidateModel(ctx context.Context, _ string) error {
 	}
 	return nil
 }
+func (r *deadlineRunner) PrepareWorker(context.Context, Config) (PreparedWorker, error) {
+	return PreparedWorker{Path: WorkerName}, nil
+}
 func (r *deadlineRunner) Run(ctx context.Context, _ string, _ []string, _ io.Reader) error {
 	r.process, _ = ctx.Deadline()
 	if remaining := time.Until(r.process); remaining <= 0 || remaining > 120*time.Second {
@@ -246,7 +249,7 @@ func TestSynthesisDeadlineContract(t *testing.T) {
 				r.parent, _ = ctx.Deadline()
 			}
 			defer cancel()
-			_, err := (LocalRenderer{Runner: r}).Render(ctx, t.TempDir(), Config{true, MaxSeconds}, "synthetic fixture")
+			_, err := (LocalRenderer{Runner: r}).Render(ctx, t.TempDir(), Config{Enabled: true, MaxSeconds: MaxSeconds}, "synthetic fixture")
 			assertSynthesis(t, err, SynthesisDeadline, -1, "voice synthesis failed: context deadline exceeded")
 		})
 	}
@@ -255,7 +258,7 @@ func TestSynthesisDeadlineContract(t *testing.T) {
 // A failure while synthesizing the truncation notice retains the same bounded category and cleans earlier audio.
 func TestSynthesisNoticeCategory(t *testing.T) {
 	r := &categoryRunner{renderRunner: &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, 181*sampleRate)}, failAt: 3, failure: NewSynthesisError(SynthesisWorkerExit, 7)}
-	audio, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{true, MaxSeconds}, "synthetic fixture")
+	audio, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: MaxSeconds}, "synthetic fixture")
 	assertSynthesis(t, err, SynthesisWorkerExit, 7, "voice synthesis failed: worker exited (status 7)")
 	if len(audio.OGG) != 0 || r.seen != 3 {
 		t.Fatal("notice failure published audio or retried")
@@ -266,7 +269,7 @@ func TestSynthesisNoticeCategory(t *testing.T) {
 		}
 	}
 	r.failAt, r.seen, r.renderRunner.calls = 0, 0, 0
-	if audio, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{true, MaxSeconds}, "synthetic fixture"); err != nil || !audio.Truncated {
+	if audio, err := (LocalRenderer{Runner: r}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: MaxSeconds}, "synthetic fixture"); err != nil || !audio.Truncated {
 		t.Fatal("valid notice neighbor refused")
 	}
 }

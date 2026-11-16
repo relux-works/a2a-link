@@ -3833,12 +3833,13 @@ selected profile's card-room setting changes; start a fresh invocation to use th
 new setting. Existing binaries that do not recognize `card_room` refuse such a
 registry rather than silently ignoring the setting.
 
-The credential-store schema accepts exactly these two backends:
+The credential-store schema accepts these explicit backends:
 
 | Backend | Configuration | Secret storage |
 | --- | --- | --- |
 | `keychain` | Requires distinct valid `access_token_service` and `password_service` names, as above; macOS only | Access token and recovery password in the selected Keychain services, keyed by full MXID |
 | `file` | `"credential_store": {"backend": "file"}`; no Keychain service names and no `registration_token_ref` | Access token in the existing connection-scoped credential file, mode `0600`; passwords stay in memory |
+| `vault-v1` | Named release-only backend; no Keychain service names, `registration_token_ref` or `admin_registration` | Portable boundary only; production native/context dependencies are unavailable |
 
 `registration_token_ref` resolves only through Keychain, so any such reference
 is invalid on a file connection. File connections work on Linux and macOS and
@@ -3947,6 +3948,71 @@ or manufacture receipts. Preserve the old working path until separately
 admitted migration and retirement are verified. Binary installation, profile
 activation, bindings, identity creation, federation and rollout each retain
 their existing owner/keeper admission gates.
+
+### Portable vault-v1 metadata and release boundary
+
+The profile selects only the backend. Each selected agent's connection-scoped
+public metadata supplies this complete object (no token/password):
+
+```json
+{
+  "vault_selection": {
+    "identity": {
+      "domain": "fixture-domain",
+      "kind": "explicit",
+      "name": "fixture-alpha",
+      "origin": null
+    },
+    "session_mode": "registered"
+  }
+}
+```
+
+This public schema example is not enrollment or launch authority. The actual
+metadata retains its existing exact connection_binding/user_id/homeserver fields.
+`session_mode` must be explicitly `registered` or `direct`; no default exists.
+Synthetic identity uses the exact three-field origin and its frozen derivation.
+The field must be genuinely absent on legacy backends: null, malformed values,
+duplicates and case shadows are invalid, including on lenient legacy loads.
+Absent legacy serialization/fingerprints and unrelated legacy unknown-key handling
+are preserved. Valid JSON surrogate pairs and raw scalars decode to identical
+UTF-8 bytes; malformed Unicode is refused without replacement.
+
+Any ambient A2A_SECRET_STORE override conflicts with a selected vault profile,
+including an equal or explicitly empty value. Ambient vault-v1 alone cannot
+select/admit this backend. Agent identity need not equal the Matrix selector:
+only an independently admitted exact typed choice, trusted installation domain
+and explicit identity-to-full-account/endpoint binding can admit credentials.
+Profiles do not carry identity, origin or service trust material. These checks
+do not authenticate an individual same-UID agent: a peer using the genuinely
+admitted route may freshly select another enrolled identity, under the frozen
+trust model.
+
+Production has no context issuer/provider, so valid metadata alone returns
+NOT_SUBMITTED E_CONTEXT before the factory. Qualified context without a driver
+returns NOT_SUBMITTED E_UNAVAILABLE. No native driver, endpoint, bootstrap, codec,
+peer proof, custody, home/resume receiver or usable service is implemented.
+There is no override to manufacture those facts. These source interfaces do not
+qualify real code signatures, Keychain/Enclave behavior or installed adoption.
+
+On a future qualified route, every operation requires exact live-connection
+service-signature/pin-policy verification and its own trusted invocation receipt.
+Register success does not mean release was invoked. Only a complete authenticated
+matching refusal is REFUSED; uncertain invoked/unadmitted replies are UNKNOWN
+with zero consumer bytes. Known valid release success stays SUCCEEDED if later
+consumer or cleanup work fails; local handoff/cleanup reporting remains separate.
+No automatic retry occurs. A later authorized attempt after UNKNOWN uses a fresh
+connection/request/session as required by the frozen contract. Connections are
+closed per attempt; no session/plaintext cache is persisted.
+
+Metadata-only observation makes zero context-provider, factory, discovery,
+connect/bootstrap/verification/prepare/invoke/close or legacy-secret calls.
+Every selected-vault failure keeps the selected identity/backend, reads no legacy
+token and writes no home/config/journal. Matrix account registration/admin and
+daemon custody migration refuse before effects. Ordinary metadata/credential
+validation and existing typed member/auth behavior still apply. No native or
+live operation is authorized by this documentation.
+
 
 ## Stale addressed-mail alarm (`a2a mail-alarm`)
 
@@ -4361,6 +4427,64 @@ UNKNOWN operation. No history/body/time search, remote reconciliation, replay
 or resend is implemented here. Issue #97 remains open. A separately decided
 future resume route requires a known server transaction-deduplication horizon;
 this feature makes no such assumption.
+
+### `a2a e2ee init [--json]` / `a2a e2ee identity show [--json]` (U2a)
+
+Cross-signing bootstrap and public identity evidence for the E2EE MVP
+([design](e2ee.md), sections 3, 4 and 10). Both verbs are agent-only, need the
+selected identity and run only where A1 custody exists: the process is the
+dedicated a2ad service user (`_a2a` on macOS, `a2a` on Linux) and the identity's
+config base is its a2ad identity home. Anywhere else both refuse
+`e2ee_custody_unavailable`; there is no home, local-base or environment fallback.
+Custody lives in `<identity base>/e2ee-<hash>/` (U1 file custody: generation
+pointer, create-only root bundle, sealed `state.bin`, the fixed account-password
+section). The station allowlist admits exactly these two verbs.
+
+`init` is idempotent and never rotates keys:
+
+1. Reads the host pin `B/CLASS/H/NAME.pin.json` under
+   `/Library/Application Support/a2a-swarm/e2ee-trust` (macOS) or
+   `/etc/a2a-swarm/e2ee-trust` (Linux), refusing a missing artifact
+   (`e2ee_pin_unavailable`), anything not root-owned, agent-writable or
+   symlinked (`e2ee_pin_unsafe`), more than 64 KiB (`e2ee_capacity`), and a
+   duplicate/unknown member or wrong binding, identity, device or owner principal
+   (`e2ee_pin_invalid`). It then verifies the pinned owner MSK signature over the
+   pinned USK (`e2ee_owner_signature_invalid`). The CLI never writes the pin.
+2. Requires `whoami` to equal the credential MXID and device
+   (`e2ee_identity_mismatch`), then persists pointer, root seeds and the first
+   sealed state (`local-ready`) before any upload. Keys already published for
+   this device or user without local state refuse `e2ee_recovery_required`.
+3. Uploads the self-signed device keys, then the master, self-signing and
+   user-signing keys passwordless. When the server demands user-interactive
+   auth, it completes `m.login.password` once with the Q2 stored password; a
+   missing section, unsupported flow or rejected password stops at
+   `awaiting-uia` with `e2ee_uia_unavailable` (exit 1, nothing claimed uploaded).
+   The SSK signature over the device is published last; state `published`.
+4. Reads its own `/keys/query`: no owner USK signature on the master is
+   `awaiting-owner` (exit 0, the expected stop before the Element ceremony); a
+   signature under the pinned owner USK that verifies over exactly the persisted
+   master is `owner-verified`; a present signature that does not verify refuses
+   `e2ee_owner_signature_invalid`. A local flag or unsigned USK never counts.
+
+Before every trusted step the pin is reopened and compared: the same revision
+with other bytes, a lower revision or a higher revision enters `changed`
+(`e2ee_trust_changed`), which stays until U2b's host revision + 1 ceremony.
+Different published keys enter `changed` with `e2ee_published_conflict`.
+
+Output (text or `--json` with `type: e2ee_identity`) carries public evidence
+only: MXID, device ID, state, pin revision, owner, and for the MSK/SSK/USK the
+key ID and SHA256 of the public key. This is the input of the later grant
+key-binding node. `identity show` reads custody without network access, prints
+`absent` before the first init, re-verifies a stored owner signature against the
+current pin and reports `changed` for a changed pin.
+
+Q2 wiring: `register` and named `connection register` store the generated
+account password in the fixed custody section before registering when custody
+is available, and reuse an existing section on retry; only a2a reads it.
+
+Not here: Q4 device admission, revision + 1 / re-ceremony / recovery / rotation
+(U2b), rooms, sends, ingress, decryption, activation, keychain backends, backup
+or key sharing.
 
 ## Daemon authentication endpoint
 

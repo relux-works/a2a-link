@@ -32,6 +32,7 @@ func (c *Credentials) decodeJSON(data []byte, strict bool) error {
 	wire := struct {
 		*credentialsJSON
 		Keywords waitKeywordValues `json:"wait_keywords"`
+		Vault    json.RawMessage   `json:"vault_selection"`
 	}{credentialsJSON: &next}
 	d := json.NewDecoder(bytes.NewReader(data))
 	if strict {
@@ -40,6 +41,14 @@ func (c *Credentials) decodeJSON(data []byte, strict bool) error {
 	if err := d.Decode(&wire); err != nil {
 		return err
 	}
+	field, err := scanVaultSelection(data)
+	if err != nil {
+		if strict || !field.present {
+			return err
+		}
+		field.invalid = true // legacy decode retains reserved invalid presence for validation
+	}
+	next.VaultSelection = field
 	next.waitKeywordsRaw = wire.Keywords
 	for _, raw := range wire.Keywords {
 		// Invalid optional data stays opaque; it never becomes an active filter.

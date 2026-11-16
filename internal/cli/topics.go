@@ -875,9 +875,11 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 		a.Stdout = out
 		defer func() { a.Stdout = out.w }()
 	}
+	observer := a.envelopeObserver(s)
 	for _, ev := range events {
+		verdict := observer.Observe(ev, roomID, s.creds.UserID, a.Now())
 		if !*asJSON {
-			a.printEvent(ev, s.server)
+			a.printEvent(ev, s.server, verdict)
 			printed = append(printed, ev.EventID)
 			continue
 		}
@@ -885,7 +887,9 @@ func cmdRead(ctx context.Context, a *App, args []string) error {
 		if h, ok := decodeHeader(ev.Message().A2A); ok && h.Type == "topic" {
 			typ = "topic"
 		}
-		if err := a.printJSON(eventRecord(typ, label, roomID, ev, s.server, false)); err != nil {
+		rec := eventRecord(typ, label, roomID, ev, s.server, false)
+		rec.Verification = verdict
+		if err := a.printJSON(rec); err != nil {
 			return err
 		}
 		printed = append(printed, ev.EventID)
@@ -988,7 +992,7 @@ func (s *session) collectWhere(ctx context.Context, n int, keep func(matrix.Even
 	return out, nil
 }
 
-func (a *App) printEvent(ev matrix.Event, server string) {
+func (a *App) printEvent(ev matrix.Event, server string, verification ...string) {
 	m := ev.Message()
 	ts := time.UnixMilli(ev.OriginServerTS).UTC().Format(time.RFC3339)
 	meta := []string{}
@@ -1024,7 +1028,12 @@ func (a *App) printEvent(ev matrix.Event, server string) {
 	if root := eventTopicRoot(ev); root != "" {
 		meta = append(meta, "thread="+root)
 	}
-	line := fmt.Sprintf("[%s] %s %s", ts, senderText(ev.Sender), sanitizeLine(ev.EventID))
+	label := ""
+	if len(verification) > 0 {
+		label = verificationField(verification[0])
+	}
+	// The observed label precedes every peer-controlled field (sender, id, meta).
+	line := fmt.Sprintf("[%s]%s %s %s", ts, label, senderText(ev.Sender), sanitizeLine(ev.EventID))
 	if len(meta) > 0 {
 		line += " " + sanitizeLine(strings.Join(meta, " "))
 	}

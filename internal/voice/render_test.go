@@ -25,6 +25,9 @@ type renderRunner struct {
 }
 
 func (r *renderRunner) ValidateModel(context.Context, string) error { return nil }
+func (r *renderRunner) PrepareWorker(context.Context, Config) (PreparedWorker, error) {
+	return PreparedWorker{Path: "fixture-worker"}, nil
+}
 
 func (r *renderRunner) Run(ctx context.Context, name string, args []string, input io.Reader) error {
 	r.calls++
@@ -64,12 +67,51 @@ func (r *renderRunner) Run(ctx context.Context, name string, args []string, inpu
 	return os.WriteFile(out, pcm, 0600)
 }
 
+type preparedWorkerRunner struct {
+	*renderRunner
+	path        string
+	prepareCall int
+	closeCall   int
+	workerName  string
+	workerArgs  []string
+}
+
+func (r *preparedWorkerRunner) PrepareWorker(context.Context, Config) (PreparedWorker, error) {
+	r.prepareCall++
+	return PreparedWorker{Path: r.path, cleanup: func() { r.closeCall++ }}, nil
+}
+
+func (r *preparedWorkerRunner) Run(ctx context.Context, name string, args []string, input io.Reader) error {
+	if input != nil {
+		r.workerName = name
+		r.workerArgs = append([]string(nil), args...)
+	}
+	return r.renderRunner.Run(ctx, name, args, input)
+}
+
+// Synthesis executes the authenticated snapshot path, passes only model/output
+// arguments, and removes the snapshot after the child has exited.
+func TestRenderUsesPreparedWorkerSnapshot(t *testing.T) {
+	base := t.TempDir()
+	worker := filepath.Join(t.TempDir(), WorkerName)
+	runner := &preparedWorkerRunner{
+		renderRunner: &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, sampleRate)},
+		path:         worker,
+	}
+	if _, err := (LocalRenderer{Runner: runner}).Render(context.Background(), base, Config{Enabled: true, MaxSeconds: MaxSeconds}, "prepared worker control"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.prepareCall != 1 || runner.closeCall != 1 || runner.workerName != worker || len(runner.workerArgs) != 2 || runner.workerArgs[0] != ModelDir(base) || filepath.Base(runner.workerArgs[1]) != "source.wav" {
+		t.Fatalf("prepared worker boundary mismatch: prepare=%d close=%d name=%q args=%q", runner.prepareCall, runner.closeCall, runner.workerName, runner.workerArgs)
+	}
+}
+
 // A controlled long source really appends the synthesized notice, stays below
 // 180s after decode, uses bounded processes and deletes every private output.
 // This tests the cap algorithm, not a real engine's pronunciation or encoding.
 func TestRenderCapNoticeAndPrivacy(t *testing.T) {
 	runner := &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, 181*sampleRate)}
-	result, err := (LocalRenderer{Runner: runner}).Render(context.Background(), t.TempDir(), Config{true, 180}, "complete text")
+	result, err := (LocalRenderer{Runner: runner}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: 180}, "complete text")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +138,7 @@ func TestRenderFailuresAndShortControl(t *testing.T) {
 	for fail := 0; fail <= 4; fail++ {
 		t.Run(string(rune('0'+fail)), func(t *testing.T) {
 			runner := &renderRunner{t: t, fail: fail, source: bytes.Repeat([]byte{0, 1}, sampleRate)}
-			a, err := (LocalRenderer{Runner: runner}).Render(context.Background(), t.TempDir(), Config{true, 180}, "PRIVATE TEXT")
+			a, err := (LocalRenderer{Runner: runner}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: 180}, "PRIVATE TEXT")
 			if fail == 0 {
 				if err != nil || a.Truncated || a.DurationMS != 1000 {
 					t.Fatalf("short control: %+v %v", a, err)
@@ -139,6 +181,44 @@ func TestCapPCMAndWaveform(t *testing.T) {
 	}
 }
 
+func TestDocumentedVoiceWitnessConfigValidates(t *testing.T) {
+	c := Config{
+		Enabled: true, MaxSeconds: 180,
+		Worker:         filepath.Join("/verified/release", WorkerName),
+		WorkerSHA256:   strings.Repeat("a", 64),
+		ManifestSHA256: strings.Repeat("b", 64),
+	}
+	actualWorker, hasWorker := os.LookupEnv("A2A_VOICE_IT_EXECUTABLE")
+	actualWorkerSHA, hasWorkerSHA := os.LookupEnv("A2A_VOICE_IT_WORKER_SHA256")
+	actualManifestSHA, hasManifestSHA := os.LookupEnv("A2A_VOICE_IT_MANIFEST_SHA256")
+	if hasWorker || hasWorkerSHA || hasManifestSHA {
+		if actualWorker == "" || actualWorkerSHA == "" || actualManifestSHA == "" {
+			t.Fatal("documented native witness path and pins must be supplied together")
+		}
+		c.Worker = actualWorker
+		c.WorkerSHA256 = actualWorkerSHA
+		c.ManifestSHA256 = actualManifestSHA
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("documented native witness config rejected: %v", err)
+	}
+	invalid := []struct {
+		name   string
+		config Config
+	}{
+		{"wrong-worker-name", func() Config { c := c; c.Worker = filepath.Join(filepath.Dir(c.Worker), "a2a-voice"); return c }()},
+		{"malformed-worker-pin", func() Config { c := c; c.WorkerSHA256 = "A" + strings.Repeat("a", 63); return c }()},
+		{"malformed-manifest-pin", func() Config { c := c; c.ManifestSHA256 = "b"; return c }()},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.config.Validate(); err == nil {
+				t.Fatal("invalid documented worker config accepted")
+			}
+		})
+	}
+}
+
 // Gated actual macOS synthesis and Opus encode/decode witness. Uses only the
 // caller's explicit isolated model/config directory and separately built binary;
 // it writes no audio or text logs and never touches Matrix or the shared binary.
@@ -153,9 +233,9 @@ func TestVoiceReal(t *testing.T) {
 	if base == "" || !filepath.IsAbs(exe) {
 		t.Fatal("explicit isolated base and executable required")
 	}
-	c := Config{true, 180}
+	c := Config{Enabled: true, MaxSeconds: 180, Worker: exe, WorkerSHA256: os.Getenv("A2A_VOICE_IT_WORKER_SHA256"), ManifestSHA256: os.Getenv("A2A_VOICE_IT_MANIFEST_SHA256")}
 	t.Run("sherpa", func(t *testing.T) {
-		audio, err := (LocalRenderer{Executable: exe}).Render(context.Background(), base, c, "Проверка голосового ответа. Полный текст сохраняется в сообщении.")
+		audio, err := (LocalRenderer{}).Render(context.Background(), base, c, "Проверка голосового ответа. Полный текст сохраняется в сообщении.")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +255,7 @@ func TestVoiceReal(t *testing.T) {
 		}
 		t.Logf("engine=%s original_data_dir_bytes=%d duration_ms=%d ogg_bytes=%d waveform_bins=%d", "sherpa", len(filepath.Join(ModelDir(base), "espeak-ng-data")), audio.DurationMS, len(audio.OGG), len(audio.Waveform))
 		if os.Getenv("A2A_VOICE_IT_LONG") == "1" {
-			long, err := (LocalRenderer{Executable: exe}).Render(context.Background(), base, c, strings.Repeat("Это проверка ограничения длительности голосового ответа. ", 160))
+			long, err := (LocalRenderer{}).Render(context.Background(), base, c, strings.Repeat("Это проверка ограничения длительности голосового ответа. ", 160))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +285,7 @@ func TestWaveformSignedBoundary(t *testing.T) {
 // waveform receives the spoken notice when the input itself was shortened.
 func TestRenderInputBound(t *testing.T) {
 	runner := &renderRunner{t: t, source: bytes.Repeat([]byte{1, 0}, sampleRate)}
-	a, err := (LocalRenderer{Runner: runner}).Render(context.Background(), t.TempDir(), Config{true, 180}, strings.Repeat("Я", 6001))
+	a, err := (LocalRenderer{Runner: runner}).Render(context.Background(), t.TempDir(), Config{Enabled: true, MaxSeconds: 180}, strings.Repeat("Я", 6001))
 	if err != nil || !a.Truncated || len([]rune(runner.inputs[0])) != 6000 || runner.inputs[1] != TruncationNotice {
 		t.Fatalf("input bound failed: truncated=%v err=%v", a.Truncated, err)
 	}

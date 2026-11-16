@@ -1,6 +1,6 @@
 module github.com/relux-works/a2a-swarm
 
-go 1.26.0
+go 1.26.8
 
 require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5
@@ -12,7 +12,7 @@ require (
 	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway v0.4.1-0.20261115082735-4f7f9ae72ed8
 	github.com/relux-works/swarma-chain-lab/experiments/sealwatch v0.2.1-0.20261115082735-4f7f9ae72ed8
 	github.com/relux-works/swarma-chain-lab/experiments/single-use v0.3.1-0.20261115082735-4f7f9ae72ed8
-	github.com/relux-works/swarma-envelope v0.0.0-20261108162913-e38510c503d2
+	github.com/relux-works/swarma-envelope v0.0.0-20261114153213-065e25f69da8
 	github.com/yuin/goldmark v1.8.7
 	golang.org/x/net v0.58.0
 	maunium.net/go/mautrix v0.30.0
@@ -34,6 +34,10 @@ require (
 	github.com/relux-works/swarma-chain-lab/experiments/station-lifecycle v0.2.1-0.20261115082735-4f7f9ae72ed8 // indirect
 	github.com/relux-works/swarma-chain-lab/experiments/station-lifecycle/gatewaybind v0.1.1-0.20261115082735-4f7f9ae72ed8 // indirect
 	github.com/relux-works/swarma-registrar v0.0.0-20261023164451-5f44ebf3f788 // indirect
+	github.com/tidwall/gjson v1.19.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	go.mau.fi/util v0.10.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 )
