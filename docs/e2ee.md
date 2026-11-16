@@ -311,9 +311,10 @@ For incoming session-originator eligibility require all applicable checks:
 Forwarded/imported/backup keys and another device's assertion do not prove origin.
 Fresh queries provide a recent **observation**, not cryptographic freshness: a
 malicious server can replay individually valid device keys and hide deletion.
-Guarantee assumes the outer sender MXID matches the cross-signed originator, an
-uncompromised originator device (and outbound session store) and authentic host
-pins; it cannot promise detection of hidden revocation.
+The outer sender MXID matching the cross-signed originator is an enforced check
+(section 1 item 2, section 7 stage 6), not an assumption. The guarantee still
+assumes an uncompromised originator device (and outbound session store) and
+authentic host pins; it cannot promise detection of hidden revocation.
 No stronger signature over application text is invented. Device-list observation
 and timestamp appear in evidence; never label it a freshness proof.
 Changed keys are quarantined. Known deletion/block immediately prevents new
@@ -1182,7 +1183,7 @@ cases, with comments stating exactly what each proves and its limits:
 - **U5:** Real owner verifies master in own client; retained public evidence validates
   after restart. Section 8 sends/reply/refusal with exact MXID/originator chain;
   correctly cross-signed/approved second device is the neighboring positive control.
-  State honest hidden-revocation/key-holder limitations. Preserve S1 plaintext and
+  State honest hidden-revocation and compromised-originator-device limitations. Preserve S1 plaintext and
   encrypted-room refusal, pin/watermarks/archive exclusions/mirror deadlines.
   Record build SHA, public fingerprints and exact command verdicts. Fake-only
   interoperability or a skipped control cannot satisfy acceptance.
