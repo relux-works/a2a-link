@@ -252,6 +252,8 @@ func TestOriginCheckGrantRefusals(t *testing.T) {
 		verdict grantcheck.Verdict
 		want    OriginCode
 	}{
+		{"terms-invalid", grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeTermsInvalid}, OriginTermsInvalid},
+		{"binding-mismatch", grantcheck.Verdict{Decision: grantcheck.Refused, Code: grantcheck.CodeBindingMismatch}, OriginBindingMismatch},
 		{"no-grant", grantcheck.Verdict{Decision: grantcheck.Exchange, Code: grantcheck.CodeNoGrant}, OriginGrantAbsent},
 		{"expired", grantcheck.Verdict{Decision: grantcheck.Exchange, Code: grantcheck.CodeExpired}, OriginGrantExpired},
 		{"seal-spent", grantcheck.Verdict{Decision: grantcheck.Exchange, Code: grantcheck.CodeSealSpent, Closed: true}, OriginSealSpent},

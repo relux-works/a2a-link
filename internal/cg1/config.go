@@ -65,13 +65,13 @@ func open(c admission.Config) (admission.Checker, error) {
 	var cfg settings
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&cfg) != nil || d.Decode(new(any)) != io.EOF || cfg.Version != 1 || cfg.TimeoutMS < 1 || cfg.TimeoutMS > 5000 {
+	if d.Decode(&cfg) != nil || d.Decode(new(any)) != io.EOF || (cfg.Version != 1 && cfg.Version != 2) || cfg.TimeoutMS < 1 || cfg.TimeoutMS > 5000 {
 		return nil, errConfig
 	}
-	if !uniqueJSON(raw) || !grantPolicyNames(raw) {
+	if !uniqueJSON(raw) || !grantPolicyNames(raw, cfg.Version) {
 		return nil, errConfig
 	}
-	freshness, terms, err := cfg.grantPolicy.resolve()
+	_, _, err = cfg.grantPolicy.resolve()
 	if err != nil {
 		return nil, errConfig
 	}
@@ -94,7 +94,7 @@ func open(c admission.Config) (admission.Checker, error) {
 		return nil, errConfig
 	}
 	sr.Close()
-	core, err := grantcheck.New(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, ExecutorKey: cfg.ExecutorKey, Freshness: freshness, Terms: terms, StateDir: state, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond})
+	core, err := newPolicyChecker(cfg.grantPolicy, grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: state, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.NostrNIP17Seal)
 	if err != nil {
 		return nil, errConfig
 	}

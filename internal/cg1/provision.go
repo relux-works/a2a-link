@@ -35,7 +35,7 @@ func (c *matrixChecker) Provision(parent context.Context, p grantcheck.Presentat
 	}
 	// Only the concrete production backend exposes this route; no test verdict
 	// source or transport assertion substitutes for the protected constructor.
-	core, ok := c.core.(*grantcheck.Checker)
+	core, ok := c.core.(*policyChecker)
 	if !ok {
 		return deny("check_failed")
 	}

@@ -217,6 +217,8 @@ func TestPrepareRefusalsCarryNoResult(t *testing.T) {
 		{"grant-expired", cg1.OriginGrantExpired, ReasonGrantExpired, runorigin.ErrRefused},
 		{"seal-spent", cg1.OriginSealSpent, ReasonSealSpent, runorigin.ErrRefused},
 		{"landlord-changed", cg1.OriginLandlordChanged, ReasonLandlordChanged, runorigin.ErrRefused},
+		{"terms-invalid", cg1.OriginTermsInvalid, ReasonTermsInvalid, runorigin.ErrRefused},
+		{"binding-mismatch", cg1.OriginBindingMismatch, ReasonBindingMismatch, runorigin.ErrRefused},
 		{"grant-refused", cg1.OriginGrantRefused, ReasonGrantRefused, runorigin.ErrRefused},
 		{"policy-invalid", cg1.OriginPolicyInvalid, ReasonPolicyInvalid, runorigin.ErrRefused},
 		{"stale-tip", cg1.OriginTipStale, ReasonTipStale, runorigin.ErrUnavailable},

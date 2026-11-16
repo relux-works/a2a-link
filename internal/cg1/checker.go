@@ -13,8 +13,13 @@ import (
 
 // Only grantcheck.New constructs this production backend. No injectable factory
 // or verdict cache can bypass K1. CG1 owns cross-process state/try-locks.
+type nostrGrantSource interface {
+	Inbound(context.Context, string, *grantcheck.Presentation) grantcheck.Verdict
+	Outbound(context.Context, string) grantcheck.Verdict
+}
+
 type checker struct {
-	core          *grantcheck.Checker
+	core          nostrGrantSource
 	own, identity string
 	timeout       time.Duration
 	closed        atomic.Bool

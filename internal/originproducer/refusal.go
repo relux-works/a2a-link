@@ -33,6 +33,8 @@ const (
 	ReasonSealSpent          Reason = "seal_spent"
 	ReasonLandlordChanged    Reason = "landlord_changed"
 	ReasonGrantRefused       Reason = "grant_refused"
+	ReasonTermsInvalid       Reason = "terms_invalid"
+	ReasonBindingMismatch    Reason = "binding_mismatch"
 	ReasonTipStale           Reason = "tip_stale"
 	ReasonTipMoved           Reason = "tip_moved"
 	ReasonUnavailable        Reason = "unavailable"
@@ -75,6 +77,10 @@ func ReasonOf(err error) Reason {
 // outcome refuses; nothing here can turn an outcome into permission.
 func refusalFor(code cg1.OriginCode) error {
 	switch code {
+	case cg1.OriginTermsInvalid:
+		return refuse(ReasonTermsInvalid)
+	case cg1.OriginBindingMismatch:
+		return refuse(ReasonBindingMismatch)
 	case cg1.OriginPolicyInvalid:
 		return refuse(ReasonPolicyInvalid)
 	case cg1.OriginInnerInvalid:

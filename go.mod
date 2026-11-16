@@ -8,10 +8,10 @@ require (
 	github.com/k2-fsa/sherpa-onnx-go-macos v1.13.8
 	github.com/relux-works/a2a-transport-nostr v0.3.0
 	github.com/relux-works/skill-go-testing-tools/tuitestkit v0.1.1
-	github.com/relux-works/swarma-chain-lab/experiments/rental v0.5.1-0.20261115082735-4f7f9ae72ed8
-	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway v0.4.1-0.20261115082735-4f7f9ae72ed8
-	github.com/relux-works/swarma-chain-lab/experiments/sealwatch v0.2.1-0.20261115082735-4f7f9ae72ed8
-	github.com/relux-works/swarma-chain-lab/experiments/single-use v0.3.1-0.20261115082735-4f7f9ae72ed8
+	github.com/relux-works/swarma-chain-lab/experiments/rental v0.5.1-0.20261116161722-09586168b906
+	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway v0.4.1-0.20261116161722-09586168b906
+	github.com/relux-works/swarma-chain-lab/experiments/sealwatch v0.2.1-0.20261116161722-09586168b906
+	github.com/relux-works/swarma-chain-lab/experiments/single-use v0.3.1-0.20261116161722-09586168b906
 	github.com/relux-works/swarma-envelope v0.0.0-20261114153213-065e25f69da8
 	github.com/yuin/goldmark v1.8.7
 	golang.org/x/net v0.58.0
@@ -26,8 +26,8 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.2.1-0.20261115082735-4f7f9ae72ed8 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/rental-booking v0.4.1-0.20261115082735-4f7f9ae72ed8 // indirect
+	github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.2.1-0.20261116161722-09586168b906 // indirect
+	github.com/relux-works/swarma-chain-lab/experiments/rental-booking v0.4.1-0.20261116161722-09586168b906 // indirect
 	github.com/relux-works/swarma-registrar v0.0.0-20261023164451-5f44ebf3f788 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
@@ -53,8 +53,8 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261115082735-4f7f9ae72ed8
-	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway/kernelbind v0.1.1-0.20261115082735-4f7f9ae72ed8
+	github.com/relux-works/swarma-chain-lab/experiments/grantcheck v0.1.2-0.20261116161722-09586168b906
+	github.com/relux-works/swarma-chain-lab/experiments/rental-gateway/kernelbind v0.1.1-0.20261116161722-09586168b906
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.47.0

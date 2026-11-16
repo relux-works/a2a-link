@@ -90,7 +90,7 @@ func loadMatrixSettings(dir string) (matrixSettings, error) {
 	if dec.Decode(&cfg) != nil || dec.Decode(new(any)) != io.EOF {
 		return cfg, errConfig
 	}
-	if cfg.Version != 1 || cfg.Identity == "" || !matrix.ValidVerificationID(cfg.UserID, '@') || cfg.Audience == "" || cfg.ConstructionProfile != "W" || cfg.TimeoutMS < 1 || cfg.TimeoutMS > 5000 || len(cfg.Pins) == 0 || len(cfg.Pins) > 64 {
+	if !grantPolicyNames(raw, cfg.Version) || cfg.Identity == "" || !matrix.ValidVerificationID(cfg.UserID, '@') || cfg.Audience == "" || cfg.ConstructionProfile != "W" || cfg.TimeoutMS < 1 || cfg.TimeoutMS > 5000 || len(cfg.Pins) == 0 || len(cfg.Pins) > 64 {
 		return cfg, errConfig
 	}
 	if _, e = time.Parse("2006-01-02T15:04:05Z", cfg.InitialWatermark); e != nil {
@@ -128,10 +128,17 @@ func matrixConfigShape(value any) bool {
 		}
 		return true
 	}
-	if !exact(value, "version identity user_id audience construction_profile agent_name landlord_name issuer_pubkey timeout_ms rpc pins envelope_evidence initial_watermark executor_key max_tip_age_seconds max_future_skew_seconds minimum_height terms") {
+	obj, ok := value.(map[string]any)
+	if !ok {
 		return false
 	}
-	obj := value.(map[string]any)
+	names := "version identity user_id audience construction_profile agent_name landlord_name issuer_pubkey timeout_ms rpc pins envelope_evidence initial_watermark executor_key max_tip_age_seconds max_future_skew_seconds minimum_height terms"
+	if obj["version"] == json.Number("2") {
+		names += " profile network genesis"
+	}
+	if !exact(value, names) {
+		return false
+	}
 	if !exact(obj["rpc"], "host port username password") {
 		return false
 	}
@@ -230,11 +237,7 @@ func openMatrix(c admission.Config) (admission.Checker, error) {
 			}
 		}()
 	}
-	freshness, terms, e := cfg.grantPolicy.resolve()
-	if e != nil {
-		return nil, errConfig
-	}
-	core, e := grantcheck.NewForTransport(grantcheck.Config{ConstructionProfile: "W", Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, ExecutorKey: cfg.ExecutorKey, Freshness: freshness, Terms: terms, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
+	core, e := newPolicyChecker(cfg.grantPolicy, grantcheck.Config{ConstructionProfile: cfg.ConstructionProfile, Identity: c.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
 	if e != nil {
 		return nil, errConfig
 	}

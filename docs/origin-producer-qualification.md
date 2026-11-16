@@ -13,7 +13,7 @@ installs a service or turns enforcement on.
 | Producer and session (`runorigin.Producer`, `runorigin.Session`) | `internal/originproducer/producer.go` |
 | Protected host mapping | `internal/originproducer/mapping.go` |
 | Retained-event store (the agent's durable mailbox) | `internal/originproducer/store.go` |
-| Contract profile seam `termsProfile`, pay profile only | `internal/originproducer/terms.go` |
+| Closed contract profile seam `termsProfile`, pay and trust | `internal/originproducer/terms.go` |
 | Typed refusals | `internal/originproducer/refusal.go` |
 | Single construction point with the refusing default (Linux) | `internal/originproducer/service_linux.go` |
 | Read-only origin checker on the existing Matrix admission path | `internal/cg1/origin.go` |
@@ -36,7 +36,16 @@ owned by root, of at most 256 KiB, readable by its owner and writable by nobody
 else, inside a directory owned by root that only root can write. Every member
 is mandatory. The launcher pin must equal the authenticated launcher exactly.
 `policy_dir` holds the existing `cg1-matrix.json` under its existing protection
-checks. `scope_root` is an existing private directory of the service account;
+checks. Its policy version is 1 (unchanged implicit pay/regtest/regtest genesis)
+or 2 (required exact `profile`, `network`, `genesis`). Version 1 forbids the new
+members. Version 2 admits only `pay` or `trust`, and the exact `regtest` or `main`
+network/genesis pairs documented in [the policy reference](g1-gate-1.md).
+Missing, unknown, empty, null, duplicate or case-variant inputs refuse the whole
+policy. Trust has no network or genesis default and requires `executor_key` to
+be empty. The mapping's `terms_profile` must agree with the policy before the
+owned backend is constructed; unknown mapping names refuse at Open before any
+checker is built. There is no profile inference from a message or contract.
+`scope_root` is an existing private directory of the service account;
 each session creates and removes one fresh subdirectory in it.
 
 `connection` selects an exact profile in the public `connections.json`, never
@@ -82,6 +91,11 @@ it reaches the backend's identity read, then returns typed `unavailable` with
 no Result because that dependency is unavailable. Altered signed text instead
 refuses as `inner_request_invalid` before the backend. No Live production
 backend or warm-backend Validate success is claimed.
+`TestProductionCrossProfileRefusal` additionally uses the production factory,
+signed retained requests and the real CG1 parser under explicit pay and trust
+policies. Each own-profile control passes terms to an unavailable identity
+read; presenting the other profile refuses earlier as typed `terms_invalid`
+without a Result. The restored valid control reaches the identity read again.
 
 | Obligation from `docs/source-origin.md` | Test |
 | --- | --- |
@@ -103,7 +117,9 @@ backend or warm-backend Validate success is claimed.
 | Prompt, idempotent `Close`; context cancellation | `TestCloseDuringPrepare`, `TestContextCancellationAndClosedSession`, `TestOriginCheckLifetime` (`internal/cg1`) |
 | Cancellation during construction tears down ownership; failed cleanup is typed and scrubbed | `TestOpenCancellationDuringConstruction`, `TestCloseReportsScopeRemovalFailure`, `TestErrorsCarryNoProtectedValue` |
 | Protected policy change during a check | `TestOriginCheckPolicyChange` (`internal/cg1`) |
-| Pay profile only, validator not weakened | `TestOnlyPayProfileIsImplemented`, `TestPayProfileValidator`, `TestOriginTerms` (`internal/cg1`) |
+| Closed pay/trust lookup, protected mapping selection, no Result on grant refusal | `TestClosedTermsProfiles`, `TestTrustMappingAndRefusal`, `TestTrustProfileObjects`, `TestPayProfileValidator` |
+| Required explicit binding on every factory, old pay policy preserved, mapping/policy agreement | `TestExplicitPolicyMembers`, `TestExplicitPolicyBinding`, `TestLegacyPolicyStaysPay`, `TestBothPathsUsePolicy` (`internal/cg1`) |
+| Fresh node network and genesis before grant checks; exact CG1 cross-profile refusal | `TestPolicyNodePinsBeforeGrant`, `TestProfileContractGate` (`internal/cg1`), `TestProductionCrossProfileRefusal` |
 | No protected value in any error; no log route | `TestErrorsCarryNoProtectedValue`, `TestPackageHasNoLogRoute` |
 | Refusing default and one service per process | `TestServiceRefusingDefault`, `TestServiceSingleConstruction` (Linux) |
 
@@ -164,8 +180,20 @@ may be enabled.
    **Validate recheck against a warm backend** remain untested compositions by
    name; the loopback production-composition control reaches only a dependency
    refusal, not Live or a provisioned cache.
-6. **Trust profile.** Only the pay profile is implemented. The trust contract
-   profile and its actions are not decoded or checked here.
+6. **Trust chain qualification.** Trust is selected only by protected mapping
+   and policy. The terms seam checks bounded hash-addressed bytes; the real CG1
+   check then validates the canonical /1 contract or /2 root at depth zero and
+   all Grant v3 bindings. `terms_invalid` and `binding_mismatch` remain typed
+   origin/producer refusals with no Result, rather than a generic grant refusal.
+   It refuses children, re-delegation, unresolved scope
+   text, nonempty executor keys and landlord holders under the pinned rules.
+   There is no second local trust decoder. The consumer cross-profile control
+   passes valid terms only as far as a deliberately unavailable node; it does
+   not claim Live. Trust Live and warm Validate through a real chain remain
+   unqualified, as do main-network operation, production freshness values,
+   enabling enforcement and instruction/action authorization. None of these
+   source changes enables the endpoint or supplies acceptance of the journal
+   and backend-tip residuals below.
 7. **Wire-level behaviour with this producer linked.** Response release,
    client replay comparison and the hello with a linked producer are covered by
    upstream fixtures with a stand-in producer only.

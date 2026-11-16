@@ -37,7 +37,7 @@ func TestErrorsCarryNoProtectedValue(t *testing.T) {
 		collected = append(collected, err)
 	}
 	// Session refusals for every checker outcome.
-	for _, code := range []cg1.OriginCode{cg1.OriginPolicyInvalid, cg1.OriginInnerInvalid, cg1.OriginRecipientMismatch, cg1.OriginGrantAbsent, cg1.OriginGrantExpired, cg1.OriginSealSpent, cg1.OriginLandlordChanged, cg1.OriginGrantRefused, cg1.OriginTipStale, cg1.OriginTipMoved, cg1.OriginUnavailable, cg1.OriginClosed, cg1.OriginCode(fixtureRegistration)} {
+	for _, code := range []cg1.OriginCode{cg1.OriginPolicyInvalid, cg1.OriginInnerInvalid, cg1.OriginRecipientMismatch, cg1.OriginGrantAbsent, cg1.OriginGrantExpired, cg1.OriginSealSpent, cg1.OriginLandlordChanged, cg1.OriginGrantRefused, cg1.OriginTermsInvalid, cg1.OriginBindingMismatch, cg1.OriginTipStale, cg1.OriginTipMoved, cg1.OriginUnavailable, cg1.OriginClosed, cg1.OriginCode(fixtureRegistration)} {
 		s, checker := f.session()
 		checker.set(func(c *fakeChecker) { c.code = code })
 		_, err = s.Prepare(context.Background())
@@ -90,7 +90,7 @@ func TestErrorsCarryNoProtectedValue(t *testing.T) {
 	f.failOpen = true
 	open(func(*runorigin.Selection) {})
 	f.failOpen = false
-	f.mapping.Agents[0].TermsProfile = "trust"
+	f.mapping.Agents[0].TermsProfile = "unknown"
 	f.saveMapping()
 	open(func(*runorigin.Selection) {})
 	f.writeMapping([]byte(`{"keymaker_registration":"` + fixtureRegistration + `"}`))

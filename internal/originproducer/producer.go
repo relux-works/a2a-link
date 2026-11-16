@@ -124,7 +124,7 @@ func (p *Producer) Open(ctx context.Context, sel runorigin.Selection) (runorigin
 	if err != nil {
 		return nil, refuse(ReasonScope)
 	}
-	owned := cg1.OriginScope{Identity: entry.Identity, UserID: entry.MatrixUserID, PolicyDir: entry.PolicyDir, ScopeDir: scope}
+	owned := cg1.OriginScope{Identity: entry.Identity, UserID: entry.MatrixUserID, PolicyDir: entry.PolicyDir, ScopeDir: scope, Profile: profile.name()}
 	checker, err := p.open(owned) // owned checker gate
 	if ctx.Err() != nil {
 		if checker != nil {

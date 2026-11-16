@@ -35,6 +35,8 @@ const (
 	OriginSealSpent         OriginCode = "seal_spent"
 	OriginLandlordChanged   OriginCode = "landlord_changed"
 	OriginGrantRefused      OriginCode = "grant_refused"
+	OriginTermsInvalid      OriginCode = "terms_invalid"
+	OriginBindingMismatch   OriginCode = "binding_mismatch"
 	OriginTipStale          OriginCode = "tip_stale"
 	// The chain tip changed while the grant was being checked.
 	OriginTipMoved    OriginCode = "tip_moved"
@@ -49,6 +51,8 @@ type OriginScope struct {
 	UserID    string
 	PolicyDir string
 	ScopeDir  string
+	// Profile, when supplied by the protected origin mapping, must agree with policy.
+	Profile string
 }
 
 // OriginEvent is a retained Matrix event read by the caller from the agent's
@@ -100,6 +104,10 @@ func OpenOriginChecker(s OriginScope) (*OriginChecker, error) {
 	if e != nil || cfg.Identity != s.Identity || cfg.UserID != s.UserID {
 		return nil, errConfig
 	}
+	profile, _, _, bound := cfg.grantPolicy.binding()
+	if !bound || (s.Profile != "" && s.Profile != profile) {
+		return nil, errConfig
+	}
 	root, e := openPrivateRoot(s.ScopeDir)
 	if e != nil {
 		return nil, errConfig
@@ -113,15 +121,11 @@ func OpenOriginChecker(s OriginScope) (*OriginChecker, error) {
 	if e = admission.PrivateDir(grantState); e != nil {
 		return nil, errConfig
 	}
-	freshness, terms, e := cfg.grantPolicy.resolve()
-	if e != nil {
-		return nil, errConfig
-	}
 	node, e := newReadNode(cfg.RPC)
 	if e != nil {
 		return nil, errConfig
 	}
-	core, e := grantcheck.NewForTransport(grantcheck.Config{ConstructionProfile: "W", Identity: s.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, ExecutorKey: cfg.ExecutorKey, Freshness: freshness, Terms: terms, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
+	core, e := newPolicyChecker(cfg.grantPolicy, grantcheck.Config{ConstructionProfile: cfg.ConstructionProfile, Identity: s.Identity, AgentName: cfg.AgentName, LandlordName: cfg.LandlordName, IssuerPubkey: cfg.IssuerPubkey, StateDir: grantState, Node: node, CheckTimeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, grantcheck.SwarmEnvelopeV2)
 	if e != nil {
 		node.Close()
 		return nil, errConfig
@@ -240,6 +244,10 @@ func originGrantCode(v grantcheck.Verdict) OriginCode {
 		return OriginGrantRefused
 	}
 	switch v.Code {
+	case grantcheck.CodeTermsInvalid:
+		return OriginTermsInvalid
+	case grantcheck.CodeBindingMismatch:
+		return OriginBindingMismatch
 	case grantcheck.CodeNoGrant, grantcheck.CodeNotYet:
 		return OriginGrantAbsent
 	case grantcheck.CodeExpired:

@@ -14,20 +14,10 @@ shared envelope format are unchanged. PR #4 remains independent.
 
 ## Source pins and scope
 
-- Grantcheck #116, #111 and strict-parser commit `e70a35a41dec5948d5452f1f898f4d26977372d7`
-  are contained by the selected snapshot `4f7f9ae72ed82a3af647ee881ff5d801dd7dbd8b`.
-  Grantcheck is pinned as `v0.1.2-0.20261115082735-4f7f9ae72ed8`.
-  Every selected chain-lab module uses that same commit. Selection is checked
-  with `git merge-base --is-ancestor`, never pseudo-version ordering.
-  The executable dependency check rejects the former `3baa201bafb6` selection
-  and pre-#116 snapshots such as `d01e38f1c966`. Explicit exclusions keep the
-  pre-merge `f1936aa1117a` references from winning Go module selection: that
-  parent shares the merge timestamp and sorts above it, but fails ancestry.
-  Five graph-only indirect constraints intentionally keep grant-store,
-  model-proxy, signer-service, station-lifecycle and its gatewaybind at this
-  same ancestry floor. `go mod tidy` removes those currently unused graph
-  constraints; preserve/reapply them when refreshing dependencies, then run
-  the ancestry check against the complete selected graph.
+- Every chain-lab requirement in the consumer's `go.mod` is pinned to
+  `09586168b906fcd700edf9a8c024190546d7d1eb`; grantcheck is
+  `v0.1.2-0.20261116161722-09586168b906`. Historical exclusions remain
+  exclusions, not selected versions. No other dependency is changed.
 - Existing envelope library: `e38510c503d266d36a275a5976f933e10fae4060`, pinned as
   `v0.0.0-20261108162913-e38510c503d2`. Its complete `VerifyMessage` pipeline
   checks the existing schema, every Ed25519/approved approver signature,
@@ -155,25 +145,56 @@ Closed top-level fields:
 
 | Field | Meaning |
 | --- | --- |
-| `version` | Integer 1 |
+| `version` | Integer 1 (legacy pay) or 2 (explicit binding) |
+| `profile` | Version 2 REQUIRED: exactly `pay` or `trust`; forbidden in version 1 |
+| `network` | Version 2 REQUIRED: exactly `regtest` or `main`; forbidden in version 1 |
+| `genesis` | Version 2 REQUIRED: the exact lowercase genesis hash for the selected network; forbidden in version 1 |
 | `identity`, `user_id` | Exact session name and credential-bound local Matrix id |
 | `audience` | Exact consuming-installation audience |
 | `construction_profile` | Exactly `W` |
 | `agent_name`, `landlord_name`, `issuer_pubkey` | Grantcheck's protected names and lowercase BIP-340 issuer key |
-| `executor_key` | REQUIRED consumer x-only BIP-340 key, lowercase hex; compared to canonical terms' `ExecutorKey`, not a sender key |
+| `executor_key` | REQUIRED member: valid consumer x-only BIP-340 key for pay; exactly the empty string for trust |
 | `max_tip_age_seconds` | REQUIRED integer A > 0, at most 9223372036 seconds (duration representation limit) |
 | `max_future_skew_seconds` | REQUIRED integer F from 0 through 600 seconds; 600 is a BENCH ceiling |
 | `minimum_height` | REQUIRED integer FLOOR from 0 through 2147483647 |
-| `terms` | REQUIRED nonempty map (at most 64 entries) from contract SHA256 to canonical unpadded-base64url terms-v2 bytes |
+| `terms` | REQUIRED nonempty map (at most 64 entries) from contract SHA256 to canonical unpadded-base64url contract bytes |
 | `timeout_ms` | 1..5000, shared per-check budget |
 | `rpc` | Existing Route shape: loopback IP, port, exact `w3-observer` username, read-only node password |
 | `pins` | Exact carrier id to `{key, author}`; key is lowercase BIP-340 x-only hex, author is canonical Ed25519 key id; includes the local identity |
 | `envelope_evidence` | Host-authenticated snapshots described below |
 | `initial_watermark` | Exact UTC seconds timestamp for a newly provisioned state namespace |
 
+Version 1 retains exactly the original pay meaning and serialized binding:
+`pay`, `regtest` and the regtest genesis from `single-use.RegtestGenesis`.
+The previous grantcheck constructor supplied these implicitly. Version 1
+refuses all three new members, even if they name that same binding. Version 2
+requires all three; a missing, null, empty, duplicate, case-variant or unknown
+member/value refuses the whole policy as a configuration error. No trust
+network or genesis default exists. The only admitted pairs are `regtest` with
+`single-use.RegtestGenesis` and `main` with `grantcheck.MainGenesis`
+(`000000000062b72c5e2ceb45fbc8587e807c155b0da735e6483dfba2f0a9c770`).
+
+Matrix, origin and Nostr share one backend construction path. The three values
+are passed unchanged to CG1's `ContractProfile`, `Network` and `Genesis`;
+`construction_profile: "W"` is a separate witness-construction pin. Before any
+version-2 grant check, each route freshly reads the node's chain and block-zero
+hash and compares both with policy. A mismatched or unreadable node observation
+is retryable `verifier_unavailable`, preserving CG1's node-chain and genesis
+refusal classification. Grant/configuration binding mismatches remain distinct
+from node-observation failures. CG1 also retains its own chain and grant checks.
+
+For trust, only bounded hash-addressed objects are loaded at startup. The
+pinned CG1 implementation, not a second local parser, validates canonical
+LIP-0013 /1 or a LIP-0014 /2 root at depth zero and binds every contract field
+to Grant v3 on every admission check. Cross-profile or malformed contracts
+refuse as `terms_invalid`; binding differences and empty or populated landlord
+`holders` refuse as `binding_mismatch`. A nonempty trust executor refuses
+construction. Children, re-delegation and unresolved scope text remain refused.
+The origin mapping's `terms_profile` must agree with this protected policy.
+
 The executor, A, F and FLOOR have **no defaults**. Missing, null, aliases,
 wrong types and out-of-range values refuse startup before checker state exists.
-Explicit zero F and FLOOR are valid. Canonical terms are hash-checked and
+Explicit zero F and FLOOR are valid. Pay terms are hash-checked and
 re-encoded for byte equality at startup, then looked up without I/O by the
 signed grant's contract hash. The grantcheck admission path compares their
 executor against `executor_key` and returns `executor_mismatch` by name.
@@ -198,8 +219,8 @@ A tight bench F can refuse consensus-valid tips: production A/F values remain
 unset pending a real-node runtime probe. These settings are operator inputs,
 not production recommendations or values inferred from a received message.
 
-The retained Nostr `cg1.json` requires these same five fields and passes them
-into the sole constructor too; it retains its existing mode-0600 and 8192-byte
+The retained Nostr `cg1.json` uses the same version rule and grant-policy fields,
+and passes them into the sole constructor too; it retains its existing mode-0600 and 8192-byte
 configuration limits. New trust/freshness pins are bound by grantcheck's durable
 identity. Old state cannot reopen under changed pins; there is no automatic
 migration and no instruction here to discard established state.

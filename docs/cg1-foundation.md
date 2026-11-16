@@ -63,14 +63,21 @@ A Live result is a current observation, never a queued reusable permission token
 The existing engine derives StateDir beneath the authenticated identity home.
 Provision `<StateDir>/cg1.json` mode 0600, a regular single-link owned file:
 
-- version:1;
+- version:1 for the unchanged pay/regtest policy, or version:2;
+- profile, network, genesis: required exact members in version 2, forbidden in version 1;
+  see the [shared policy rules](g1-gate-1.md#per-identity-protected-configuration);
+  `profile` is `pay` or `trust`, with an explicit admitted network/genesis pair;
+  trust has no network or genesis default;
 - agent_name and landlord_name: distinct approved id/ names;
 - issuer_pubkey: approved lowercase x-only grant-signing public key;
-- executor_key: this consumer's required lowercase x-only executor pin;
+- executor_key: this consumer's required lowercase x-only executor pin for pay,
+  or exactly the empty string for trust;
 - max_tip_age_seconds: required integer A > 0;
 - max_future_skew_seconds: required integer F in [0, 600], a bench ceiling;
 - minimum_height: required integer FLOOR in [0, 2147483647];
-- terms: required contract-hash to canonical unpadded-base64url terms-v2 map;
+- terms: required contract-hash to canonical unpadded-base64url contract map;
+  pay retains its terms-v2 startup validator; trust is validated and bound by CG1
+  against the presented Grant v3 before admission;
 - timeout_ms: an integer from 1 through 5000;
 - rpc: host, port, username, password for the verifier's own read-only node.
 
@@ -90,7 +97,9 @@ No private input or RPC error text is returned in admission decisions.
 
 ## Routing, locks and refusal codes
 
-Both hooks invoke the real grantcheck.New backend. Inbound Live reaches ordinary
+Both hooks invoke the shared protected-policy constructor and real grantcheck
+backend. Version 2 checks the node's chain and genesis before each grant check;
+version 1 retains its implicit pay/regtest pins and backend-only node checks. Inbound Live reaches ordinary
 delivery; inbound no_grant/not_yet/expired or proven closure routes to Exchange;
 these states never allow an outbound send. Current identity expiry is instead a
 named `identity_expired` refusal in both directions, closed and nonretryable. Outbound requires a previously live
