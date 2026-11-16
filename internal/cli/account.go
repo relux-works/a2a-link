@@ -90,6 +90,20 @@ func (a *App) registerAgent(ctx context.Context, p config.Paths, mx config.Matri
 	}
 	password := base64.RawURLEncoding.EncodeToString(raw[:])
 	a.secrets.Add(password)
+	// Q2: under a2ad custody the password is kept in the fixed create-only
+	// section before registration; outside a2ad legacy behavior is unchanged.
+	expectedUser := ""
+	if mx.ServerName != "" {
+		expectedUser = "@" + name + ":" + mx.ServerName
+		var inCustody bool
+		password, inCustody, err = a.e2eeAccountPassword(ctx, p, name, expectedUser, mx.URL, mx.ServerName, password)
+		if err != nil {
+			return config.Credentials{}, "", fmt.Errorf("register %s: recovery password could not be stored", name)
+		}
+		if !inCustody {
+			expectedUser = ""
+		}
+	}
 
 	c := matrix.New(mx.URL, "")
 	c.HTTP = a.HTTP
@@ -108,6 +122,9 @@ func (a *App) registerAgent(ctx context.Context, p config.Paths, mx config.Matri
 	a.secrets.Add(resp.AccessToken)
 	if resp.AccessToken == "" || resp.UserID == "" {
 		return config.Credentials{}, "", errors.New("register: homeserver returned no access token")
+	}
+	if expectedUser != "" && resp.UserID != expectedUser {
+		return config.Credentials{}, "", errors.New("register: homeserver identity does not match the stored password section; owner recovery required")
 	}
 	creds := config.Credentials{
 		UserID:      resp.UserID,

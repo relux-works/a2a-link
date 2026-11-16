@@ -133,6 +133,8 @@ type Snapshot struct {
 	Replay    map[string]ReplayWindow `json:"replay"`
 	Retention Retention               `json:"retention"`
 	Prepared  *Prepared               `json:"prepared,omitempty"`
+	// Identity is the U2a cross-signing bootstrap record; nil before init.
+	Identity *IdentityEvidence `json:"identity,omitempty"`
 }
 
 // validate checks the single value, including exact canonical encoded budgets.
@@ -147,6 +149,11 @@ func (s Snapshot) validate() (int, error) {
 	}
 	for _, pin := range s.Pins {
 		if err := pin.Validate(); err != nil {
+			return 0, err
+		}
+	}
+	if s.Identity != nil {
+		if err := s.Identity.validate(); err != nil {
 			return 0, err
 		}
 	}

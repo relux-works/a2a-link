@@ -412,6 +412,14 @@ See [the E2EE design](docs/e2ee.md)
 for the owner decisions, limits and U2a/U2b integration gates. Existing token
 storage below is unchanged by these library foundations.
 
+U2a adds `a2a e2ee init` and `a2a e2ee identity show` (`docs/cli.md`): custody
+opens only for the a2ad service user under the identity's a2ad home, the host
+pin reader verifies the owner MSK/USK chain, bootstrap persists roots before a
+passwordless upload with stored-password UIA fallback, and the owner's USK
+signature over the agent master is verified from the agent's own key query.
+Q4, U2b lifecycle, rooms, activation and pin writing remain out of scope; the
+live Element ceremony witness is a separate gate.
+
 ### E2EE foundation tools
 
 Go is declared as `1.26.8` for the signed-envelope dependency and aligned release compiler pins. Offline checks require the admitted module

@@ -4428,6 +4428,64 @@ or resend is implemented here. Issue #97 remains open. A separately decided
 future resume route requires a known server transaction-deduplication horizon;
 this feature makes no such assumption.
 
+### `a2a e2ee init [--json]` / `a2a e2ee identity show [--json]` (U2a)
+
+Cross-signing bootstrap and public identity evidence for the E2EE MVP
+([design](e2ee.md), sections 3, 4 and 10). Both verbs are agent-only, need the
+selected identity and run only where A1 custody exists: the process is the
+dedicated a2ad service user (`_a2a` on macOS, `a2a` on Linux) and the identity's
+config base is its a2ad identity home. Anywhere else both refuse
+`e2ee_custody_unavailable`; there is no home, local-base or environment fallback.
+Custody lives in `<identity base>/e2ee-<hash>/` (U1 file custody: generation
+pointer, create-only root bundle, sealed `state.bin`, the fixed account-password
+section). The station allowlist admits exactly these two verbs.
+
+`init` is idempotent and never rotates keys:
+
+1. Reads the host pin `B/CLASS/H/NAME.pin.json` under
+   `/Library/Application Support/a2a-swarm/e2ee-trust` (macOS) or
+   `/etc/a2a-swarm/e2ee-trust` (Linux), refusing a missing artifact
+   (`e2ee_pin_unavailable`), anything not root-owned, agent-writable or
+   symlinked (`e2ee_pin_unsafe`), more than 64 KiB (`e2ee_capacity`), and a
+   duplicate/unknown member or wrong binding, identity, device or owner principal
+   (`e2ee_pin_invalid`). It then verifies the pinned owner MSK signature over the
+   pinned USK (`e2ee_owner_signature_invalid`). The CLI never writes the pin.
+2. Requires `whoami` to equal the credential MXID and device
+   (`e2ee_identity_mismatch`), then persists pointer, root seeds and the first
+   sealed state (`local-ready`) before any upload. Keys already published for
+   this device or user without local state refuse `e2ee_recovery_required`.
+3. Uploads the self-signed device keys, then the master, self-signing and
+   user-signing keys passwordless. When the server demands user-interactive
+   auth, it completes `m.login.password` once with the Q2 stored password; a
+   missing section, unsupported flow or rejected password stops at
+   `awaiting-uia` with `e2ee_uia_unavailable` (exit 1, nothing claimed uploaded).
+   The SSK signature over the device is published last; state `published`.
+4. Reads its own `/keys/query`: no owner USK signature on the master is
+   `awaiting-owner` (exit 0, the expected stop before the Element ceremony); a
+   signature under the pinned owner USK that verifies over exactly the persisted
+   master is `owner-verified`; a present signature that does not verify refuses
+   `e2ee_owner_signature_invalid`. A local flag or unsigned USK never counts.
+
+Before every trusted step the pin is reopened and compared: the same revision
+with other bytes, a lower revision or a higher revision enters `changed`
+(`e2ee_trust_changed`), which stays until U2b's host revision + 1 ceremony.
+Different published keys enter `changed` with `e2ee_published_conflict`.
+
+Output (text or `--json` with `type: e2ee_identity`) carries public evidence
+only: MXID, device ID, state, pin revision, owner, and for the MSK/SSK/USK the
+key ID and SHA256 of the public key. This is the input of the later grant
+key-binding node. `identity show` reads custody without network access, prints
+`absent` before the first init, re-verifies a stored owner signature against the
+current pin and reports `changed` for a changed pin.
+
+Q2 wiring: `register` and named `connection register` store the generated
+account password in the fixed custody section before registering when custody
+is available, and reuse an existing section on retry; only a2a reads it.
+
+Not here: Q4 device admission, revision + 1 / re-ceremony / recovery / rotation
+(U2b), rooms, sends, ingress, decryption, activation, keychain backends, backup
+or key sharing.
+
 ## Daemon authentication endpoint
 
 The a2a daemon (a2ad) exposes local-only operator commands:

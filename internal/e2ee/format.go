@@ -50,6 +50,10 @@ func (v Root) Format(state fmt.State, _ rune)        { formatLabel(state, v.Stri
 func (v EngineState) Format(state fmt.State, _ rune) { formatLabel(state, v.String()) }
 func (v Codec) Format(state fmt.State, _ rune)       { formatLabel(state, "<e2ee-codec>") }
 
+func (CrossSigning) String() string                   { return "<e2ee-cross-signing>" }
+func (v CrossSigning) GoString() string               { return v.String() }
+func (v CrossSigning) Format(state fmt.State, _ rune) { formatLabel(state, v.String()) }
+
 func (PinRecord) String() string                   { return "<e2ee-pin-record>" }
 func (v PinRecord) GoString() string               { return v.String() }
 func (v PinRecord) Format(state fmt.State, _ rune) { formatLabel(state, v.String()) }

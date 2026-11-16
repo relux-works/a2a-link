@@ -279,8 +279,18 @@ func (a *App) registerNamedAgentDestination(ctx context.Context, name string, ad
 	}
 	password := base64.RawURLEncoding.EncodeToString(raw[:])
 	a.secrets.Add(password)
-	// Only Keychain retains a recovery password. File passwords stay in memory;
-	// the secret-free journal still fences every failed/ambiguous attempt.
+	// Q2: under a2ad custody the per-agent password lives in the fixed
+	// create-only section before any network call; only a2a reads it. A fresh
+	// member root is provisioned for another host and has no custody here.
+	if destination == nil {
+		password, _, e = a.e2eeAccountPassword(ctx, p, name, b.UserID, c.URL, c.ServerName, password)
+		if e != nil {
+			_ = stage("password-store-failed")
+			return empty, "", errors.New("recovery password could not be stored; no registration attempted")
+		}
+	}
+	// Keychain also retains a recovery password. File passwords outside a2ad stay
+	// in memory; the secret-free journal still fences every failed/ambiguous attempt.
 	if store == "keychain" {
 		if e = a.createConnectionSecretLocked(ctx, p, passwordRef, password); e != nil {
 			_ = stage("password-store-failed")

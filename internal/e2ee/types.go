@@ -34,6 +34,19 @@ const (
 	ErrReplay      Code = "e2ee_replay"
 	ErrExpired     Code = "e2ee_replay_window_expired"
 	ErrRefused     Code = "e2ee_refusal_history_blocked"
+
+	// U2a typed refusals. Each names one gate; none carries a value.
+	ErrCustodyUnavailable Code = "e2ee_custody_unavailable"     // A1: not an a2ad identity home under the service user.
+	ErrPinUnavailable     Code = "e2ee_pin_unavailable"         // Host pin absent.
+	ErrPinUnsafe          Code = "e2ee_pin_unsafe"              // Pin not host-owned, agent-writable or a symlink.
+	ErrPinInvalid         Code = "e2ee_pin_invalid"             // Pin shape, binding or principal mismatch.
+	ErrTrustChanged       Code = "e2ee_trust_changed"           // Pin bytes/revision or published roots changed.
+	ErrOwnerSignature     Code = "e2ee_owner_signature_invalid" // Owner MSK->USK or USK->agent MSK signature failed.
+	ErrAwaitingOwner      Code = "e2ee_awaiting_owner"          // No owner USK signature on the agent master yet.
+	ErrPublishedConflict  Code = "e2ee_published_conflict"      // Server holds different keys for this device/user.
+	ErrUIAUnavailable     Code = "e2ee_uia_unavailable"         // Server demanded UIA and no stored password satisfied it.
+	ErrRecoveryRequired   Code = "e2ee_recovery_required"       // Published keys without local state: explicit recovery (U2b).
+	ErrIdentityMismatch   Code = "e2ee_identity_mismatch"       // whoami/credential/binding disagreement.
 )
 const MaxSnapshot = 64 << 20
 const RecoveryReserve = 8 << 20

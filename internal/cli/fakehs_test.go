@@ -85,6 +85,8 @@ type fakeHS struct {
 	receiptHang chan struct{}
 	// receiptHangRooms, when set, limits receiptHang to these room ids.
 	receiptHangRooms map[string]bool
+	// e2ee models the device/cross-signing key endpoints (fakehs_e2ee_test.go).
+	e2ee fakeE2EE
 }
 
 // fakeReceipt is one accepted POST /rooms/{room}/receipt/{type}/{event}.
@@ -262,6 +264,10 @@ func newFakeHS(t *testing.T) *fakeHS {
 		writeJSON(w, 200, map[string]int64{"m.upload.size": hs.uploadMax})
 	})
 	route("GET "+v1+"/media/download/{server}/{media}", true, hs.download)
+	route("POST "+v3+"/keys/upload", true, hs.keysUpload)
+	route("POST "+v3+"/keys/query", true, hs.keysQuery)
+	route("POST "+v3+"/keys/device_signing/upload", true, hs.keysDeviceSigning)
+	route("POST "+v3+"/keys/signatures/upload", true, hs.keysSignatures)
 	hs.srv = httptest.NewServer(mux)
 	t.Cleanup(hs.srv.Close)
 	return hs

@@ -194,6 +194,18 @@ func Authorize(argv []string, identity string) (Plan, error) {
 		values = "stale-after product history-pages-per-poll poll unanswered-since unanswered-after alert-room keeper reply-alias"
 		bools = "json watch alert"
 	case "whoami":
+	case "e2ee":
+		// U2a: bootstrap and public identity evidence only. The custody root is
+		// the identity's own a2ad home, so the station needs no path argument.
+		switch {
+		case len(rest) >= 2 && rest[1] == "init":
+			start = 2
+		case len(rest) >= 3 && rest[1] == "identity" && rest[2] == "show":
+			start = 3
+		default:
+			return p, errRefused
+		}
+		bools = "json"
 	case "status":
 		if len(rest) != 3 || rest[1] != "admission" || rest[2] != "--json" {
 			return p, errRefused

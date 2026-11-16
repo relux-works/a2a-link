@@ -19,6 +19,10 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/relux-works/swarma-registrar v0.0.0-20261023164451-5f44ebf3f788 // indirect
+	github.com/tidwall/gjson v1.19.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	go.mau.fi/util v0.10.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 )

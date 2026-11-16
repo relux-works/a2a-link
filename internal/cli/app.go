@@ -15,6 +15,7 @@ import (
 
 	"github.com/relux-works/a2a-swarm/internal/config"
 	"github.com/relux-works/a2a-swarm/internal/daemon"
+	"github.com/relux-works/a2a-swarm/internal/e2ee"
 	"github.com/relux-works/a2a-swarm/internal/envelopeobserve"
 	"github.com/relux-works/a2a-swarm/internal/matrix"
 	"github.com/relux-works/a2a-swarm/internal/redact"
@@ -138,6 +139,12 @@ type App struct {
 	lookupEnv                  func(string) (string, bool)
 	vaultContext               vaultContextProvider
 	vaultDependency            func(vaultCredentialSelection) (*vaultDependency, error)
+
+	// E2EE U2a test-only seams. nil selects the production A1 service-user gate
+	// and the platform host pin root; no flag or environment reaches either.
+	e2eeCustodyGate func() error
+	e2eePinPolicy   *e2ee.PinPolicy
+	e2eeInventory   *e2ee.Inventory // Per-invocation secret inventory for e2ee diagnostics.
 }
 
 // NewApp returns an App bound to the real process environment.
@@ -216,6 +223,7 @@ func commands() []command {
 		{"project", "project --system R --source R [--source R...] [--kind k1,k2] [--once]   project allowed sources to one explicit target", cmdProject},
 		{"skill", "skill install [--force] | skill print   install the a2a agent skill into ~/.agents, ~/.claude, ~/.codex", cmdSkill},
 		{"creds", "creds migrate | reconcile | move-human <name>   migrate selected credentials to Keychain, or move HUMAN metadata into humans/", cmdCreds},
+		{"e2ee", "e2ee init [--json] | e2ee identity show [--json]   cross-signing bootstrap under a2ad custody and public identity evidence (docs/e2ee.md)", cmdE2EE},
 		{"card", "card set --file card.md | card get <name> | card room init [--room R]   configured card store", cmdCard},
 		{"status", "status init | set STATE TEXT --heartbeat DUR --runtime R --hooks H --doorbell D [--product X] | get [name] (legacy presence)", cmdStatus},
 		{"who", "who --stale-after DUR [--product X] [--json]   read self-written agent liveness", cmdWho},
