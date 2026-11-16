@@ -17,9 +17,11 @@ full-cap saves off the hook path with a pre-mutation size/latency guard or an
 equivalent separately admitted design; this wiring remains unresolved. Hosted CI
 does not run the capacity benchmark, and this follow-up supplies no new latency
 measurements. Native and full-hook qualification remain separate gates.
-The repository declares Go 1.25.12; this bench supplies 1.25.14. Exact 1.25.12
-execution remains unverified. mautrix v0.31.0/v0.32.0 require Go 1.26 and are
-excluded without a separate toolchain decision. No E2EE activation is delivered.
+This follow-up was measured when the repository declared Go 1.25.12 on a 1.25.14
+bench. The repository now declares Go 1.26.8 for the pinned swarma-envelope
+dependency; that move does not transfer this bench evidence. mautrix
+v0.31.0/v0.32.0 remain excluded without a separate dependency decision. No E2EE
+activation is delivered.
 
 Source's U1 r2 resolution closes the server-only USK visibility assumption:
 `/keys/query` exposes USKs only for the requesting user's own keys. The host pin
