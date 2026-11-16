@@ -26,13 +26,8 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/grant-store v0.1.1-0.20261115082735-4f7f9ae72ed8 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/model-proxy v0.4.1-0.20261115082735-4f7f9ae72ed8 // indirect
 	github.com/relux-works/swarma-chain-lab/experiments/payment-chain v0.2.1-0.20261115082735-4f7f9ae72ed8 // indirect
 	github.com/relux-works/swarma-chain-lab/experiments/rental-booking v0.4.1-0.20261115082735-4f7f9ae72ed8 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/signer-service v0.3.1-0.20261115082735-4f7f9ae72ed8 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/station-lifecycle v0.2.1-0.20261115082735-4f7f9ae72ed8 // indirect
-	github.com/relux-works/swarma-chain-lab/experiments/station-lifecycle/gatewaybind v0.1.1-0.20261115082735-4f7f9ae72ed8 // indirect
 	github.com/relux-works/swarma-registrar v0.0.0-20261023164451-5f44ebf3f788 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
