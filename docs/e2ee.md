@@ -26,11 +26,26 @@ Encryption and device provenance grant no application authority: existing princi
 scopes and protocol rules 13/14/24 still apply.
 
 An accepted Megolm event is associated with the **session-originator device** and
-its anchored cross-signing chain, under section 3's assumptions. It is not proof
-that this device alone authored the ciphertext. Megolm keys are shared; another
-key holder can forge a message under the session. The homeserver asserts the outer
-sender MXID, which is not itself authenticated by Megolm plaintext. Two-member
-scope reduces third-party key holders; it does not remove this protocol limitation.
+its anchored cross-signing chain, under section 3's assumptions. Megolm messages
+are signed with the session's Ed25519 signing key. Only the device that created
+the outbound session holds that private key. A recipient gets the ratchet and the
+public signing key, so it can decrypt but cannot produce a valid message under the
+session. The residual risks are elsewhere:
+
+1. The session-to-device binding rests on the room key arriving over an
+   authenticated Olm channel from that device (`direct-olm`, section 3). Forwarded,
+   imported or backup-restored keys lose that binding and are refused.
+2. Megolm plaintext carries no sender. The outer sender MXID is asserted by the
+   homeserver; it is accepted only when it equals the MXID that the cross-signing
+   chain binds to the originator device.
+3. A compromised originator device, or a stolen copy of its outbound session,
+   can sign. Cross-signing cannot detect that.
+4. The signature gives integrity and origin, not freshness: replay and ordering
+   are handled by message-index windows, and a homeserver can still withhold or
+   delay events.
+
+Two-member scope limits who receives keys; the origin claim itself does not depend
+on room size.
 
 Acceptance: one real identity sends to a joined, verified human peer in that DM,
 reads a reply associated with the peer's verified session-originator device, and
@@ -296,8 +311,9 @@ For incoming session-originator eligibility require all applicable checks:
 Forwarded/imported/backup keys and another device's assertion do not prove origin.
 Fresh queries provide a recent **observation**, not cryptographic freshness: a
 malicious server can replay individually valid device keys and hide deletion.
-Guarantee assumes honest sender-MXID binding by the server, no colluding/compromised
-key holder and authentic host pins; it cannot promise detection of hidden revocation.
+Guarantee assumes the outer sender MXID matches the cross-signed originator, an
+uncompromised originator device (and outbound session store) and authentic host
+pins; it cannot promise detection of hidden revocation.
 No stronger signature over application text is invented. Device-list observation
 and timestamp appear in evidence; never label it a freshness proof.
 Changed keys are quarantined. Known deletion/block immediately prevents new
@@ -1034,8 +1050,8 @@ resume the failed step; a gate cannot be skipped to reach a later diagnostic.
 If a reply was finally refused, use a new event after repair rather than promoting
 it. `topic new` establishes the root required by `post`; slug lookup must decrypt
 that root through U3 before use. The peer's
-unverified reply uses a fresh session never shared by an eligible device; otherwise
-Megolm cannot prove which key holder authored it. Exact single-event diagnostic:
+unverified reply uses a fresh session that the unverified device itself created;
+otherwise the run does not exercise the unverified-originator refusal. Exact single-event diagnostic:
 `a2a --profile "$PROFILE" --as "$NAME" e2ee refusals --room "$R" --event "$E" --json`.
 Record metadata/effects and own-outbound echo evidence, never plaintext or secrets.
 Acceptance requires the final lookup visibly report the intended retained refusal and
