@@ -10,7 +10,11 @@ Ordinary `a2a inbox` and `a2a read` label messages with exactly one result:
 - `unknown-author`: a structurally parseable author cannot be resolved against
   an available protected host roster, including missing/unreadable configuration.
 
-Text adds a quoted `verification` field to the generated event header;
+Text adds a quoted `verification` field to the generated event header, placed
+before every peer-controlled field (sender, room, kind, topic, re, body excerpt).
+Header values from peers are not quoted, so a peer can write its own
+`verification=...` text later on the line; only the FIRST `verification` token
+of a generated header is the observation. Prefer `--json` for machine reading.
 `--json` adds the string `verification`
 member to each message record. Inbox brief summaries, private saved frames and
 `inbox show` retain the observation. Saved observations describe the original

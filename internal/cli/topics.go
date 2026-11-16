@@ -1013,12 +1013,14 @@ func (a *App) printEvent(ev matrix.Event, server string, verification ...string)
 	if root := eventTopicRoot(ev); root != "" {
 		meta = append(meta, "thread="+root)
 	}
-	line := fmt.Sprintf("[%s] %s %s", ts, senderText(ev.Sender), sanitizeLine(ev.EventID))
+	label := ""
+	if len(verification) > 0 {
+		label = verificationField(verification[0])
+	}
+	// The observed label precedes every peer-controlled field (sender, id, meta).
+	line := fmt.Sprintf("[%s]%s %s %s", ts, label, senderText(ev.Sender), sanitizeLine(ev.EventID))
 	if len(meta) > 0 {
 		line += " " + sanitizeLine(strings.Join(meta, " "))
-	}
-	if len(verification) > 0 {
-		line += verificationField(verification[0])
 	}
 	a.printf("%s\n", line)
 	body := sanitizeText(m.Body)

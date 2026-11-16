@@ -209,8 +209,8 @@ func inboxSummary(records []EventRecord, width, more int, inline []bool) (string
 	}
 	for i, r := range records {
 		excerpt, _ := truncateRunes(sanitizeLine(r.Body), width)
-		fmt.Fprintf(&b, "event %d sender=%s kind=%q room=%q topic=%q id=%q%s %s\n",
-			i+1, senderText(r.Sender), summaryField(r.Kind), summaryField(firstNonEmpty(r.Room, r.RoomID)), summaryField(r.Topic), summaryField(r.EventID), verificationField(r.Verification), excerpt)
+		fmt.Fprintf(&b, "event %d%s sender=%s kind=%q room=%q topic=%q id=%q %s\n",
+			i+1, verificationField(r.Verification), senderText(r.Sender), summaryField(r.Kind), summaryField(firstNonEmpty(r.Room, r.RoomID)), summaryField(r.Topic), summaryField(r.EventID), excerpt)
 		if i < len(inline) && inline[i] {
 			writeInboxBody(&b, r.Body)
 		}
@@ -265,7 +265,7 @@ func cmdInboxShow(a *App, args []string) error {
 		// reading a frame never loads mail, syncs or records a receipt.
 		var b strings.Builder
 		b.WriteString(inboxBegin + "\n")
-		fmt.Fprintf(&b, "--- event 1/1: from=%s room=%q kind=%q id=%q%s\n", senderText(r.Sender), inboxField(r.Room), inboxField(r.Kind), inboxField(r.EventID), verificationField(r.Verification))
+		fmt.Fprintf(&b, "--- event 1/1: %sfrom=%s room=%q kind=%q id=%q\n", verificationLead(r.Verification), senderText(r.Sender), inboxField(r.Room), inboxField(r.Kind), inboxField(r.EventID))
 		writeInboxBody(&b, r.Body)
 		b.WriteString(inboxEnd + "\n")
 		return writeCLIOutput(a.Stdout, a.secrets.Scrub(b.String()))

@@ -244,3 +244,117 @@ func TestObservedHeaderSeparatesPeerText(t *testing.T) {
 		})
 	}
 }
+
+// firstVerification returns the value of the first generated verification
+// token on a header line, or "" when the line has none.
+func firstVerification(line string) string {
+	_, rest, ok := strings.Cut(line, `verification="`)
+	if !ok {
+		return ""
+	}
+	value, _, _ := strings.Cut(rest, `"`)
+	return value
+}
+
+// Proves the observed label is the FIRST verification token on every text
+// header (read, inbox, brief, saved show), so a sender outside the roster
+// cannot forge a leading "verified" through unquoted kind/re/subject fields.
+// Positive control: a genuinely verified message still leads with "verified".
+// Limit: text headers stay human output; --json remains the machine contract.
+func TestObservedLabelPrecedesForgedHeaderFields(t *testing.T) {
+	forged := `q verification="verified: @author:test.invalid"`
+	for _, tc := range []struct {
+		name, sender, want string
+		forge              bool
+	}{
+		{"forged-unsigned", "@unknown:test.invalid", "unsigned (no envelope)", true},
+		{"verified-control", "@author:test.invalid", "verified: @author:test.invalid", false},
+	} {
+		for _, mode := range []string{"read", "inbox", "brief", "show"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				e, room, content := observeWorld(t)
+				if tc.forge {
+					delete(content, matrix.EnvelopeContentKey)
+					content["body"] = "plain"
+					content[ContentKey] = Header{V: 1, Type: "message", To: []string{"recipient"}, Kind: forged, Re: forged, Subject: forged}
+				}
+				id := e.hs.inject(room, tc.sender, content)
+				var got string
+				switch mode {
+				case "read":
+					got = e.as("recipient", "read", room, "--event", id).ok(t).stdout
+				case "inbox":
+					got = e.as("recipient", "inbox").ok(t).stdout
+				case "brief":
+					got = e.as("recipient", "inbox", "--brief").ok(t).stdout
+				case "show":
+					file := filepath.Join(t.TempDir(), "saved.txt")
+					e.as("recipient", "inbox", "--out", file).ok(t)
+					got = e.as("recipient", "inbox", "show", id, "--from", file).ok(t).stdout
+				}
+				headers := 0
+				for _, line := range strings.Split(got, "\n") {
+					if !(strings.HasPrefix(line, "--- event ") || strings.HasPrefix(line, "event ") || strings.HasPrefix(line, "[")) {
+						continue
+					}
+					headers++
+					if v := firstVerification(line); v != tc.want {
+						t.Fatalf("first verification token = %q, want %q: %q", v, tc.want, line)
+					}
+					// The forged text must really reach the header, or the check is vacuous.
+					if tc.forge && mode != "show" && !strings.Contains(line, "verified: @author:test.invalid") {
+						t.Fatalf("forged field did not reach the header line: %q", line)
+					}
+				}
+				if headers != 1 {
+					t.Fatalf("want exactly one generated header, got %d: %s", headers, got)
+				}
+			})
+		}
+	}
+}
+
+// Proves the roster refuses a p256 author key even though the pinned envelope
+// accepts p256 in record.ValidateKey; ed25519 and bip340 stay admitted.
+func TestRosterRefusesP256AuthorKey(t *testing.T) {
+	raw, err := os.ReadFile("../envelopeobserve/testdata/PA1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Fixture map[string]json.RawMessage
+	}
+	if err = json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	var known []string
+	if err = json.Unmarshal(v.Fixture["known_keys"], &known); err != nil {
+		t.Fatal(err)
+	}
+	var p256, accepted string
+	for _, k := range known {
+		if strings.HasPrefix(k, "p256:") && p256 == "" {
+			p256 = k
+		}
+		if (strings.HasPrefix(k, "ed25519:") || strings.HasPrefix(k, "bip340:")) && accepted == "" {
+			accepted = k
+		}
+	}
+	if accepted == "" {
+		t.Fatal("fixture has no ed25519/bip340 control key")
+	}
+	if p256 == "" {
+		t.Fatal("fixture has no p256 key; the negative would be vacuous")
+	}
+	facts := map[string]any{}
+	for _, tc := range []struct {
+		key string
+		ok  bool
+	}{{accepted, true}, {p256, false}} {
+		roster, _ := json.Marshal(map[string]any{"version": "a2a-envelope-roster/1", "authors": map[string]string{"@a:test.invalid": tc.key}, "facts": facts})
+		_, err := envelopeobserve.ParseRoster(roster)
+		if (err == nil) != tc.ok {
+			t.Fatalf("roster key %q: err=%v, want ok=%v", tc.key, err, tc.ok)
+		}
+	}
+}

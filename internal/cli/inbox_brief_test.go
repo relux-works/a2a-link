@@ -219,7 +219,8 @@ func TestInboxBriefSaveShowAndSelectedReceipt(t *testing.T) {
 	id := e.hs.inject(room, "@bob:test.local", toMsg("bob", "notice", strings.Repeat("界", 161)+"TAIL"))
 	later := e.hs.inject(room, "@bob:test.local", toMsg("bob", "request", "later full body"))
 	out := e.as("alice", "inbox", "--brief", "--limit", "1").ok(t).stdout
-	tuitestkit.ContainsStr(t, out, "id="+fmt.Sprintf("%q", id)+" verification=\"unsigned (no envelope)\" "+strings.Repeat("界", 160)+"\n")
+	tuitestkit.ContainsStr(t, out, "event 1 verification=\"unsigned (no envelope)\" sender=")
+	tuitestkit.ContainsStr(t, out, "id="+fmt.Sprintf("%q", id)+" "+strings.Repeat("界", 160)+"\n")
 	tuitestkit.NotContainsStr(t, out, strings.Repeat("界", 161))
 	path := e.state("alice").LastInbox
 	if filepath.Dir(path) != filepath.Dir(e.paths().StateFile("alice")) {
