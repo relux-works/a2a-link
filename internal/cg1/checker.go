@@ -11,7 +11,7 @@ import (
 	"github.com/relux-works/swarma-chain-lab/experiments/grantcheck"
 )
 
-// Only grantcheck.New constructs this production backend. No injectable factory
+// Only newPolicyChecker constructs this production backend. No injectable factory
 // or verdict cache can bypass K1. CG1 owns cross-process state/try-locks.
 type nostrGrantSource interface {
 	Inbound(context.Context, string, *grantcheck.Presentation) grantcheck.Verdict

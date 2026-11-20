@@ -275,8 +275,8 @@ pins/evidence, independent owner-DM route and fresh grantcheck calls. No shared
 envelope schema or algorithm changes. A reviewed BIP-340 author profile remains
 the future Track B, after the format owner's agreement.
 
-The landed grantcheck #111/#116 snapshot is pinned at
-`4f7f9ae72ed82a3af647ee881ff5d801dd7dbd8b`; the current module versions are
+The grantcheck profile/network policy snapshot is pinned at
+`09586168b906fcd700edf9a8c024190546d7d1eb`; the current module versions are
 recorded in the Track A specification. Its transport provenance binding rejects
 old unpinned state; no migration or installed consumer adoption is performed.
 Source tests and a real constructor do not attest live grants. The optional

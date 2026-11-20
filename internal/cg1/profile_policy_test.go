@@ -151,7 +151,7 @@ func TestExplicitPolicyMembers(t *testing.T) {
 			}
 		}
 		for _, field := range []string{"profile", "network", "genesis"} {
-			for _, defect := range []string{"missing", "unknown", "empty", "null", "type", "duplicate", "alias", "alias-extra"} {
+			for _, defect := range []string{"missing", "unknown", "value-case", "extra", "empty", "null", "type", "duplicate", "alias", "alias-extra"} {
 				t.Run(path+"/"+field+"/"+defect, func(t *testing.T) {
 					raw, open := policyFactory(t, path, "trust", "regtest")
 					var obj map[string]json.RawMessage
@@ -163,6 +163,10 @@ func TestExplicitPolicyMembers(t *testing.T) {
 						delete(obj, field)
 					case "unknown":
 						obj[field] = json.RawMessage(`"unknown"`)
+					case "value-case":
+						obj[field] = json.RawMessage(strings.ToUpper(string(obj[field])))
+					case "extra":
+						obj["extra"] = json.RawMessage(`true`)
 					case "empty":
 						obj[field] = json.RawMessage(`""`)
 					case "null":
@@ -235,7 +239,8 @@ func TestLegacyPolicyStaysPay(t *testing.T) {
 				t.Fatal("legacy reopen", err)
 			}
 			for _, field := range []string{"profile", "network", "genesis"} {
-				obj[field] = json.RawMessage(`"trust"`)
+				value := map[string]string{"profile": "pay", "network": "regtest", "genesis": su.RegtestGenesis}[field]
+				obj[field] = jsonBytes(t, value)
 				if err := open(jsonBytes(t, obj)); !errors.Is(err, errConfig) {
 					t.Fatalf("old version accepted %s: %v", field, err)
 				}

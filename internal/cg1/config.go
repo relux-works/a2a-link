@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,7 +70,7 @@ func open(c admission.Config) (admission.Checker, error) {
 	if d.Decode(&cfg) != nil || d.Decode(new(any)) != io.EOF || (cfg.Version != 1 && cfg.Version != 2) || cfg.TimeoutMS < 1 || cfg.TimeoutMS > 5000 {
 		return nil, errConfig
 	}
-	if !uniqueJSON(raw) || !grantPolicyNames(raw, cfg.Version) {
+	if !uniqueJSON(raw) || !nostrConfigNames(raw, cfg.Version) || !grantPolicyNames(raw, cfg.Version) {
 		return nil, errConfig
 	}
 	_, _, err = cfg.grantPolicy.resolve()
@@ -128,6 +130,30 @@ func privateFile(st os.FileInfo) bool {
 	s, ok := st.Sys().(*syscall.Stat_t)
 	return ok && st.Mode().IsRegular() && st.Mode().Perm() == 0600 && s.Nlink == 1 && s.Uid == uint32(os.Getuid())
 }
+func nostrConfigNames(raw []byte, version int) bool {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil {
+		return false
+	}
+	closed := func(object map[string]json.RawMessage, names string) bool {
+		fields := strings.Fields(names)
+		for name := range object {
+			if !slices.Contains(fields, name) {
+				return false
+			}
+		}
+		return true
+	}
+	names := "version agent_name landlord_name issuer_pubkey timeout_ms rpc executor_key max_tip_age_seconds max_future_skew_seconds minimum_height terms"
+	if version == 2 {
+		names += " profile network genesis"
+	}
+	if !closed(object, names) {
+		return false
+	}
+	var rpc map[string]json.RawMessage
+	return json.Unmarshal(object["rpc"], &rpc) == nil && rpc != nil && closed(rpc, "host port username password")
+}
 func uniqueJSON(raw []byte) bool {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	var value func() bool
@@ -146,6 +172,11 @@ func uniqueJSON(raw []byte) bool {
 				s, ok := k.(string)
 				if e != nil || !ok || seen[s] {
 					return false
+				}
+				for name := range seen {
+					if strings.EqualFold(name, s) {
+						return false
+					}
 				}
 				seen[s] = true
 				if !value() {

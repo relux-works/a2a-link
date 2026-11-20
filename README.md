@@ -96,8 +96,10 @@ The [host-selected Nostr session](docs/nostr-session.md), using transport v0.3.0
 with strict JSON boundaries, supplies genuine NIP-17 post, sync, inbox and status
 with per-target checks on every retry. The separate `cg1-matrix` policy verifies
 unchanged Ed25519 envelopes plus the fork-only per-message BIP-340 co-signature,
-then checks the pinned v3 regtest grant backend. The `cg1` policy remains
-Nostr-only; unsupported Nostr room/account/media commands refuse.
+then checks the pinned v3 grant backend with its protected profile/network policy.
+The `cg1` policy remains Nostr-only; its policy and RPC member names are exact,
+and duplicate or case-folded members refuse before checker state is created.
+Unsupported Nostr room/account/media commands refuse.
 
 The Linux [P17-A Source origin library](docs/source-origin.md) provides a separate
 closed control socket and optional typed producer seam. Stock upstream has no

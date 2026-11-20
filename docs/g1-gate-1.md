@@ -23,7 +23,7 @@ shared envelope format are unchanged. PR #4 remains independent.
   checks the existing schema, every Ed25519/approved approver signature,
   admitted author, root-signed attestation, active generation, signed revocation
   snapshot, audience, delivery/text, window and exact-byte id history.
-- W construction, issuer/agent/landlord pins and regtest genesis stay with
+- W construction, issuer/agent/landlord pins and the configured genesis stay with
   grantcheck/K1. Both inbound and outbound calls check freshly. No cached Live
   result permits another attempt. The dependency adds an immutable transport pin;
   existing unpinned Nostr state is refused unchanged. This PR performs no live
